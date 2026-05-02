@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "FlukeUI", targets: ["FlukeUI"]),
     ],
     dependencies: [
+        .package(path: "../FlukeKit"),
         .package(
             url: "https://github.com/pointfreeco/swift-snapshot-testing",
             from: "1.17.0"
@@ -16,6 +17,7 @@ let package = Package(
     targets: [
         .target(
             name: "FlukeUI",
+            dependencies: ["FlukeKit"],
             path: "Sources/FlukeUI",
             resources: [
                 .process("Resources"),
