@@ -32,3 +32,6 @@ fastlane/test_output
 # Editor noise
 .vscode/
 .idea/
+
+# Script temporary data
+scripts/data/

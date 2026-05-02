@@ -1,0 +1,19 @@
+{
+  "features": [
+    { "name": "Strait of Juan de Fuca", "lat": 48.30, "lng": -123.80, "kind": "strait" },
+    { "name": "Haro Strait",            "lat": 48.55, "lng": -123.20, "kind": "strait" },
+    { "name": "Rosario Strait",         "lat": 48.55, "lng": -122.80, "kind": "strait" },
+    { "name": "Boundary Pass",          "lat": 48.78, "lng": -123.18, "kind": "pass" },
+    { "name": "Admiralty Inlet",        "lat": 48.10, "lng": -122.65, "kind": "inlet" },
+    { "name": "Hood Canal",             "lat": 47.75, "lng": -122.85, "kind": "canal" },
+    { "name": "Possession Sound",       "lat": 48.05, "lng": -122.30, "kind": "sound" },
+    { "name": "Saratoga Passage",       "lat": 48.20, "lng": -122.45, "kind": "pass" },
+    { "name": "Puget Sound",            "lat": 47.50, "lng": -122.45, "kind": "sound" },
+    { "name": "Strait of Georgia",      "lat": 49.10, "lng": -123.50, "kind": "strait" },
+    { "name": "Vancouver Island",       "lat": 49.20, "lng": -124.00, "kind": "land" },
+    { "name": "San Juan Islands",       "lat": 48.55, "lng": -123.05, "kind": "land" },
+    { "name": "Olympic Peninsula",      "lat": 47.80, "lng": -123.85, "kind": "land" },
+    { "name": "Lime Kiln Point",        "lat": 48.516, "lng": -123.155, "kind": "point" },
+    { "name": "Friday Harbor",          "lat": 48.535, "lng": -123.012, "kind": "point" }
+  ]
+}
