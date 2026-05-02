@@ -1,0 +1,108 @@
+import SwiftUI
+import FlukeKit
+import FlukeUI
+
+public struct AnimatedPolylineLayer: View {
+
+    public let coordinates: [(lat: Double, lng: Double)]
+    public let projection: SalishSeaProjection
+    public let color: Color
+    public let drawDuration: Double
+    public let isLatest: Bool
+
+    @State private var drawProgress: CGFloat = 0
+    @State private var dashOffset: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    public init(
+        coordinates: [(lat: Double, lng: Double)],
+        projection: SalishSeaProjection = .salishSea,
+        color: Color,
+        drawDuration: Double = 2.5,
+        isLatest: Bool = false
+    ) {
+        self.coordinates = coordinates
+        self.projection = projection
+        self.color = color
+        self.drawDuration = drawDuration
+        self.isLatest = isLatest
+    }
+
+    public var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                Path { path in
+                    let pts = coordinates.map { coord in
+                        let p = projection.project(lat: coord.lat, lng: coord.lng)
+                        return CGPoint(x: CGFloat(p.x) * geo.size.width, y: CGFloat(p.y) * geo.size.height)
+                    }
+                    if let first = pts.first {
+                        path.move(to: first)
+                        for pt in pts.dropFirst() {
+                            path.addLine(to: pt)
+                        }
+                    }
+                }
+                .trim(from: 0, to: drawProgress)
+                .stroke(
+                    color,
+                    style: StrokeStyle(
+                        lineWidth: 2.5,
+                        lineCap: .round,
+                        lineJoin: .round,
+                        dash: drawProgress >= 1 ? [8, 6] : [],
+                        dashPhase: dashOffset
+                    )
+                )
+
+                if let lastCoord = coordinates.last, isLatest {
+                    let p = projection.project(lat: lastCoord.lat, lng: lastCoord.lng)
+                    PulsingEndpoint(color: color)
+                        .position(x: CGFloat(p.x) * geo.size.width, y: CGFloat(p.y) * geo.size.height)
+                        .opacity(drawProgress >= 1 ? 1 : 0)
+                }
+            }
+        }
+        .onAppear {
+            if reduceMotion {
+                drawProgress = 1
+                return
+            }
+            withAnimation(.easeOut(duration: drawDuration)) {
+                drawProgress = 1
+            }
+            withAnimation(
+                .linear(duration: 1.4)
+                .repeatForever(autoreverses: false)
+                .delay(drawDuration)
+            ) {
+                dashOffset = -40
+            }
+        }
+    }
+}
+
+private struct PulsingEndpoint: View {
+    let color: Color
+    @State private var scale: CGFloat = 1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(color.opacity(0.45), lineWidth: 2)
+                .scaleEffect(scale)
+                .opacity(2 - scale)
+                .frame(width: 12, height: 12)
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) {
+                scale = 2.4
+            }
+        }
+    }
+}
