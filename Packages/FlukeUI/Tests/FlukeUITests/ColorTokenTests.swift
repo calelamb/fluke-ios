@@ -36,8 +36,16 @@ final class ColorTokenTests: XCTestCase {
         XCTAssertEqual(components.b, 0x72 / 255.0, accuracy: 0.005)
     }
 
+    func test_swell_matchesWebHexValue() {
+        // Web token: #3B5F75 — midtone between tide (#2E5972) and deep (#4A6478)
+        let components = Color.swell.rgbComponents()
+        XCTAssertEqual(components.r, 0x3B / 255.0, accuracy: 0.005)
+        XCTAssertEqual(components.g, 0x5F / 255.0, accuracy: 0.005)
+        XCTAssertEqual(components.b, 0x75 / 255.0, accuracy: 0.005)
+    }
+
     func test_allSemanticTokensAreDistinct() {
-        let palette: [Color] = [.bone, .fog, .mist, .tide, .deep, .abyss, .ember]
+        let palette: [Color] = [.bone, .fog, .mist, .tide, .deep, .abyss, .ember, .swell]
         let components = palette.map { $0.rgbComponents() }
         for i in 0..<components.count {
             for j in (i + 1)..<components.count {

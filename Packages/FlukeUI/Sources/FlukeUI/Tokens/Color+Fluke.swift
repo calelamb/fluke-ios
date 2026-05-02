@@ -28,6 +28,10 @@ public extension Color {
     /// Warm accent — used sparingly for status dots, the BIGGS ecotype, ember moments.
     /// Web token: `--color-ember` `#C65A3F`.
     static let ember = Color(hex: 0xC65A3F)
+
+    /// Midtone between `tide` and `deep` — used for L pod's polyline in Atlas.
+    /// Web token: `--color-swell` `#3B5F75`.
+    static let swell = Color(hex: 0x3B5F75)
 }
 
 public extension Color {
