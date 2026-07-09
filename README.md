@@ -88,4 +88,4 @@ fluke-ios/
 
 ## Status
 
-Currently shipping **M-iOS-1 (Bootstrap)**. See [`../fluke/docs/plans/README.md`](../fluke/docs/plans/README.md) for the roadmap (M-iOS-1 through M-iOS-7) and [`docs/contributing.md`](docs/contributing.md) for how to pick up the next task.
+**M-iOS-1 (Bootstrap) is incomplete** — packages and Atlas exist, but the App target is still the Xcode template and is not linked to the packages. For a prioritized gap list toward a working, App Store–ready product, see [`docs/app-store-readiness-triage.md`](docs/app-store-readiness-triage.md). Roadmap context: [`../fluke/docs/plans/README.md`](../fluke/docs/plans/README.md) (M-iOS-1 through M-iOS-7).
