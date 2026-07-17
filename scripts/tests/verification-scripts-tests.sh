@@ -157,7 +157,7 @@ SH
 chmod +x "$fake_bin/xcodebuild"
 capture="$test_root/xcodebuild-arguments"
 expect_success "boundary verifier accepts result and coverage options" env \
-  PATH="$fake_bin:$PATH" \
+  PATH="$fake_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_TEST_DESTINATION="platform=iOS Simulator,name=Verifier" \
   FLUKE_RESULT_BUNDLE_PATH="$test_root/AppTests.xcresult" \
@@ -168,6 +168,17 @@ if ! grep -Fxq -- '-resultBundlePath' "$capture" \
   || ! grep -Fxq -- '-enableCodeCoverage' "$capture" \
   || ! grep -Fxq -- 'YES' "$capture"; then
   printf 'FAIL: boundary verifier did not forward result/coverage arguments\n' >&2
+  failures=$((failures + 1))
+fi
+
+default_capture="$test_root/xcodebuild-default-arguments"
+expect_success "boundary verifier accepts omitted result path" env \
+  PATH="$fake_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+  FLUKE_XCODEBUILD_CAPTURE="$default_capture" \
+  FLUKE_TEST_DESTINATION="platform=iOS Simulator,name=Verifier" \
+  "$boundary_verifier"
+if grep -Fxq -- '-resultBundlePath' "$default_capture"; then
+  printf 'FAIL: boundary verifier forwarded an empty result path\n' >&2
   failures=$((failures + 1))
 fi
 

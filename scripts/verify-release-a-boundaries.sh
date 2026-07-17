@@ -7,19 +7,39 @@ destination="${FLUKE_TEST_DESTINATION:-platform=iOS Simulator,name=iPhone 17,OS=
 result_bundle_path="${FLUKE_RESULT_BUNDLE_PATH:-}"
 enable_coverage="${FLUKE_ENABLE_COVERAGE:-NO}"
 
+search_lines() {
+  local pattern="$1"
+  local path="$2"
+  if command -v rg >/dev/null 2>&1; then
+    rg -n -- "$pattern" "$path"
+  else
+    grep -ERn -- "$pattern" "$path"
+  fi
+}
+
+contains_pattern() {
+  local pattern="$1"
+  local path="$2"
+  if command -v rg >/dev/null 2>&1; then
+    rg -q -- "$pattern" "$path"
+  else
+    grep -Eq -- "$pattern" "$path"
+  fi
+}
+
 if [[ "$enable_coverage" != "YES" && "$enable_coverage" != "NO" ]]; then
   echo "FLUKE_ENABLE_COVERAGE must be YES or NO" >&2
   exit 2
 fi
 
-if rg -n 'SwiftData|\bItem\b|IdentifyPlaceholder|YouPlaceholder|Submit' \
+if search_lines 'SwiftData|(^|[^[:alnum:]_])Item([^[:alnum:]_]|$)|IdentifyPlaceholder|YouPlaceholder|Submit' \
   "$repo_root/App/Fluke"; then
   echo "Release A boundary violation in the app target" >&2
   exit 1
 fi
 
 for module in FlukeKit FlukeUI FlukeFeatures; do
-  rg -q "productName = $module" "$project/project.pbxproj" || {
+  contains_pattern "productName = $module" "$project/project.pbxproj" || {
     echo "Missing app package product: $module" >&2
     exit 1
   }
@@ -37,16 +57,17 @@ test -f "$project/xcshareddata/xcschemes/Fluke.xcscheme" || {
   exit 1
 }
 
-result_arguments=()
+xcodebuild_arguments=(
+  test
+  -project "$project"
+  -scheme Fluke
+  -destination "$destination"
+  -only-testing:FlukeTests
+  -enableCodeCoverage "$enable_coverage"
+)
 if [[ -n "$result_bundle_path" ]]; then
-  result_arguments=(-resultBundlePath "$result_bundle_path")
+  xcodebuild_arguments+=(-resultBundlePath "$result_bundle_path")
 fi
+xcodebuild_arguments+=(CODE_SIGNING_ALLOWED=NO)
 
-xcodebuild test \
-  -project "$project" \
-  -scheme Fluke \
-  -destination "$destination" \
-  -only-testing:FlukeTests \
-  -enableCodeCoverage "$enable_coverage" \
-  "${result_arguments[@]}" \
-  CODE_SIGNING_ALLOWED=NO
+xcodebuild "${xcodebuild_arguments[@]}"
