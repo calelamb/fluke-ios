@@ -42,6 +42,59 @@ struct MovementTrackViewModelTests {
       })
   }
 
+  @Test("Polyline needs three points after season and scrubber filters compose")
+  func composedPolylineNeedsThreePoints() async {
+    let model = loadedModel(points: MovementTrackPoint.yearFixture)
+    await model.load()
+
+    model.setSeasons([.summer])
+    #expect(model.visiblePoints.count == 1)
+    #expect(model.visiblePolyline.isEmpty)
+
+    model.setSeasons([.summer, .fall])
+    model.setScrubberDate(.october)
+    #expect(model.visiblePoints.count == 2)
+    #expect(model.visiblePolyline.isEmpty)
+
+    model.setScrubberDate(.november)
+    #expect(model.visiblePolyline.count == 3)
+  }
+
+  @Test("Offline and stale notices remain visible for sparse and empty tracks")
+  func noticesRemainVisible() async {
+    let failure = BrowseFailure(
+      code: "TIMEOUT",
+      message: "The request took too long.",
+      retryable: true,
+      requestId: nil
+    )
+    let sparse = MovementTrackViewModel(
+      repository: MovementTrackRepository(
+        result: .cachedOffline(
+          payload: .value([.january, .june]),
+          metadata: .fixture
+        )),
+      whale: .movementFixture
+    )
+    let empty = MovementTrackViewModel(
+      repository: MovementTrackRepository(
+        result: .stale(
+          payload: .empty,
+          metadata: .fixture,
+          failure: failure
+        )),
+      whale: .movementFixture
+    )
+
+    await sparse.load()
+    await empty.load()
+
+    #expect(sparse.presentation == .sparse)
+    #expect(sparse.browseNotice == .offline)
+    #expect(empty.presentation == .empty)
+    #expect(empty.browseNotice == .stale(failure))
+  }
+
   @Test("Range measures northernmost to southernmost observations")
   func northSouthRange() async throws {
     let model = loadedModel(points: MovementTrackPoint.yearFixture)
@@ -135,11 +188,36 @@ struct MovementTrackViewModelTests {
   func accessibilityContracts() async {
     let model = loadedModel(points: MovementTrackPoint.yearFixture)
     await model.load()
+    model.focus(nearestToLatitude: 48.61, longitude: -123.21)
 
     #expect(MovementTrackView.minimumControlSize == 44)
     #expect(model.accessibilitySummary.contains("4 sightings"))
     #expect(model.accessibilitySummary.contains("January 2024"))
     #expect(model.accessibilitySummary.contains("November 2024"))
+    #expect(model.focusedPointAccessibilityLabel.contains("Haro Strait"))
+    #expect(model.focusedPointAccessibilityLabel.contains("June 1, 2024"))
+    #expect(model.focusedPointAccessibilityLabel.contains("Foraging"))
+    #expect(model.focusedPointAccessibilityLabel.contains("Focused sighting"))
+  }
+
+  @Test("A slower older movement load cannot replace a newer response")
+  func latestLoadWins() async {
+    let repository = SequencedMovementTrackRepository(
+      results: [
+        .fresh(value: [.january, .june, .october], metadata: .fixture),
+        .fresh(value: [.january, .june, .november], metadata: .fixture),
+      ],
+      delays: [.milliseconds(120), .milliseconds(5)]
+    )
+    let model = MovementTrackViewModel(repository: repository, whale: .movementFixture)
+
+    let first = Task { await model.load() }
+    try? await Task.sleep(for: .milliseconds(10))
+    let second = Task { await model.load() }
+    await second.value
+    await first.value
+
+    #expect(model.points.map(\.id) == ["jan", "jun", "nov"])
   }
 
   private func loadedModel(points: [MovementTrackPoint]) -> MovementTrackViewModel {
@@ -152,7 +230,15 @@ struct MovementTrackViewModelTests {
 }
 
 private struct MovementTrackRepository: WhalesRepositoryProtocol {
-  let points: [MovementTrackPoint]
+  let result: BrowseResult<[MovementTrackPoint]>
+
+  init(points: [MovementTrackPoint]) {
+    result = .fresh(value: points, metadata: .fixture)
+  }
+
+  init(result: BrowseResult<[MovementTrackPoint]>) {
+    self.result = result
+  }
 
   func loadCatalog() async throws -> BrowseResult<[Whale]> { .empty(metadata: .fixture) }
   func loadProfile(id: String) async throws -> BrowseResult<WhaleProfile?> {
@@ -163,7 +249,32 @@ private struct MovementTrackRepository: WhalesRepositoryProtocol {
     from: Date,
     to: Date
   ) async throws -> BrowseResult<[MovementTrackPoint]> {
-    .fresh(value: points, metadata: .fixture)
+    result
+  }
+}
+
+private actor SequencedMovementTrackRepository: WhalesRepositoryProtocol {
+  private var results: [BrowseResult<[MovementTrackPoint]>]
+  private var delays: [Duration]
+
+  init(results: [BrowseResult<[MovementTrackPoint]>], delays: [Duration]) {
+    self.results = results
+    self.delays = delays
+  }
+
+  func loadCatalog() async throws -> BrowseResult<[Whale]> { .empty(metadata: .fixture) }
+  func loadProfile(id: String) async throws -> BrowseResult<WhaleProfile?> {
+    .empty(metadata: .fixture)
+  }
+  func loadTrack(
+    whaleId: String,
+    from: Date,
+    to: Date
+  ) async throws -> BrowseResult<[MovementTrackPoint]> {
+    let result = results.removeFirst()
+    let delay = delays.removeFirst()
+    try await Task.sleep(for: delay)
+    return result
   }
 }
 

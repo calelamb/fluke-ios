@@ -6,6 +6,7 @@ public struct MovementTrackView: View {
   public static let minimumControlSize: CGFloat = 44
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.dismiss) private var dismiss
   @State private var model: MovementTrackViewModel
   private let submitSighting: () -> Void
@@ -46,6 +47,16 @@ public struct MovementTrackView: View {
 
   @ViewBuilder
   private var content: some View {
+    VStack(spacing: 0) {
+      if let notice = model.browseNotice {
+        browseNotice(notice)
+      }
+      presentationContent
+    }
+  }
+
+  @ViewBuilder
+  private var presentationContent: some View {
     switch model.presentation {
     case .loading:
       ProgressView("Loading movement track")
@@ -64,6 +75,10 @@ public struct MovementTrackView: View {
       } actions: {
         if failure.retryable {
           Button("Retry") { Task { await model.retry() } }
+            .frame(
+              minWidth: Self.minimumControlSize,
+              minHeight: Self.minimumControlSize
+            )
         }
       }
     case .sparse:
@@ -91,7 +106,6 @@ public struct MovementTrackView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
         header
-        if let notice = model.state.notice { browseNotice(notice) }
         statsStrip
         seasonChips
         map
@@ -101,7 +115,7 @@ public struct MovementTrackView: View {
         Text(model.accessibilitySummary)
           .font(.flukeBody)
           .foregroundStyle(Color.deep)
-          .accessibilityLabel("Movement summary")
+          .accessibilityLabel(model.accessibilitySummary)
       }
       .frame(maxWidth: 720, alignment: .leading)
       .padding(16)
@@ -154,23 +168,38 @@ public struct MovementTrackView: View {
     .accessibilityElement(children: .combine)
   }
 
+  @ViewBuilder
   private var seasonChips: some View {
-    ScrollView(.horizontal, showsIndicators: false) {
-      HStack(spacing: 8) {
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(spacing: 8) {
         ForEach(MovementSeason.allCases) { season in
-          let selected = model.selectedSeasons.contains(season)
-          Button(season.rawValue) { model.toggleSeason(season) }
-            .font(.flukeLabel)
-            .foregroundStyle(selected ? Color.bone : Color.abyss)
-            .padding(.horizontal, 12)
-            .frame(minWidth: Self.minimumControlSize, minHeight: Self.minimumControlSize)
-            .background(selected ? Color.tide : Color.bone, in: Capsule())
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(selected ? .isSelected : [])
+          seasonButton(season)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
       }
+      .accessibilityLabel("Movement seasons")
+    } else {
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 8) {
+          ForEach(MovementSeason.allCases) { season in
+            seasonButton(season)
+          }
+        }
+      }
+      .accessibilityLabel("Movement seasons")
     }
-    .accessibilityLabel("Movement seasons")
+  }
+
+  private func seasonButton(_ season: MovementSeason) -> some View {
+    let selected = model.selectedSeasons.contains(season)
+    return Button(season.rawValue) { model.toggleSeason(season) }
+      .font(.flukeLabel)
+      .foregroundStyle(selected ? Color.bone : Color.abyss)
+      .padding(.horizontal, 12)
+      .frame(minWidth: Self.minimumControlSize, minHeight: Self.minimumControlSize)
+      .background(selected ? Color.tide : Color.bone, in: Capsule())
+      .buttonStyle(.plain)
+      .accessibilityAddTraits(selected ? .isSelected : [])
   }
 
   private var map: some View {
@@ -275,7 +304,7 @@ public struct MovementTrackView: View {
       .padding(14)
       .background(Color.bone, in: RoundedRectangle(cornerRadius: 14))
       .accessibilityElement(children: .combine)
-      .accessibilityLabel("Focused sighting")
+      .accessibilityLabel(model.focusedPointAccessibilityLabel)
     }
   }
 

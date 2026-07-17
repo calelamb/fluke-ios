@@ -69,6 +69,7 @@ public final class MovementTrackViewModel {
   public var points: [MovementTrackPoint] { state.value ?? [] }
   public var stats: MovementTrackStats? { MovementTrackStats(points: points) }
   public var sparseMessage: String { Self.sparseMessage }
+  public var browseNotice: BrowseNotice? { state.notice }
 
   public var presentation: Presentation {
     if state.isLoading, points.isEmpty { return .loading }
@@ -94,8 +95,9 @@ public final class MovementTrackViewModel {
   }
 
   public var visiblePolyline: [MovementTrackPoint] {
-    guard presentation == .ready else { return [] }
-    return visiblePoints.map(\.point)
+    let filtered = visiblePoints.map(\.point)
+    guard filtered.count >= 3 else { return [] }
+    return filtered
   }
 
   public var accessibilitySummary: String {
@@ -108,6 +110,14 @@ public final class MovementTrackViewModel {
     let last = stats.lastSeen.formatted(.dateTime.month(.wide).year())
     return
       "\(stats.sightingCount) sightings from \(first) to \(last), spanning \(distance) kilometers north to south."
+  }
+
+  public var focusedPointAccessibilityLabel: String {
+    guard let focusedPoint else { return "No focused sighting." }
+    let location = focusedPoint.locationName ?? "Salish Sea"
+    let date = focusedPoint.observedAt.formatted(date: .complete, time: .omitted)
+    let notes = focusedPoint.behaviorNotes.flatMap(Self.normalized)
+    return ["Focused sighting", location, date, notes].compactMap { $0 }.joined(separator: ", ")
   }
 
   public func setSeasons(_ seasons: Set<MovementSeason>) {
@@ -189,6 +199,11 @@ public final class MovementTrackViewModel {
     -> CLLocationDistance
   {
     CLLocation(latitude: point.latitude, longitude: point.longitude).distance(from: location)
+  }
+
+  private static func normalized(_ value: String) -> String? {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 
   private static func playbackDate(
