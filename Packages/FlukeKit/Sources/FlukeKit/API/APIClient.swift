@@ -63,7 +63,8 @@ public struct APIClient: Sendable {
 
   public func post<Request: Encodable & Sendable, Response: Decodable>(
     _ request: APIRequest,
-    body: Request
+    body: Request,
+    headers: [String: String] = [:]
   ) async throws -> Response {
     let encodedBody: Data
     do {
@@ -73,7 +74,8 @@ public struct APIClient: Sendable {
     }
     let mutation = try MutationRequest(
       body: encodedBody,
-      contentType: "application/json"
+      contentType: "application/json",
+      headers: headers
     )
     return try await send(
       method: "POST",
