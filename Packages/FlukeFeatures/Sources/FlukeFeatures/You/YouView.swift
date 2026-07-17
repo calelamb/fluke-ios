@@ -23,11 +23,13 @@ public struct YouView: View {
   private let queue: any QueuedLogbookProviding
   private let configureAppleRequest: (ASAuthorizationAppleIDRequest) -> Void
   private let completeAppleAuthorization: (Result<ASAuthorization, Error>) -> Void
+  private let configureDeletionAuthorization: (ASAuthorizationAppleIDRequest) -> Void
+  private let completeDeletionAuthorization: (Result<ASAuthorization, Error>) -> Void
   private let signOut: () -> Void
-  private let deleteAccount: () -> Void
   private let sessionExpired: () -> Void
 
   @State private var confirmsDeletion = false
+  @State private var requestsDeletionReauthentication = false
 
   public init(
     availability: YouAccountAvailability,
@@ -36,8 +38,9 @@ public struct YouView: View {
     queue: any QueuedLogbookProviding,
     configureAppleRequest: @escaping (ASAuthorizationAppleIDRequest) -> Void,
     completeAppleAuthorization: @escaping (Result<ASAuthorization, Error>) -> Void,
+    configureDeletionAuthorization: @escaping (ASAuthorizationAppleIDRequest) -> Void,
+    completeDeletionAuthorization: @escaping (Result<ASAuthorization, Error>) -> Void,
     signOut: @escaping () -> Void,
-    deleteAccount: @escaping () -> Void,
     sessionExpired: @escaping () -> Void
   ) {
     self.availability = availability
@@ -46,8 +49,9 @@ public struct YouView: View {
     self.queue = queue
     self.configureAppleRequest = configureAppleRequest
     self.completeAppleAuthorization = completeAppleAuthorization
+    self.configureDeletionAuthorization = configureDeletionAuthorization
+    self.completeDeletionAuthorization = completeDeletionAuthorization
     self.signOut = signOut
-    self.deleteAccount = deleteAccount
     self.sessionExpired = sessionExpired
   }
 
@@ -65,7 +69,7 @@ public struct YouView: View {
     .navigationTitle("You")
     .alert("Delete your Fluke account?", isPresented: $confirmsDeletion) {
       Button("Cancel", role: .cancel) {}
-      Button("Delete account", role: .destructive, action: deleteAccount)
+      Button("Continue", role: .destructive) { requestsDeletionReauthentication = true }
     } message: {
       Text(
         "Your linked personal details will be removed. Approved public wildlife observations may remain in anonymized form. This cannot be undone."
@@ -172,6 +176,30 @@ public struct YouView: View {
         confirmsDeletion = true
       }
       .youMinimumHitTarget(.deleteAccount)
+      if requestsDeletionReauthentication {
+        VStack(alignment: .leading, spacing: 10) {
+          Text("Confirm with Apple")
+            .font(.flukeDisplaySmall)
+            .foregroundStyle(Color.abyss)
+          Text("A fresh Apple authorization is required before Fluke can delete your account.")
+            .font(.flukeBody)
+            .foregroundStyle(Color.deep)
+          SignInWithAppleButton(
+            .continue,
+            onRequest: configureDeletionAuthorization,
+            onCompletion: { result in
+              requestsDeletionReauthentication = false
+              completeDeletionAuthorization(result)
+            }
+          )
+          .signInWithAppleButtonStyle(.black)
+          .frame(maxWidth: 360, minHeight: 50)
+          .accessibilityIdentifier(YouInteractiveControl.reauthenticateDeletion.rawValue)
+          .accessibilityHint("Reauthenticates with Apple before deleting your account")
+        }
+        .padding(14)
+        .background(Color.ember.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+      }
     }
   }
 
@@ -192,6 +220,6 @@ public struct YouView: View {
   private func greetingName(for user: AuthenticatedUser) -> String {
     let name = user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
     if let name, !name.isEmpty { return name }
-    return user.email
+    return user.email ?? "orca observer"
   }
 }

@@ -26,6 +26,7 @@
           .retry,
           .signOut,
           .deleteAccount,
+          .reauthenticateDeletion,
           .about,
           .privacy,
           .support,

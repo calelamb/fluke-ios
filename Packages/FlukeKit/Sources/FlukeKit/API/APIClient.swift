@@ -29,13 +29,14 @@ public struct APIClient: Sendable {
   public init(
     baseURL: URL,
     transport: any HTTPTransport,
-    requestTimeout: Duration = APIClient.defaultRequestTimeout
+    requestTimeout: Duration = APIClient.defaultRequestTimeout,
+    cookieStorage: HTTPCookieStorage? = nil
   ) {
     self.init(
       baseURL: baseURL,
       transport: transport,
       requestTimeout: requestTimeout,
-      cookies: nil
+      cookies: cookieStorage
     )
   }
 
@@ -134,6 +135,47 @@ public struct APIClient: Sendable {
     try await sendNoContent(method: "DELETE", request: request, mutation: nil)
   }
 
+  public func postOKWithCSRF(_ request: APIRequest) async throws {
+    try await sendOKWithCSRF(method: "POST", request: request, body: nil)
+  }
+
+  public func deleteOKWithCSRF<Request: Encodable & Sendable>(
+    _ request: APIRequest,
+    body: Request
+  ) async throws {
+    let encodedBody: Data
+    do {
+      encodedBody = try JSONEncoder().encode(body)
+    } catch {
+      throw APIError.invalidRequest
+    }
+    try await sendOKWithCSRF(method: "DELETE", request: request, body: encodedBody)
+  }
+
+  public func validatedCSRFCookieValue(for request: APIRequest) throws -> String {
+    let url = try request.url(relativeTo: baseURL)
+    guard url.scheme?.lowercased() == "https",
+      let host = url.host?.lowercased(),
+      let cookies
+    else {
+      throw APIError.invalidRequest
+    }
+    let candidates = (cookies.cookies(for: url) ?? []).filter {
+      $0.name.lowercased() == "fluke_csrf"
+    }
+    guard candidates.count == 1, let cookie = candidates.first,
+      cookie.name == "fluke_csrf", cookie.isSecure,
+      cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")) == host,
+      cookie.value.count >= 32, cookie.value.count <= 512,
+      cookie.value.unicodeScalars.allSatisfy({
+        CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_"
+      })
+    else {
+      throw APIError.invalidRequest
+    }
+    return cookie.value
+  }
+
   public func clearCookies() {
     guard let cookies, let host = baseURL.host?.lowercased() else { return }
     let matchingCookies =
@@ -153,7 +195,8 @@ public struct APIClient: Sendable {
     method: String,
     request apiRequest: APIRequest,
     mutation: MutationRequest?,
-    retriesTransientFailure: Bool = false
+    retriesTransientFailure: Bool = false,
+    expectedStatus: Int? = nil
   ) async throws -> T {
     let request = try makeURLRequest(
       method: method,
@@ -182,6 +225,9 @@ public struct APIClient: Sendable {
 
     switch response.statusCode {
     case 200...299:
+      guard expectedStatus == nil || response.statusCode == expectedStatus else {
+        throw APIError.malformedResponse
+      }
       do {
         return try JSONDecoder.fluke.decode(T.self, from: data)
       } catch {
@@ -232,6 +278,26 @@ public struct APIClient: Sendable {
       }
       throw decodeRemoteError(status: response.statusCode, data: data)
     }
+  }
+
+  private func sendOKWithCSRF(
+    method: String,
+    request apiRequest: APIRequest,
+    body: Data?
+  ) async throws {
+    let csrf = try validatedCSRFCookieValue(for: apiRequest)
+    let mutation = try MutationRequest(
+      body: body ?? Data(),
+      contentType: "application/json",
+      headers: ["x-fluke-csrf": csrf]
+    )
+    let response: StrictOKResponse = try await send(
+      method: method,
+      request: apiRequest,
+      mutation: mutation,
+      expectedStatus: 200
+    )
+    guard response.ok else { throw APIError.malformedResponse }
   }
 
   private func makeURLRequest(
@@ -328,6 +394,35 @@ public struct APIClient: Sendable {
         !CharacterSet.controlCharacters.contains($0)
       }
   }
+}
+
+private struct StrictOKResponse: Decodable {
+  let ok: Bool
+
+  private enum CodingKeys: String, CodingKey, CaseIterable { case ok }
+
+  init(from decoder: any Decoder) throws {
+    let dynamic = try decoder.container(keyedBy: DynamicCodingKey.self)
+    guard Set(dynamic.allKeys.map(\.stringValue)) == ["ok"] else {
+      throw DecodingError.dataCorrupted(
+        .init(codingPath: decoder.codingPath, debugDescription: "Unexpected response keys")
+      )
+    }
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    guard Set(container.allKeys) == Set(CodingKeys.allCases) else {
+      throw DecodingError.dataCorrupted(
+        .init(codingPath: decoder.codingPath, debugDescription: "Unexpected response keys")
+      )
+    }
+    ok = try container.decode(Bool.self, forKey: .ok)
+  }
+}
+
+private struct DynamicCodingKey: CodingKey {
+  let stringValue: String
+  let intValue: Int? = nil
+  init?(stringValue: String) { self.stringValue = stringValue }
+  init?(intValue: Int) { return nil }
 }
 
 extension Duration {

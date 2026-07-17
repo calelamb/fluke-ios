@@ -5,7 +5,7 @@ public protocol AuthServiceProtocol: Sendable {
   func signIn(credential: AppleCredential) async throws -> AuthenticatedUser
   func currentUser() async throws -> AuthenticatedUser
   func signOut() async throws
-  func deleteAccount() async throws
+  func deleteAccount(credential: AppleCredential) async throws
 }
 
 public struct AuthService: AuthServiceProtocol, Sendable {
@@ -16,47 +16,65 @@ public struct AuthService: AuthServiceProtocol, Sendable {
   }
 
   public func signIn(credential: AppleCredential) async throws -> AuthenticatedUser {
-    guard let token = String(data: credential.identityToken, encoding: .utf8),
-      !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    else {
+    let values = try validatedCredential(credential)
+    let name = credential.fullName?.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard name == nil || isValid(name ?? "", maximum: 120) else {
       throw AuthServiceError.invalidAppleCredential
     }
-    let name = credential.fullName?.trimmingCharacters(in: .whitespacesAndNewlines)
-    let user: AuthenticatedUser = try await api.post(
+    let response: AppleSignInResponse = try await api.post(
       APIRequest(path: ReleaseBEndpoint.authApple),
       body: AppleSignInRequest(
-        identityToken: token,
+        authorizationCode: values.authorizationCode,
+        identityToken: values.identityToken,
+        nonce: credential.nonce,
         fullName: name?.isEmpty == false ? name : nil
       )
     )
-    return try validated(user)
+    let cookieToken = try api.validatedCSRFCookieValue(
+      for: APIRequest(path: ReleaseBEndpoint.authApple)
+    )
+    guard response.csrfToken == cookieToken else { throw APIError.malformedResponse }
+    return try validated(response.user)
   }
 
   public func currentUser() async throws -> AuthenticatedUser {
-    let user: AuthenticatedUser = try await api.get(
+    let response: CurrentObserverResponse = try await api.get(
       APIRequest(path: ReleaseBEndpoint.authMe)
     )
-    return try validated(user)
+    guard response.userId == response.id else { throw APIError.malformedResponse }
+    return try validated(
+      AuthenticatedUser(
+        id: response.id,
+        email: response.email,
+        displayName: response.displayName,
+        role: response.role
+      ))
   }
 
   public func signOut() async throws {
-    try await api.postNoContent(
-      APIRequest(path: ReleaseBEndpoint.authLogout),
-      body: EmptyRequest()
-    )
+    try await api.postOKWithCSRF(APIRequest(path: ReleaseBEndpoint.authLogout))
     api.clearCookies()
   }
 
-  public func deleteAccount() async throws {
-    try await api.deleteNoContent(APIRequest(path: ReleaseBEndpoint.authAccount))
+  public func deleteAccount(credential: AppleCredential) async throws {
+    let values = try validatedCredential(credential)
+    try await api.deleteOKWithCSRF(
+      APIRequest(path: ReleaseBEndpoint.authAccount),
+      body: DeleteAccountRequest(
+        authorizationCode: values.authorizationCode,
+        identityToken: values.identityToken,
+        nonce: credential.nonce
+      )
+    )
     api.clearCookies()
   }
 
   private func validated(_ user: AuthenticatedUser) throws -> AuthenticatedUser {
     guard isValid(user.id, maximum: 200),
-      isValid(user.email, maximum: 320),
-      EmailAddressValidator.isValid(user.email),
-      isValid(user.role, maximum: 100)
+      user.email == nil
+        || (isValid(user.email ?? "", maximum: 320)
+          && EmailAddressValidator.isValid(user.email ?? "")),
+      user.role == "OBSERVER"
     else {
       throw APIError.malformedResponse
     }
@@ -66,7 +84,7 @@ public struct AuthService: AuthServiceProtocol, Sendable {
     }
     return AuthenticatedUser(
       id: user.id.trimmingCharacters(in: .whitespacesAndNewlines),
-      email: user.email.trimmingCharacters(in: .whitespacesAndNewlines),
+      email: user.email?.trimmingCharacters(in: .whitespacesAndNewlines),
       displayName: displayName,
       role: user.role.trimmingCharacters(in: .whitespacesAndNewlines)
     )
@@ -79,5 +97,17 @@ public struct AuthService: AuthServiceProtocol, Sendable {
       && trimmed.unicodeScalars.allSatisfy {
         !CharacterSet.controlCharacters.contains($0)
       }
+  }
+
+  private func validatedCredential(
+    _ credential: AppleCredential
+  ) throws -> (authorizationCode: String, identityToken: String) {
+    guard let authorizationCode = String(data: credential.authorizationCode, encoding: .utf8),
+      let identityToken = String(data: credential.identityToken, encoding: .utf8),
+      credential.isStructurallyValid
+    else {
+      throw AuthServiceError.invalidAppleCredential
+    }
+    return (authorizationCode, identityToken)
   }
 }

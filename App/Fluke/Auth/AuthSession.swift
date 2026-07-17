@@ -60,9 +60,7 @@ final class AuthSession {
   }
 
   func signIn(credential: AppleCredential) async {
-    guard let token = String(data: credential.identityToken, encoding: .utf8),
-      !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    else {
+    guard credential.isStructurallyValid else {
       state = .signedOut(error: .invalidAppleCredential)
       return
     }
@@ -100,14 +98,18 @@ final class AuthSession {
     }
   }
 
-  func deleteAccount() async {
+  func deleteAccount(credential: AppleCredential) async {
     guard let knownUser = signedInUser else { return }
+    guard credential.isStructurallyValid else {
+      notice = .invalidAppleCredential
+      return
+    }
     notice = nil
     do {
-      try await service.deleteAccount()
+      try await service.deleteAccount(credential: credential)
     } catch {
       state = .signedIn(knownUser)
-      notice = presentationError(for: error)
+      notice = deletionPresentationError(for: error)
       return
     }
     var cleanupError: AuthPresentationError?
@@ -135,6 +137,16 @@ final class AuthSession {
     notice = nil
   }
 
+  func expireWithInvalidCredential() {
+    state = .signedOut(error: .invalidAppleCredential)
+    notice = nil
+  }
+
+  func reportInvalidCredential() {
+    guard signedInUser != nil else { return }
+    notice = .invalidAppleCredential
+  }
+
   private var signedInUser: AuthenticatedUser? {
     guard case .signedIn(let user) = state else { return nil }
     return user
@@ -152,5 +164,18 @@ final class AuthSession {
       return apiError.retryable ? .retryable(message) : .unavailable(message)
     }
     return .unavailable("Fluke couldn't complete the account request.")
+  }
+
+  private func deletionPresentationError(for error: Error) -> AuthPresentationError {
+    switch presentationError(for: error) {
+    case .retryable(let message):
+      return .retryable(
+        "Your account was not deleted. \(message) Confirm with Apple again to retry."
+      )
+    case .unavailable(let message):
+      return .unavailable("Your account was not deleted. \(message)")
+    case .invalidAppleCredential:
+      return .invalidAppleCredential
+    }
   }
 }

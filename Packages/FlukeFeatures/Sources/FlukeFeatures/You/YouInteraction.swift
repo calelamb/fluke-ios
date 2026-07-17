@@ -5,6 +5,7 @@ enum YouInteractiveControl: String, CaseIterable {
   case retry = "you.retry"
   case signOut = "you.sign-out"
   case deleteAccount = "you.delete-account"
+  case reauthenticateDeletion = "you.reauthenticate-deletion"
   case about = "you.about"
   case privacy = "you.privacy"
   case support = "you.support"

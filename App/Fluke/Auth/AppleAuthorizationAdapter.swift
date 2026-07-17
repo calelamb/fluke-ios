@@ -1,31 +1,35 @@
 import AuthenticationServices
-import FlukeReleaseB
 import Foundation
 
-enum AppleAuthorizationAdapter {
-  nonisolated static func configure(_ request: ASAuthorizationAppleIDRequest) {
-    request.requestedScopes = [.fullName, .email]
-  }
+struct AppleAuthorizationPayload {
+  let authorizationCode: Data?
+  let identityToken: Data?
+  let fullName: String?
+}
 
-  static func credential(
+enum AppleAuthorizationAdapter {
+  static func payload(
     from result: Result<ASAuthorization, Error>
-  ) -> Result<AppleCredential, AuthPresentationError> {
+  ) -> Result<AppleAuthorizationPayload, AuthPresentationError> {
     guard case .success(let authorization) = result,
-      let apple = authorization.credential as? ASAuthorizationAppleIDCredential,
-      let token = apple.identityToken,
-      let tokenValue = String(data: token, encoding: .utf8),
-      !tokenValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      let apple = authorization.credential as? ASAuthorizationAppleIDCredential
     else {
       return .failure(.invalidAppleCredential)
     }
-
     let formatter = PersonNameComponentsFormatter()
-    let fullName = apple.fullName.map(formatter.string(from:))
+    let name = apple.fullName.map(formatter.string(from:))
     return .success(
-      AppleCredential(
-        identityToken: token,
-        fullName: fullName?.isEmpty == false ? fullName : nil
-      )
-    )
+      AppleAuthorizationPayload(
+        authorizationCode: apple.authorizationCode,
+        identityToken: apple.identityToken,
+        fullName: name?.isEmpty == false ? name : nil
+      ))
+  }
+
+  static func isCancellation(_ result: Result<ASAuthorization, Error>) -> Bool {
+    guard case .failure(let error) = result,
+      let authorizationError = error as? ASAuthorizationError
+    else { return false }
+    return authorizationError.code == .canceled
   }
 }

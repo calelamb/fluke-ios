@@ -17,7 +17,9 @@ struct AuthSessionTests {
 
     await session.signIn(
       credential: AppleCredential(
+        authorizationCode: Data("code".utf8),
         identityToken: Data("signed.jwt".utf8),
+        nonce: String(repeating: "n", count: 32),
         fullName: "Cale Lamb"
       )
     )
@@ -33,7 +35,7 @@ struct AuthSessionTests {
       accountAssociations: AccountAssociationSpy()
     )
 
-    await session.signIn(credential: .init(identityToken: Data(), fullName: nil))
+    await session.signIn(credential: .invalidFixture)
 
     #expect(session.state == .signedOut(error: .invalidAppleCredential))
   }
@@ -62,7 +64,7 @@ struct AuthSessionTests {
       hints: MemorySessionHintStore(),
       accountAssociations: AccountAssociationSpy()
     )
-    await session.signIn(credential: .init(identityToken: Data("jwt".utf8), fullName: nil))
+    await session.signIn(credential: .validFixture)
 
     await session.restore()
 
@@ -79,7 +81,7 @@ struct AuthSessionTests {
       hints: hints,
       accountAssociations: AccountAssociationSpy()
     )
-    await session.signIn(credential: .init(identityToken: Data("jwt".utf8), fullName: nil))
+    await session.signIn(credential: .validFixture)
 
     await session.signOut()
 
@@ -97,25 +99,67 @@ struct AuthSessionTests {
     let hints = MemorySessionHintStore()
     let associations = AccountAssociationSpy()
     let session = AuthSession(service: service, hints: hints, accountAssociations: associations)
-    await session.signIn(credential: .init(identityToken: Data("jwt".utf8), fullName: nil))
+    await session.signIn(credential: .validFixture)
 
-    await session.deleteAccount()
+    await session.deleteAccount(credential: .validFixture)
 
     #expect(session.state == .signedIn(.fixture))
-    #expect(session.notice == .retryable("You're offline."))
+    #expect(
+      session.notice
+        == .retryable(
+          "Your account was not deleted. You're offline. Confirm with Apple again to retry."
+        )
+    )
     #expect(try await hints.hasReauthenticationHint())
     #expect(await associations.clearCallCount == 0)
   }
 
-  @Test("A 204 deletion clears local authenticated state and hints")
+  @Test("Deletion rejects a malformed fresh credential without calling the service")
+  func invalidDeletionCredential() async {
+    let service = AuthServiceSpy(signInResult: .success(.fixture))
+    let session = AuthSession(
+      service: service,
+      hints: MemorySessionHintStore(),
+      accountAssociations: AccountAssociationSpy()
+    )
+    await session.signIn(credential: .validFixture)
+
+    await session.deleteAccount(credential: .invalidFixture)
+
+    #expect(session.state == .signedIn(.fixture))
+    #expect(session.notice == .invalidAppleCredential)
+    #expect(await service.deleteCallCount == 0)
+  }
+
+  @Test("Malformed Apple presentation helpers preserve or expire the intended session")
+  func invalidPresentationHelpers() async {
+    let session = AuthSession(
+      service: AuthServiceSpy(signInResult: .success(.fixture)),
+      hints: MemorySessionHintStore(),
+      accountAssociations: AccountAssociationSpy()
+    )
+    session.reportInvalidCredential()
+    #expect(session.notice == nil)
+
+    await session.signIn(credential: .validFixture)
+    session.reportInvalidCredential()
+    #expect(session.state == .signedIn(.fixture))
+    #expect(session.notice == .invalidAppleCredential)
+
+    session.expireWithInvalidCredential()
+    #expect(session.state == .signedOut(error: .invalidAppleCredential))
+    #expect(session.notice == nil)
+  }
+
+  @Test("A successful reauthenticated deletion clears local authenticated state and hints")
   func successfulDeletion() async throws {
     let service = AuthServiceSpy(signInResult: .success(.fixture))
     let hints = MemorySessionHintStore()
     let associations = AccountAssociationSpy()
     let session = AuthSession(service: service, hints: hints, accountAssociations: associations)
-    await session.signIn(credential: .init(identityToken: Data("jwt".utf8), fullName: nil))
+    await session.signIn(credential: .validFixture)
 
-    await session.deleteAccount()
+    await session.deleteAccount(credential: .validFixture)
 
     #expect(session.state == .signedOut(error: nil))
     #expect(try await hints.hasReauthenticationHint() == false)
@@ -132,9 +176,9 @@ struct AuthSessionTests {
       hints: hints,
       accountAssociations: associations
     )
-    await session.signIn(credential: .init(identityToken: Data("jwt".utf8), fullName: nil))
+    await session.signIn(credential: .validFixture)
 
-    await session.deleteAccount()
+    await session.deleteAccount(credential: .validFixture)
 
     #expect(
       session.state
@@ -194,6 +238,7 @@ private actor AuthServiceSpy: AuthServiceProtocol {
   private let signOutResult: Result<Void, Error>
   private let deleteResult: Result<Void, Error>
   private(set) var signOutCallCount = 0
+  private(set) var deleteCallCount = 0
 
   init(
     signInResult: Result<AuthenticatedUser, Error> = .failure(APIError.transport),
@@ -220,7 +265,8 @@ private actor AuthServiceSpy: AuthServiceProtocol {
     try signOutResult.get()
   }
 
-  func deleteAccount() async throws {
+  func deleteAccount(credential: AppleCredential) async throws {
+    deleteCallCount += 1
     try deleteResult.get()
   }
 }
@@ -238,6 +284,16 @@ extension AuthenticatedUser {
     id: "observer-1",
     email: "cale@example.com",
     displayName: "Cale Lamb",
-    role: "observer"
+    role: "OBSERVER"
+  )
+}
+
+extension AppleCredential {
+  fileprivate static let validFixture = AppleCredential(
+    authorizationCode: Data("code".utf8), identityToken: Data("jwt".utf8),
+    nonce: String(repeating: "n", count: 32), fullName: nil
+  )
+  fileprivate static let invalidFixture = AppleCredential(
+    authorizationCode: Data(), identityToken: Data(), nonce: "", fullName: nil
   )
 }

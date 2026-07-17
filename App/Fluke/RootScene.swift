@@ -40,6 +40,8 @@ struct RootScene: View {
   private let submissionQueue: DeferredSubmissionQueueBridge
   private let submissionReplay: SubmissionReplayActor
   private let networkMonitor = NWPathMonitor()
+  private let signInAuthorizationFlow: AppleAuthorizationFlow
+  private let deletionAuthorizationFlow: AppleAuthorizationFlow
 
   @Environment(\.scenePhase) private var scenePhase
 
@@ -60,6 +62,8 @@ struct RootScene: View {
       queue: environment.submissionQueue,
       service: environment.submissionService
     )
+    self.signInAuthorizationFlow = AppleAuthorizationFlow()
+    self.deletionAuthorizationFlow = AppleAuthorizationFlow()
     _authSession = State(
       initialValue: AuthSession(
         service: environment.authService,
@@ -126,10 +130,11 @@ struct RootScene: View {
             authState: youAuthState,
             repository: environment.logbookRepository,
             queue: submissionQueue,
-            configureAppleRequest: AppleAuthorizationAdapter.configure,
-            completeAppleAuthorization: completeAppleAuthorization,
+            configureAppleRequest: signInAuthorizationFlow.configure,
+            completeAppleAuthorization: completeSignInAuthorization,
+            configureDeletionAuthorization: deletionAuthorizationFlow.configure,
+            completeDeletionAuthorization: completeDeletionAuthorization,
             signOut: { Task { await authSession.signOut() } },
-            deleteAccount: { Task { await authSession.deleteAccount() } },
             sessionExpired: { authSession.expire() }
           )
         }
@@ -251,16 +256,29 @@ struct RootScene: View {
     }
   }
 
-  private func completeAppleAuthorization(_ result: Result<ASAuthorization, Error>) {
-    switch AppleAuthorizationAdapter.credential(from: result) {
+  private func completeSignInAuthorization(_ result: Result<ASAuthorization, Error>) {
+    if AppleAuthorizationAdapter.isCancellation(result) {
+      signInAuthorizationFlow.cancel()
+      return
+    }
+    switch signInAuthorizationFlow.credential(from: result) {
     case .success(let credential):
       Task { await authSession.signIn(credential: credential) }
     case .failure:
-      Task {
-        await authSession.signIn(
-          credential: AppleCredential(identityToken: Data(), fullName: nil)
-        )
-      }
+      authSession.expireWithInvalidCredential()
+    }
+  }
+
+  private func completeDeletionAuthorization(_ result: Result<ASAuthorization, Error>) {
+    if AppleAuthorizationAdapter.isCancellation(result) {
+      deletionAuthorizationFlow.cancel()
+      return
+    }
+    switch deletionAuthorizationFlow.credential(from: result) {
+    case .success(let credential):
+      Task { await authSession.deleteAccount(credential: credential) }
+    case .failure:
+      authSession.reportInvalidCredential()
     }
   }
 }
