@@ -10,8 +10,8 @@ final class FlukeUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        let navigationTabs = ["Sightings", "Whales", "Learn"]
-        XCTAssertEqual(app.tabBars.buttons.count, navigationTabs.count + 1)
+        let navigationTabs = ["Sightings", "Whales", "Identify", "Learn", "You"]
+        XCTAssertEqual(app.tabBars.buttons.count, navigationTabs.count)
 
         for title in navigationTabs {
             let tab = app.tabBars.buttons[title]
@@ -23,12 +23,17 @@ final class FlukeUITests: XCTestCase {
             )
         }
 
-        let atlasTab = app.tabBars.buttons["Atlas"]
-        XCTAssertTrue(atlasTab.waitForExistence(timeout: 3), "Missing Atlas tab")
-        atlasTab.tap()
+        app.tabBars.buttons["Sightings"].tap()
+        let atlasButton = app.buttons["Open Atlas"]
+        XCTAssertTrue(atlasButton.waitForExistence(timeout: 3), "Missing Atlas entry point")
+        atlasButton.tap()
         XCTAssertTrue(
             app.segmentedControls.firstMatch.waitForExistence(timeout: 3),
             "Missing Atlas mode control"
+        )
+        XCTAssertTrue(
+            app.buttons["Close Atlas"].waitForExistence(timeout: 3),
+            "Missing Atlas close control"
         )
     }
 
@@ -48,9 +53,10 @@ final class FlukeUITests: XCTestCase {
         try captureTab("Whales", named: "02-whales", loadedIdentifier: "whales.loaded", in: app)
         try captureTab("Learn", named: "03-learn", in: app)
 
-        let atlas = app.tabBars.buttons["Atlas"]
-        XCTAssertTrue(atlas.waitForExistence(timeout: 3))
-        atlas.tap()
+        app.tabBars.buttons["Sightings"].tap()
+        let atlasButton = app.buttons["Open Atlas"]
+        XCTAssertTrue(atlasButton.waitForExistence(timeout: 3))
+        atlasButton.tap()
         try capture("04-atlas", in: app) {
             app.descendants(matching: .any)["atlas.timeline.loaded"].waitForExistence(timeout: 75)
         }
