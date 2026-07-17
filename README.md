@@ -84,7 +84,7 @@ fluke-ios/
 │   │   │   ├── API/                    # APIClient, APIError, Endpoints
 │   │   │   ├── Models/                 # Whale, Sighting, Ecotype, …
 │   │   │   ├── Services/               # JSONDecoder.fluke
-│   │   │   └── Persistence/            # SwiftData @Models (M-iOS-2)
+│   │   │   └── Persistence/            # Versioned actor-backed browse cache
 │   │   └── Tests/FlukeKitTests/
 │   ├── FlukeUI/                        # design system
 │   │   ├── Sources/FlukeUI/

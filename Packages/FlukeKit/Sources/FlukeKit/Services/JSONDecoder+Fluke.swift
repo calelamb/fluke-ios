@@ -21,3 +21,16 @@ public extension JSONDecoder {
         return d
     }()
 }
+
+public extension JSONEncoder {
+    static var fluke: JSONEncoder {
+        let encoder = JSONEncoder()
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(formatter.string(from: date))
+        }
+        return encoder
+    }
+}

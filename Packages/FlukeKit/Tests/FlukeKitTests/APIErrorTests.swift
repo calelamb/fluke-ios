@@ -8,27 +8,31 @@ final class APIErrorTests: XCTestCase {
         XCTAssertEqual(err.errorDescription, "You're not signed in.")
     }
 
-    func test_server_includesStatusAndBody() {
-        let err = APIError.server(status: 500, body: "boom")
-        XCTAssertTrue(err.errorDescription?.contains("500") ?? false)
-        XCTAssertTrue(err.errorDescription?.contains("boom") ?? false)
+    func test_remote_usesOnlySafeMessage() {
+        let err = APIError.remote(
+            status: 500,
+            code: "UPSTREAM_FAILURE",
+            message: "Try again later.",
+            retryable: true,
+            requestId: "req-1"
+        )
+        XCTAssertEqual(err.errorDescription, "Try again later.")
+        XCTAssertTrue(err.retryable)
     }
 
-    func test_network_includesUnderlyingMessage() {
-        let underlying = NSError(domain: "Net", code: -1009, userInfo: [
-            NSLocalizedDescriptionKey: "Offline"
-        ])
-        let err = APIError.network(underlying)
-        XCTAssertTrue(err.errorDescription?.contains("Offline") ?? false)
+    func test_offline_hasSafeDescription() {
+        let err = APIError.offline
+        XCTAssertEqual(err.errorDescription, "You're offline.")
+        XCTAssertTrue(err.retryable)
     }
 
     func test_decoding_includesType() {
         let err = APIError.decoding("Whale")
-        XCTAssertTrue(err.errorDescription?.contains("Whale") ?? false)
+        XCTAssertEqual(err.errorDescription, "Fluke couldn't read the service response.")
     }
 
     func test_invalidPagination_hasSafeDescription() {
         let err = APIError.invalidPagination
-        XCTAssertEqual(err.errorDescription, "The server returned an invalid paginated response.")
+        XCTAssertEqual(err.errorDescription, "Fluke received an invalid service response.")
     }
 }

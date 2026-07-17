@@ -115,9 +115,9 @@ If your screen needs new server data:
 
 - Add the endpoint constant to [`Endpoints.swift`](../Packages/FlukeKit/Sources/FlukeKit/API/Endpoints.swift).
 - Add the DTO struct to `FlukeKit/Models/`.
-- If caching is needed, add a `@Model` to `FlukeKit/Persistence/`.
+- If public browse caching is needed, add a versioned Codable document/store behavior to `FlukeKit/Persistence/`.
 - Wrap it in a repository in `FlukeKit/Repositories/`.
-- Test the repository with `MockURLProtocol` (HTTP) + in-memory `ModelContainer` (cache).
+- Test the repository with an injected `HTTPTransport` + `MemoryBrowseCacheStore`.
 
 ### 3. Build the view bottom-up
 
@@ -171,7 +171,7 @@ API changes that the iOS app needs go in the parent `fluke` repo. The plans for 
 3. **TDD evidence** — is the test in the diff? Does it actually test behavior (not just mocks)?
 4. **File size + responsibility** — is the new file focused?
 5. **Naming** — do identifiers describe the thing rather than how it's implemented?
-6. **No dead code** — orphaned files (`Item.swift` from Xcode's SwiftData scaffold is a known exception, removed in M-iOS-2 cleanup).
+6. **No dead code** — remove generated scaffold files and unused production paths before review.
 
 ### Review severity
 

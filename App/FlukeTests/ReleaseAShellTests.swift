@@ -66,6 +66,31 @@ struct ReleaseAShellTests {
     #expect(state == .disabled)
   }
 
+  @Test("The app environment accepts one isolated browse cache")
+  func environmentUsesInjectedBrowseCache() throws {
+    let cache = MemoryBrowseCacheStore()
+    let environment = try AppEnvironment.make(
+      apiBaseURLString: "https://api.fluke.test",
+      configuration: .release,
+      cacheStore: cache
+    )
+
+    #expect(environment.browseCacheStore is MemoryBrowseCacheStore)
+    _ = environment.sightingsRepository
+  }
+
+  @Test("Partial capabilities fail closed")
+  func partialCapabilitiesFailClosed() async {
+    let state = await ReleaseACapabilityState.load {
+      try JSONDecoder().decode(
+        Capabilities.self,
+        from: Data(#"{"accounts":false,"identification":false}"#.utf8)
+      )
+    }
+
+    #expect(state == .disabled)
+  }
+
   private func decodeCapabilities(_ json: String) throws -> Capabilities {
     try JSONDecoder().decode(Capabilities.self, from: Data(json.utf8))
   }

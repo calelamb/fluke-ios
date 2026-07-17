@@ -33,6 +33,7 @@ enum PaginatedRepository {
         fetchedPageCount: Int,
         accumulatedItems: [Item]
     ) async throws -> [Item] {
+        try Task.checkCancellation()
         guard fetchedPageCount < maximumPageCount else {
             throw APIError.invalidPagination
         }

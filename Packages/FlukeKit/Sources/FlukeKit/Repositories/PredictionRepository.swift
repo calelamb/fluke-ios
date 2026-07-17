@@ -1,6 +1,6 @@
 import Foundation
 
-public actor PredictionRepository {
+public actor PredictionRepository: PredictionRepositoryProtocol {
 
     public enum Subject: Sendable {
         case whale(id: String)
@@ -15,24 +15,44 @@ public actor PredictionRepository {
     }
 
     private let api: APIClient
-    private var cache: [String: (Date, Prediction)] = [:]
+    private let loader: BrowseRepositoryLoader
 
-    public init(api: APIClient) {
+    public init(api: APIClient, cache: any BrowseCacheStore = MemoryBrowseCacheStore()) {
         self.api = api
+        self.loader = BrowseRepositoryLoader(cache: cache)
+    }
+
+    public func load(
+        subject: Subject,
+        horizon: PredictionHorizon
+    ) async throws -> BrowseResult<Prediction?> {
+        let key = "\(subject.queryParam)|\(horizon.rawValue)"
+        return try await loader.load(
+            Prediction?.self,
+            key: BrowseCacheKey(resource: "prediction", identity: key),
+            fetch: { [api] in try await Self.request(api: api, subject: subject, horizon: horizon) },
+            isEmpty: { $0 == nil },
+            validate: { prediction in
+                if let prediction { try PublicBrowseValidator.prediction(prediction) }
+            }
+        )
     }
 
     public func fetch(subject: Subject, horizon: PredictionHorizon) async throws -> Prediction? {
-        let key = "\(subject.queryParam)|\(horizon.rawValue)"
-        if let entry = cache[key],
-           Date().timeIntervalSince(entry.0) < 86400 {
-            return entry.1
-        }
+        let prediction = try await Self.request(api: api, subject: subject, horizon: horizon)
+        if let prediction { try PublicBrowseValidator.prediction(prediction) }
+        return prediction
+    }
+
+    private static func request(
+        api: APIClient,
+        subject: Subject,
+        horizon: PredictionHorizon
+    ) async throws -> Prediction? {
         do {
             let path = "\(Endpoint.predict)?\(subject.queryParam)&horizon=\(horizon.rawValue)"
-            let prediction: Prediction = try await api.get(path)
-            cache[key] = (Date(), prediction)
-            return prediction
-        } catch APIError.server(status: 404, body: _) {
+            return try await api.get(path)
+        } catch APIError.remote(status: 404, code: _, message: _, retryable: _, requestId: _) {
             return nil
         }
     }

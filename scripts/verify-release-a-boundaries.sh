@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 project="$repo_root/App/Fluke.xcodeproj"
+app_source_root="${FLUKE_APP_SOURCE_ROOT:-$repo_root/App/Fluke}"
 destination="${FLUKE_TEST_DESTINATION:-platform=iOS Simulator,name=iPhone 17,OS=26.0.1}"
 result_bundle_path="${FLUKE_RESULT_BUNDLE_PATH:-}"
 enable_coverage="${FLUKE_ENABLE_COVERAGE:-NO}"
@@ -32,8 +33,8 @@ if [[ "$enable_coverage" != "YES" && "$enable_coverage" != "NO" ]]; then
   exit 2
 fi
 
-if search_lines 'SwiftData|(^|[^[:alnum:]_])Item([^[:alnum:]_]|$)|IdentifyPlaceholder|YouPlaceholder|Submit' \
-  "$repo_root/App/Fluke"; then
+if search_lines '(^|[^[:alnum:]_])(IdentifyPlaceholder|IdentifyService|IdentifyView|YouPlaceholder|AuthService|AuthSession|SubmissionReplayer|SubmissionsRepository|SubmitView|SubmitSheet)([^[:alnum:]_]|$)|/api/v1/(auth|identify|sightings/me)' \
+  "$app_source_root"; then
   echo "Release A boundary violation in the app target" >&2
   exit 1
 fi

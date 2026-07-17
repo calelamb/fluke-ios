@@ -6,7 +6,7 @@ Test strategy for the iOS app. Coverage targets, what gets tested at each layer,
 
 | Layer | Coverage target | Strategy |
 | --- | --- | --- |
-| `FlukeKit` (domain) | 80%+ | XCTest unit tests; `MockURLProtocol` for HTTP; in-memory `ModelContainer` for SwiftData |
+| `FlukeKit` (domain) | 80%+ source lines | Swift Testing/XCTest; injected `HTTPTransport`; in-memory actor cache |
 | `FlukeUI` (design system) | Snapshot regression on visual components | `swift-snapshot-testing` PNG references in `__Snapshots__/` |
 | `FlukeFeatures` (screens) | View model logic + render-doesn't-crash | XCTest unit tests for view models; minimal smoke render tests |
 | `App` (UI tests) | Critical user flows | XCUITest — sign in (mocked), submit a sighting, browse a whale, identify-tab placeholder |
@@ -83,19 +83,23 @@ override func tearDown() async throws {
 }
 ```
 
-### In-memory SwiftData container for persistence tests
+### In-memory browse cache for persistence tests
 
 ```swift
-let container = try ModelContainer.fluke(inMemory: true)
-let context = ModelContext(container)
-context.insert(CachedWhale(/* … */))
-try context.save()
+let cache = MemoryBrowseCacheStore()
+let key = BrowseCacheKey(resource: "whales", identity: "catalog")
+let document = BrowseCacheDocument(
+    resource: key.resource,
+    fetchedAt: Date(),
+    payload: BrowsePayload.value([whale])
+)
+try await cache.replace(document, for: key)
 
-let fetched = try context.fetch(FetchDescriptor<CachedWhale>())
-XCTAssertEqual(fetched.count, 1)
+let fetched = try await cache.load([Whale].self, for: key)
+#expect(fetched?.payload == .value([whale]))
 ```
 
-The in-memory mode uses `isStoredInMemoryOnly: true` on `ModelConfiguration` — no disk write, fresh state per test.
+The actor store has no disk writes and starts empty for each test. File-store tests inject a writer and temporary directory to verify atomic last-known-good behavior and document bounds.
 
 ### Snapshot tests for UI components
 
@@ -174,8 +178,8 @@ Pattern: `test_<methodOrFeature>_<expectedBehavior>`.
 
 ## Avoiding test pitfalls
 
-- **Don't test framework internals.** A test that just exercises SwiftData's CRUD doesn't cover our code; it covers Apple's. Test our wrappers + behavior.
-- **Don't mock what you don't own** *too* aggressively. Mocking `URLSession` (we own the wrapper around it) is fine. Mocking SwiftData itself isn't worth the bother; use the in-memory configuration.
+- **Don't test framework internals.** Test our cache wrappers, validation, and fallback behavior rather than Foundation's JSON implementation.
+- **Don't mock what you don't own** *too* aggressively. Inject `HTTPTransport` and `BrowseCacheStore`, which are boundaries we own.
 - **Don't test private state.** Test through the public API. If you can't reach the behavior through the public interface, the API is wrong, not the test.
 - **Don't share state between tests.** `setUp`/`tearDown` reset everything. The order of test execution should not matter.
 
@@ -191,7 +195,7 @@ xcrun llvm-cov report \
   --use-color
 ```
 
-Aim for 80%+ on `FlukeKit`. `FlukeUI` is dominated by view code where snapshot tests carry the regression load. `FlukeFeatures` covers view-model logic plus minimal render tests; coverage there is meaningful for view models and incidental for views.
+CI runs `scripts/verify-swift-package-coverage.sh` against `/Sources/FlukeKit/` and requires 80%+. Test targets and generated runner files are excluded from the calculation. `FlukeUI` is dominated by view code where snapshot tests carry the regression load. `FlukeFeatures` covers view-model logic plus minimal render tests; coverage there is meaningful for view models and incidental for views.
 
 ## CI
 

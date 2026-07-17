@@ -37,7 +37,7 @@ The full design rationale lives in [`../../fluke/docs/specs/ios-app.md`](../../f
 
 ### Dependency rules (enforced by review)
 
-1. **`FlukeKit` depends on nothing project-internal.** No SwiftUI imports. No FlukeUI types. No feature code. Just Swift, Foundation, SwiftData, system frameworks.
+1. **`FlukeKit` depends on nothing project-internal.** No SwiftUI imports. No FlukeUI types. No feature code. Just Swift, Foundation, and system frameworks.
 2. **`FlukeUI` imports `SwiftUI` but no domain.** No `Whale`, `Sighting`, `APIClient` references. The design system doesn't know what an orca is.
 3. **`FlukeFeatures` depends on Kit + UI; never on itself.** A feature module (say `Sightings/`) imports `FlukeKit` and `FlukeUI` but never imports another feature folder. If two features need to share something, it goes in Kit or UI.
 4. **`App/` depends on FlukeFeatures (and transitively on Kit + UI).** The App target is small — entry point, root scene, environment plumbing. All real screens live in feature modules.
@@ -71,7 +71,7 @@ Each package is small enough that an agent (or human) can hold its full surface 
 | A new HTTP request method on the client | `FlukeKit/Sources/FlukeKit/API/APIClient.swift` |
 | A new domain model (DTO) | `FlukeKit/Sources/FlukeKit/Models/` |
 | A repository (API + cache) | `FlukeKit/Sources/FlukeKit/Repositories/` |
-| A SwiftData `@Model` | `FlukeKit/Sources/FlukeKit/Persistence/` |
+| A versioned browse-cache document/store | `FlukeKit/Sources/FlukeKit/Persistence/` |
 | A service (auth, identify, submit) | `FlukeKit/Sources/FlukeKit/Services/` |
 | A new tab | `FlukeFeatures/.../<NewTab>/` + wire in `App/Fluke/RootScene.swift` |
 | A view model | Co-located with its view in the feature folder |
@@ -84,26 +84,30 @@ Each package is small enough that an agent (or human) can hold its full surface 
 
 - Reads/writes cookies via `URLSession.configuration.httpCookieStorage` automatically — matches the cookie-based auth the web's API already uses for admin (and observer, once M-iOS-3 lands).
 - Decodes responses with `JSONDecoder.fluke` (handles Prisma's milliseconds-precision ISO-8601 dates and string-encoded `Decimal` lat/lng).
-- Surfaces errors as the typed `APIError` enum — `.network`, `.unauthorized`, `.server(status, body)`, `.decoding(typeName)`, `.unknown`.
-- Has a single retry policy: transient network errors get one retry; 4xx never retries.
+- Enforces a request deadline while preserving caller cancellation as `CancellationError`.
+- Surfaces typed, display-safe `APIError` values. Remote failures retain only the canonical safe error envelope; raw response bodies never enter an error value or user-facing description.
+- Builds query strings through `APIRequest`, with deterministic RFC 3986 encoding.
 
 Tests live at `FlukeKitTests/APIClientTests.swift` and use `MockURLProtocol` (a URLProtocol subclass that hijacks requests).
 
 ### Repositories
 
-A repository owns a single domain entity's API + cache round-trip. Pattern: fetch from API, write to cache, return DTOs. On API failure, return whatever the cache has.
+A repository owns a single domain entity's API + cache round-trip. Public browse repositories are network-first, validate every decoded response, and atomically replace the cache only after a complete successful fetch. `BrowseResult` distinguishes fresh data, a genuine empty response, stale data, offline-cached data, and failure. Cancellation propagates and never replaces last-known-good bytes.
 
-Land in `FlukeKit/Repositories/` starting in M-iOS-2. Examples:
+Release A repositories include:
 
-- `WhalesRepository` — `fetchAll() async throws -> [Whale]` + `find(byId:)` + `fetchTrack(whaleId:)`
-- `SightingsRepository` — `fetchApproved()` + `fetchMine()` (signed-in)
-- `SubmissionsRepository` — `submit(payload:photoBytes:)` + `replayQueued()` for offline support
+- `WhalesRepository` — catalog, profile, and explicit-date movement track.
+- `SightingsRepository` — approved and external public feeds.
+- `HistoricalSightingsRepository` — explicit-date atlas history.
+- `PredictionRepository` — public prediction results by whale or pod.
 
-### Persistence (SwiftData)
+Signed-in sightings, submissions, identify, and auth remain behind the Release B boundary.
 
-`@Model` classes in `FlukeKit/Persistence/`. Stored locally on device; mirror API DTOs but include offline-only fields like `cachedAt`, `viewedAt`, `submissionState`. Photo binaries are NOT stored in SwiftData (binary blobs are an anti-pattern there) — they live in `Documents/queued-photos/<uuid>.jpg`, referenced by ID.
+### Persistence (versioned Codable JSON)
 
-The `ModelContainer` is constructed once in `AppEnvironment` and shared via SwiftUI environment.
+Release A browse data uses actor-isolated `BrowseCacheStore` implementations. `FileBrowseCacheStore` writes bounded, versioned Codable JSON documents atomically under Application Support, applies file protection, excludes cache data from backup, and rejects corrupt, mismatched, oversized, or incompatible documents. `MemoryBrowseCacheStore` provides the same contract for deterministic tests.
+
+`AppEnvironment` constructs one shared file store and injects it into every public browse repository. Release B mutation and photo-queue persistence will be designed separately so browse cache semantics stay read-only and fail closed.
 
 ### Auth
 
@@ -145,7 +149,7 @@ The 5-tab `TabView`. Each tab roots its own `NavigationStack`. The Submit `+` bu
 
 ### `AppEnvironment.swift`
 
-Top-level dependency container. Holds singletons whose lifetime is the app process: `APIClient`, `ModelContainer`, repositories, `AuthService`, `NetworkMonitor`. Injected into views via SwiftUI's `@Environment`.
+Top-level dependency container. Holds process-lifetime dependencies such as `APIClient`, the shared `BrowseCacheStore`, and public browse repositories. Release B auth and mutation services are intentionally absent. Injected into views via SwiftUI's `@Environment`.
 
 ## Out-of-scope (deferred)
 

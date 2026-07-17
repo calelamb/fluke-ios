@@ -5,6 +5,7 @@ set -u
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fixture_verifier="$repo_root/scripts/verify-contract-fixtures.sh"
 coverage_verifier="$repo_root/scripts/verify-coverage.sh"
+swift_coverage_verifier="$repo_root/scripts/verify-swift-package-coverage.sh"
 archive_verifier="$repo_root/scripts/verify-archive-metadata.sh"
 boundary_verifier="$repo_root/scripts/verify-release-a-boundaries.sh"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/fluke-verifier-tests.XXXXXX")"
@@ -98,6 +99,19 @@ PY
 expect_failure "coverage rejects inconsistent counts" "coverage report is inconsistent" \
   "$coverage_verifier" "$test_root/coverage.json" Fluke.app 80
 
+cat >"$test_root/swift-coverage.json" <<'JSON'
+{"data":[{"files":[
+  {"filename":"/checkout/Packages/FlukeKit/Sources/FlukeKit/API/APIClient.swift","summary":{"lines":{"count":100,"covered":80}}},
+  {"filename":"/checkout/Packages/FlukeKit/Tests/FlukeKitTests/APIClientTests.swift","summary":{"lines":{"count":1000,"covered":1000}}}
+]}]}
+JSON
+expect_success "Swift source coverage accepts exact threshold" \
+  "$swift_coverage_verifier" "$test_root/swift-coverage.json" /Sources/FlukeKit/ 80
+expect_failure "Swift source coverage excludes tests" "below required 80.01%" \
+  "$swift_coverage_verifier" "$test_root/swift-coverage.json" /Sources/FlukeKit/ 80.01
+expect_failure "Swift source coverage rejects missing sources" "coverage source path not found" \
+  "$swift_coverage_verifier" "$test_root/swift-coverage.json" /Sources/Missing/ 80
+
 archive_path="$test_root/Fluke.xcarchive"
 python3 - "$archive_path" <<'PY'
 import os
@@ -170,6 +184,22 @@ if ! grep -Fxq -- '-resultBundlePath' "$capture" \
   printf 'FAIL: boundary verifier did not forward result/coverage arguments\n' >&2
   failures=$((failures + 1))
 fi
+
+boundary_sources="$test_root/boundary-sources"
+mkdir -p "$boundary_sources"
+printf 'struct Item {}\n' >"$boundary_sources/AllowedPersistence.swift"
+expect_success "boundary verifier allows ordinary persistence names" env \
+  PATH="$fake_bin:$PATH" \
+  FLUKE_XCODEBUILD_CAPTURE="$capture" \
+  FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
+  "$boundary_verifier"
+printf 'struct SubmitView {}\n' >"$boundary_sources/ReleaseB.swift"
+expect_failure "boundary verifier rejects Release B presentation" \
+  "Release A boundary violation" env \
+  PATH="$fake_bin:$PATH" \
+  FLUKE_XCODEBUILD_CAPTURE="$capture" \
+  FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
+  "$boundary_verifier"
 
 default_capture="$test_root/xcodebuild-default-arguments"
 expect_success "boundary verifier accepts omitted result path" env \

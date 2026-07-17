@@ -54,6 +54,13 @@ jobs:
             cp "$coverage_path" "build/verification/package-coverage/${package}.json"
           done
 
+      - name: Enforce FlukeKit source line coverage
+        run: >-
+          scripts/verify-swift-package-coverage.sh
+          build/verification/package-coverage/FlukeKit.json
+          /Sources/FlukeKit/
+          80
+
       - name: Run meaningful app tests with coverage
         env:
           FLUKE_TEST_DESTINATION: ${{ env.SIMULATOR_DESTINATION }}

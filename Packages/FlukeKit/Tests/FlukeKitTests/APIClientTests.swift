@@ -72,7 +72,13 @@ final class APIClientTests: XCTestCase {
             let _: [Whale] = try await client.get("/api/v1/whales")
             XCTFail("expected throw")
         } catch let error as APIError {
-            XCTAssertEqual(error, .server(status: 500, body: "boom"))
+            XCTAssertEqual(error, .remote(
+                status: 500,
+                code: "REMOTE_ERROR",
+                message: "The service could not complete the request.",
+                retryable: true,
+                requestId: nil
+            ))
         } catch {
             XCTFail("wrong error: \(error)")
         }

@@ -50,10 +50,12 @@ struct AppEnvironment {
   typealias CapabilitiesFetch = () async throws -> Capabilities
 
   let apiBaseURL: URL
+  let browseCacheStore: any BrowseCacheStore
   let configuration: AppBuildConfiguration
   let fetchCapabilities: CapabilitiesFetch
   let historicalSightingsRepository: HistoricalSightingsRepository
   let predictionRepository: PredictionRepository
+  let sightingsRepository: SightingsRepository
   let whalesRepository: WhalesRepository
 
   static func live(bundle: Bundle = .main) throws -> AppEnvironment {
@@ -70,7 +72,10 @@ struct AppEnvironment {
       apiBaseURLString: bundle.object(
         forInfoDictionaryKey: "FLUKE_API_BASE_URL"
       ) as? String,
-      configuration: configuration
+      configuration: configuration,
+      cacheStore: FileBrowseCacheStore(
+        directory: FileBrowseCacheStore.liveDirectory()
+      )
     )
   }
 
@@ -78,7 +83,8 @@ struct AppEnvironment {
     apiBaseURLString: String?,
     configuration: AppBuildConfiguration,
     session: URLSession = .shared,
-    capabilitiesFetch: CapabilitiesFetch? = nil
+    capabilitiesFetch: CapabilitiesFetch? = nil,
+    cacheStore: any BrowseCacheStore = MemoryBrowseCacheStore()
   ) throws -> AppEnvironment {
     let apiBaseURL = try validatedAPIBaseURL(
       apiBaseURLString,
@@ -88,13 +94,15 @@ struct AppEnvironment {
 
     return AppEnvironment(
       apiBaseURL: apiBaseURL,
+      browseCacheStore: cacheStore,
       configuration: configuration,
       fetchCapabilities: capabilitiesFetch ?? {
         try await client.get("/api/v1/capabilities")
       },
-      historicalSightingsRepository: HistoricalSightingsRepository(api: client),
-      predictionRepository: PredictionRepository(api: client),
-      whalesRepository: WhalesRepository(api: client)
+      historicalSightingsRepository: HistoricalSightingsRepository(api: client, cache: cacheStore),
+      predictionRepository: PredictionRepository(api: client, cache: cacheStore),
+      sightingsRepository: SightingsRepository(api: client, cache: cacheStore),
+      whalesRepository: WhalesRepository(api: client, cache: cacheStore)
     )
   }
 
