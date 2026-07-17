@@ -6,14 +6,17 @@ public struct WhalesView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel: WhalesViewModel
     private let repository: any WhalesRepositoryProtocol
+    private let openSubmit: () -> Void
     private let openTrace: (Whale) -> Void
 
     public init(
         repository: any WhalesRepositoryProtocol,
-        onOpenTrace: @escaping (Whale) -> Void = { _ in }
+        onOpenTrace: @escaping (Whale) -> Void = { _ in },
+        onOpenSubmit: @escaping () -> Void = {}
     ) {
         self.repository = repository
         self.openTrace = onOpenTrace
+        openSubmit = onOpenSubmit
         _viewModel = State(initialValue: WhalesViewModel(repository: repository))
     }
 
@@ -101,7 +104,8 @@ public struct WhalesView: View {
                             WhaleProfileView(
                                 whale: whale,
                                 repository: repository,
-                                onOpenTrace: { openTrace(whale) }
+                                onOpenTrace: { openTrace(whale) },
+                                onOpenSubmit: openSubmit
                             )
                         } label: {
                             WhaleCard(whale: whale)

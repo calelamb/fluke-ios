@@ -76,11 +76,18 @@ public struct SightingDetailView: View {
                 if let openWhaleMovement {
                     ForEach(sighting.identifiedWhales, id: \.catalogId) { whale in
                         Button {
-                            openWhaleMovement(whale.catalogId)
+                            SightingDetailNavigation.openMovement(
+                                catalogID: whale.catalogId,
+                                dismiss: dismiss.callAsFunction,
+                                open: openWhaleMovement
+                            )
                         } label: {
-                            Label("See \(whale.catalogId) movement", systemImage: "point.3.connected.trianglepath.dotted")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .frame(minHeight: 44)
+                            Label(
+                                "See \(whale.catalogId) movement",
+                                systemImage: "point.3.connected.trianglepath.dotted"
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minHeight: 44)
                         }
                         .buttonStyle(.bordered)
                         .accessibilityHint("Opens the whale's full-screen movement record")
@@ -123,5 +130,17 @@ public struct SightingDetailView: View {
         case .offshore: "Offshore ecotype"
         case .unknown: "Unknown ecotype"
         }
+    }
+}
+
+enum SightingDetailNavigation {
+    @MainActor
+    static func openMovement(
+        catalogID: String,
+        dismiss: () -> Void,
+        open: (String) -> Void
+    ) {
+        dismiss()
+        open(catalogID)
     }
 }

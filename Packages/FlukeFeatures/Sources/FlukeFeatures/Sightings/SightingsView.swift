@@ -5,9 +5,14 @@ import SwiftUI
 public struct SightingsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel: SightingsViewModel
+    private let openWhaleMovement: ((String) -> Void)?
 
-    public init(repository: any SightingsRepositoryProtocol) {
+    public init(
+        repository: any SightingsRepositoryProtocol,
+        onOpenWhaleMovement: ((String) -> Void)? = nil
+    ) {
         _viewModel = State(initialValue: SightingsViewModel(repository: repository))
+        openWhaleMovement = onOpenWhaleMovement
     }
 
     public var body: some View {
@@ -26,7 +31,7 @@ public struct SightingsView: View {
         .task { await viewModel.load() }
         .refreshable { await viewModel.load() }
         .sheet(item: $viewModel.selectedItem) { item in
-            SightingDetailView(item: item)
+            SightingDetailView(item: item, onOpenWhaleMovement: openWhaleMovement)
                 .presentationDetents([.medium, .large])
         }
     }

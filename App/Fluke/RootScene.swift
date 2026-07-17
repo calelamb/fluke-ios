@@ -48,11 +48,12 @@ struct RootScene: View {
   @State private var deletionAuthorizationFlow: AppleAuthorizationFlow
   @State private var capabilities = LaunchCapabilityState.loading
   @State private var identifyService: (any IdentifyServiceProtocol)?
+  @State private var movementNavigation: MovementNavigationModel
   @State private var selectedTab = RootTab.sightings
   @State private var requestedTraceWhaleID: String?
   @State private var atlasRouteRevision = 0
   @State private var isAtlasPresented = false
-  @State private var isSubmitPresented = false
+  @State private var submitRoute: MovementSubmitRoute?
 
   init(environment: AppEnvironment) {
     let submissionQueue = DeferredSubmissionQueueBridge(queue: environment.submissionQueue)
@@ -71,6 +72,9 @@ struct RootScene: View {
         accountAssociations: submissionQueue
       )
     )
+    _movementNavigation = State(
+      initialValue: MovementNavigationModel(repository: environment.whalesRepository)
+    )
   }
 
   var body: some View {
@@ -79,23 +83,26 @@ struct RootScene: View {
 
       TabView(selection: $selectedTab) {
         NavigationStack {
-          SightingsView(repository: environment.sightingsRepository)
-            .toolbar {
-              ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                  isSubmitPresented = true
-                } label: {
-                  Label("Add Sighting", systemImage: "plus")
-                }
-              }
-              ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                  presentAtlas()
-                } label: {
-                  Label("Open Atlas", systemImage: "globe.americas")
-                }
+          SightingsView(
+            repository: environment.sightingsRepository,
+            onOpenWhaleMovement: presentMovement
+          )
+          .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+              Button {
+                presentSubmit()
+              } label: {
+                Label("Add Sighting", systemImage: "plus")
               }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+              Button {
+                presentAtlas()
+              } label: {
+                Label("Open Atlas", systemImage: "globe.americas")
+              }
+            }
+          }
         }
         .flukeNavigationBackground()
         .tabItem { tabLabel(for: .sightings) }
@@ -104,6 +111,8 @@ struct RootScene: View {
         NavigationStack {
           WhalesView(repository: environment.whalesRepository) { whale in
             presentAtlas(for: whale.id)
+          } onOpenSubmit: {
+            presentSubmit()
           }
         }
         .flukeNavigationBackground()
@@ -176,15 +185,15 @@ struct RootScene: View {
     .environment(\.openAtlas) { whaleID in
       presentAtlas(for: whaleID)
     }
-    .environment(\.openSubmit) { isSubmitPresented = true }
-    .sheet(isPresented: $isSubmitPresented) {
+    .environment(\.openSubmit) { presentSubmit() }
+    .sheet(item: $submitRoute) { route in
       SubmitView(
         model: SubmitViewModel(
           service: environment.submissionService,
           queue: environment.submissionQueue,
           isSignedIn: authSession.isAuthenticated,
           signedInObserverEmail: authSession.authenticatedEmail,
-          submissionsEnabled: submissionsAvailable
+          submissionsEnabled: route.submissionsEnabled
         )
       )
       .presentationDetents([.large])
@@ -206,6 +215,9 @@ struct RootScene: View {
         .padding()
       }
     }
+    .fullScreenCover(item: movementDestination) { destination in
+      movementDestination(destination)
+    }
   }
 
   private func tabLabel(for tab: RootTab) -> some View {
@@ -216,6 +228,50 @@ struct RootScene: View {
     requestedTraceWhaleID = whaleID
     atlasRouteRevision += 1
     isAtlasPresented = true
+  }
+
+  private func presentMovement(catalogID: String) {
+    Task { await movementNavigation.present(catalogID: catalogID) }
+  }
+
+  private func presentSubmit() {
+    submitRoute = movementNavigation.routeToSubmit(
+      submissionsEnabled: submissionsAvailable
+    )
+  }
+
+  private var movementDestination: Binding<MovementDestination?> {
+    Binding(
+      get: { movementNavigation.destination },
+      set: { destination in
+        if destination == nil { movementNavigation.dismiss() }
+      }
+    )
+  }
+
+  @ViewBuilder
+  private func movementDestination(_ destination: MovementDestination) -> some View {
+    switch destination {
+    case .movement(let whale):
+      MovementTrackView(
+        repository: environment.whalesRepository,
+        whale: whale,
+        onSubmitSighting: presentSubmit
+      )
+    case .unavailable(let catalogID, let reason):
+      NavigationStack {
+        ContentUnavailableView(
+          "Movement unavailable",
+          systemImage: "water.waves",
+          description: Text(reason.message(catalogID: catalogID))
+        )
+        .toolbar {
+          ToolbarItem(placement: .cancellationAction) {
+            Button("Close") { movementNavigation.dismiss() }
+          }
+        }
+      }
+    }
   }
 
   private var accountAvailability: YouAccountAvailability {
@@ -237,12 +293,12 @@ struct RootScene: View {
       FlukeFeatures.IdentifyView(
         service: identifyService,
         browseWhales: { selectedTab = .whales },
-        submitSighting: { isSubmitPresented = true }
+        submitSighting: { presentSubmit() }
       )
     } else {
       FlukeFeatures.IdentifyView(
         browseWhales: { selectedTab = .whales },
-        submitSighting: { isSubmitPresented = true }
+        submitSighting: { presentSubmit() }
       )
     }
   }
