@@ -18,19 +18,32 @@ final class WhalesRepositoryTests: XCTestCase {
         MockURLProtocol.handler = nil
     }
 
-    func test_fetchAll_unwrapsWhalesFromPaginatedResponse() async throws {
+    func test_fetchAll_consumesEveryPageAndEncodesOpaqueCursor() async throws {
+        var requestCount = 0
         MockURLProtocol.handler = { req in
             XCTAssertEqual(req.url?.path, "/api/v1/whales")
+            requestCount += 1
+            let isFirstPage = requestCount == 1
+            XCTAssertEqual(
+                req.url?.absoluteString,
+                isFirstPage
+                    ? "http://localhost:4000/api/v1/whales"
+                    : "http://localhost:4000/api/v1/whales?cursor=page%202%2Bnext%26tail"
+            )
+            let catalogId = isFirstPage ? "A1" : "A2"
+            let pagination = isFirstPage
+                ? #"{"hasMore":true,"nextCursor":"page 2+next&tail"}"#
+                : #"{"hasMore":false,"nextCursor":null}"#
             let body = """
             {
               "items": [{
-                "id":"wh_a","catalogId":"A1","name":"Alpha",
+                "id":"wh_\(catalogId)","catalogId":"\(catalogId)","name":"Alpha",
                 "ecotype":"UNKNOWN","pod":null,"sex":"UNKNOWN",
                 "birthYear":null,"deathYear":null,"status":"UNKNOWN",
                 "biography":null,"distinguishingMarks":null,"heroImageUrl":null,
                 "notableEvents":[],"sourceCitations":[]
               }],
-              "page":{"hasMore":true,"nextCursor":"cursor-2"}
+              "page":\(pagination)
             }
             """.data(using: .utf8)!
             return (
@@ -39,8 +52,55 @@ final class WhalesRepositoryTests: XCTestCase {
             )
         }
         let whales = try await repo.fetchAll()
-        XCTAssertEqual(whales.count, 1)
-        XCTAssertEqual(whales.first?.catalogId, "A1")
+        XCTAssertEqual(whales.map(\.catalogId), ["A1", "A2"])
+        XCTAssertEqual(requestCount, 2)
+    }
+
+    func test_fetchAll_rejectsHasMoreWithoutCursor() async {
+        MockURLProtocol.handler = { req in
+            let body = #"{"items":[],"page":{"hasMore":true,"nextCursor":null}}"#.data(using: .utf8)!
+            return (
+                HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                body
+            )
+        }
+
+        await XCTAssertThrowsErrorAsync(try await repo.fetchAll()) { error in
+            XCTAssertEqual(error as? APIError, .invalidPagination)
+        }
+    }
+
+    func test_fetchAll_rejectsRepeatedCursor() async {
+        MockURLProtocol.handler = { req in
+            let body = #"{"items":[],"page":{"hasMore":true,"nextCursor":"same"}}"#.data(using: .utf8)!
+            return (
+                HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                body
+            )
+        }
+
+        await XCTAssertThrowsErrorAsync(try await repo.fetchAll()) { error in
+            XCTAssertEqual(error as? APIError, .invalidPagination)
+        }
+    }
+
+    func test_fetchAll_rejectsResponsesBeyondMaximumPageCount() async {
+        var requestCount = 0
+        MockURLProtocol.handler = { req in
+            requestCount += 1
+            let body = """
+            {"items":[],"page":{"hasMore":true,"nextCursor":"cursor-\(requestCount)"}}
+            """.data(using: .utf8)!
+            return (
+                HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                body
+            )
+        }
+
+        await XCTAssertThrowsErrorAsync(try await repo.fetchAll()) { error in
+            XCTAssertEqual(error as? APIError, .invalidPagination)
+        }
+        XCTAssertEqual(requestCount, PaginatedRepository.maximumPageCount)
     }
 
     func test_find_decodesWhaleProfile() async throws {
@@ -79,5 +139,19 @@ final class WhalesRepositoryTests: XCTestCase {
         let track = try await repo.fetchTrack(whaleId: "wh_a")
         XCTAssertEqual(track.count, 1)
         XCTAssertEqual(track.first?.locationName, "Lime Kiln")
+    }
+}
+
+private func XCTAssertThrowsErrorAsync<T>(
+    _ expression: @autoclosure () async throws -> T,
+    _ errorHandler: (Error) -> Void,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("Expected an error", file: file, line: line)
+    } catch {
+        errorHandler(error)
     }
 }

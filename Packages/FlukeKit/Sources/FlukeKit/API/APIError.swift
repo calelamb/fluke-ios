@@ -7,6 +7,7 @@ public enum APIError: LocalizedError, Equatable {
     case unauthorized
     case server(status: Int, body: String)
     case decoding(_ typeName: String)
+    case invalidPagination
     case unknown
 
     public var errorDescription: String? {
@@ -19,6 +20,8 @@ public enum APIError: LocalizedError, Equatable {
             return "Server error \(status): \(body)"
         case .decoding(let type):
             return "Couldn't read the server's response (\(type))."
+        case .invalidPagination:
+            return "The server returned an invalid paginated response."
         case .unknown:
             return "Something unexpected went wrong."
         }
@@ -26,7 +29,9 @@ public enum APIError: LocalizedError, Equatable {
 
     public static func == (lhs: APIError, rhs: APIError) -> Bool {
         switch (lhs, rhs) {
-        case (.unauthorized, .unauthorized), (.unknown, .unknown):
+        case (.unauthorized, .unauthorized),
+             (.invalidPagination, .invalidPagination),
+             (.unknown, .unknown):
             return true
         case let (.server(s1, b1), .server(s2, b2)):
             return s1 == s2 && b1 == b2

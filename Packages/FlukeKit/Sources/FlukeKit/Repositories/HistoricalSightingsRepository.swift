@@ -14,22 +14,18 @@ public actor HistoricalSightingsRepository {
         pod: Pod? = nil,
         whaleId: String? = nil
     ) async throws -> [HistoricalSighting] {
-        var queryItems: [(name: String, value: String)] = []
         let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime]
-        if let from { queryItems.append((name: "from", value: isoFormatter.string(from: from))) }
-        if let to   { queryItems.append((name: "to", value: isoFormatter.string(from: to))) }
-        if let pod  { queryItems.append((name: "pod", value: pod.rawValue)) }
-        if let whaleId { queryItems.append((name: "whaleId", value: whaleId)) }
+        let queryItems: [PaginationQueryItem] = [
+            from.map { PaginationQueryItem(name: "from", value: isoFormatter.string(from: $0)) },
+            to.map { PaginationQueryItem(name: "to", value: isoFormatter.string(from: $0)) },
+            pod.map { PaginationQueryItem(name: "pod", value: $0.rawValue) },
+            whaleId.map { PaginationQueryItem(name: "whaleId", value: $0) },
+        ].compactMap { $0 }
 
-        var path = Endpoint.historicalSightings
-        if !queryItems.isEmpty {
-            let allowed = CharacterSet.urlQueryAllowed
-            path += "?" + queryItems
-                .map { "\($0.name)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0.value)" }
-                .joined(separator: "&")
-        }
-        let response: PaginatedResponse<HistoricalSighting> = try await api.get(path)
-        return response.items
+        return try await PaginatedRepository.fetchAll(
+            api: api,
+            endpoint: Endpoint.historicalSightings,
+            queryItems: queryItems
+        )
     }
 }

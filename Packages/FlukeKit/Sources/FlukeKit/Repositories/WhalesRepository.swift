@@ -12,8 +12,7 @@ public actor WhalesRepository {
 
     /// Fetch the full catalog from the live API. No caching yet.
     public func fetchAll() async throws -> [Whale] {
-        let response: PaginatedResponse<Whale> = try await api.get(Endpoint.whales)
-        return response.items
+        try await PaginatedRepository.fetchAll(api: api, endpoint: Endpoint.whales)
     }
 
     public func find(byId id: String) async throws -> WhaleProfile? {

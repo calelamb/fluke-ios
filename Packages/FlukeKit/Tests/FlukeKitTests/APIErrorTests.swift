@@ -26,4 +26,9 @@ final class APIErrorTests: XCTestCase {
         let err = APIError.decoding("Whale")
         XCTAssertTrue(err.errorDescription?.contains("Whale") ?? false)
     }
+
+    func test_invalidPagination_hasSafeDescription() {
+        let err = APIError.invalidPagination
+        XCTAssertEqual(err.errorDescription, "The server returned an invalid paginated response.")
+    }
 }

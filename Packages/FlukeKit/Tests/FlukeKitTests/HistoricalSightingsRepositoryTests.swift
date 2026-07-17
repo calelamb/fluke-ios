@@ -52,4 +52,41 @@ final class HistoricalSightingsRepositoryTests: XCTestCase {
         }
         _ = try await repo.fetch(from: nil, to: nil, pod: .j, whaleId: nil)
     }
+
+    func test_fetch_consumesEveryPageWhilePreservingEncodedFilters() async throws {
+        var requestCount = 0
+        MockURLProtocol.handler = { req in
+            requestCount += 1
+            XCTAssertEqual(req.url?.path, "/api/v1/sightings/historical")
+            XCTAssertEqual(
+                req.url?.absoluteString,
+                requestCount == 1
+                    ? "http://localhost:4000/api/v1/sightings/historical?pod=J&whaleId=whale%20a%26b"
+                    : "http://localhost:4000/api/v1/sightings/historical?pod=J&whaleId=whale%20a%26b&cursor=next%2Bpage%26two"
+            )
+            let sightingId = requestCount == 1 ? "si_1" : "si_2"
+            let pagination = requestCount == 1
+                ? #"{"hasMore":true,"nextCursor":"next+page&two"}"#
+                : #"{"hasMore":false,"nextCursor":null}"#
+            let body = """
+            {
+              "items":[{
+                "id":"\(sightingId)","observedAt":"2026-04-20T17:45:00.000Z",
+                "latitude":48.5163,"longitude":-123.1552,
+                "locationName":"Lime Kiln","ecotypeGuess":"RESIDENT","whaleIds":[]
+              }],
+              "page":\(pagination)
+            }
+            """.data(using: .utf8)!
+            return (
+                HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                body
+            )
+        }
+
+        let sightings = try await repo.fetch(pod: .j, whaleId: "whale a&b")
+
+        XCTAssertEqual(sightings.map(\.id), ["si_1", "si_2"])
+        XCTAssertEqual(requestCount, 2)
+    }
 }
