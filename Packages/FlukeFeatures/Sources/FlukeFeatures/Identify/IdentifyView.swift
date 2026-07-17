@@ -4,29 +4,36 @@ import PhotosUI
 import SwiftUI
 
 public struct IdentifyView: View {
-  private let capability: Bool
   private let online: Bool
-  private let service: any IdentifyServiceProtocol
+  private let service: (any IdentifyServiceProtocol)?
   private let browseWhales: () -> Void
   private let submitSighting: () -> Void
 
   public init(
-    capability: Bool,
     online: Bool = true,
     service: any IdentifyServiceProtocol,
     browseWhales: @escaping () -> Void,
     submitSighting: @escaping () -> Void
   ) {
-    self.capability = capability
     self.online = online
     self.service = service
     self.browseWhales = browseWhales
     self.submitSighting = submitSighting
   }
 
+  public init(
+    browseWhales: @escaping () -> Void,
+    submitSighting: @escaping () -> Void
+  ) {
+    online = false
+    service = nil
+    self.browseWhales = browseWhales
+    self.submitSighting = submitSighting
+  }
+
   public var body: some View {
     Group {
-      if capability {
+      if let service {
         IdentifyReadyView(
           online: online,
           service: service,
@@ -168,13 +175,21 @@ private struct IdentifyReadyView: View {
 
   private var controls: some View {
     VStack(spacing: 12) {
-      Button {
-        Task { await model.openCamera() }
-      } label: {
-        Label("Take a photo", systemImage: "camera")
+      switch model.cameraState {
+      case .available:
+        Button {
+          Task { await model.openCamera() }
+        } label: {
+          Label("Take a photo", systemImage: "camera")
+        }
+        .buttonStyle(FlukeButtonStyle.primary)
+        .disabled(model.isIdentifying)
+      case .unavailable(let message):
+        Text(message)
+          .font(.footnote)
+          .foregroundStyle(Color.deep)
+          .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .buttonStyle(FlukeButtonStyle.primary)
-      .disabled(model.isIdentifying)
 
       PhotosPicker(selection: $selectedPhoto, matching: .images) {
         Label("Choose a photo", systemImage: "photo")

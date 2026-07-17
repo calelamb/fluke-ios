@@ -4,6 +4,7 @@ import Observation
 import SwiftUI
 
 #if canImport(UIKit)
+  import AVFoundation
   import UIKit
 
   @MainActor
@@ -12,8 +13,21 @@ import SwiftUI
     var isPresented = false
     private var continuation: CheckedContinuation<IdentifyPhoto?, Error>?
 
+    var cameraState: PhotoCameraState {
+      guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+        return PhotoSelectionPresentation.cameraState(for: .unavailable)
+      }
+      let authorization: PhotoCameraAuthorization =
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .denied: .denied
+        case .restricted: .restricted
+        default: .available
+        }
+      return PhotoSelectionPresentation.cameraState(for: authorization)
+    }
+
     func requestCameraPhoto() async throws -> IdentifyPhoto? {
-      guard continuation == nil, UIImagePickerController.isSourceTypeAvailable(.camera) else {
+      guard continuation == nil, cameraState == .available else {
         return nil
       }
       return try await withCheckedThrowingContinuation { continuation in
@@ -92,6 +106,9 @@ import SwiftUI
   @Observable
   final class IdentifyCameraCoordinator: IdentifyMediaProviding {
     var isPresented = false
+    var cameraState: PhotoCameraState {
+      PhotoSelectionPresentation.cameraState(for: .unavailable)
+    }
     func requestCameraPhoto() async throws -> IdentifyPhoto? { nil }
     func complete(with data: Data?) {}
     func cancel() {}

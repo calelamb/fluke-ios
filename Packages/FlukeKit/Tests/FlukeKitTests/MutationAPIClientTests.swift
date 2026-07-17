@@ -68,6 +68,29 @@ struct MutationAPIClientTests {
         #expect(await transport.requests.count == 2)
     }
 
+    @Test("Multipart keeps one transient retry by default")
+    func multipartDefaultRetry() async throws {
+        let transport = MutationTransport([
+            .failure(URLError(.networkConnectionLost)),
+            .response(status: 200, body: Data(#"{"id":"retried-photo"}"#.utf8)),
+        ])
+        let client = makeClient(transport: transport)
+        let part = try MultipartPart.data(
+            name: "photo",
+            fileName: "fin.jpg",
+            mimeType: "image/jpeg",
+            bytes: Data([0x01])
+        )
+
+        let response: MutationResponse = try await client.postMultipart(
+            APIRequest(path: "/api/v1/sightings/one/photos"),
+            parts: [part]
+        )
+
+        #expect(response.id == "retried-photo")
+        #expect(await transport.requests.count == 2)
+    }
+
     @Test("HTTP 4xx is returned safely and never retried")
     func clientFailureDoesNotRetry() async {
         let transport = MutationTransport([

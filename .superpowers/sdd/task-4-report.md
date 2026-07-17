@@ -28,17 +28,19 @@ confirmed ID.” Wrong-match feedback remains visibly disabled until its API con
 ## Final Verification
 
 - `swift test -j 4 --package-path Packages/FlukeKit --enable-code-coverage`
-  - 123 Swift Testing cases passed; 37 XCTest cases passed; zero failures.
-  - `FlukeKit` source coverage: 93.18% (1790/1921).
-  - `FlukeReleaseB` source coverage: 92.78% (899/969).
+  - 126 Swift Testing cases passed; 37 XCTest cases passed; zero failures.
+  - `FlukeKit` source coverage: 93.28% (1792/1921).
+  - `FlukeReleaseB` source coverage: 92.80% (915/986).
 - `swift test -j 4 --package-path Packages/FlukeUI`
   - 21 XCTest cases passed; zero failures.
 - `swift test -j 4 --package-path Packages/FlukeFeatures --enable-code-coverage`
-  - 63 Swift Testing cases and 3 XCTest cases passed; zero failures.
-  - CI-selected testable-logic coverage: 86.47% (799/924).
+  - 64 Swift Testing cases and 3 XCTest cases passed; zero failures.
+  - CI-selected testable-logic coverage: 86.50% (801/926).
   - Identify view-model coverage reached 98.31% in the focused coverage inspection.
 - `xcodebuild build -workspace Fluke.xcworkspace -scheme Fluke -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO`
   - `BUILD SUCCEEDED`.
+- `xcodebuild test ... -only-testing:FlukeTests/LaunchCapabilityTests`
+  - 4 tests passed on iPhone 17 / iOS 26.0.1; `TEST SUCCEEDED`.
 - `swift-format lint --strict` passed for every modified Swift file.
 - `git diff --check` passed.
 
@@ -50,3 +52,25 @@ confirmed ID.” Wrong-match feedback remains visibly disabled until its API con
 - No photo-library usage description was added because `PhotosPicker` does not require broad
   photo-library authorization. The existing camera usage description remains the only media
   permission declaration needed for this slice.
+
+## Independent Review Corrections
+
+The first independent review found four Important issues. All four were corrected with regression
+coverage:
+
+- Replaced the eager identification service value with a `@MainActor @Sendable` factory. Root
+  composition resolves that factory only after a capability response explicitly enables
+  identification. The false-capability composition test proves the factory executes zero times.
+- Reused the submit flow's `PhotoCameraState` and `PhotoSelectionPresentation` contracts. The ready
+  UI checks unavailable, denied, and restricted states before presenting, shows bounded safe copy,
+  and keeps PhotosPicker available. The shipping training branch still constructs no camera object.
+- Added an explicit original-response-position tie breaker after score and rank, with an equal-score
+  and equal-rank ordering regression test.
+- Added `MultipartRetryPolicy`, preserving `.transientOnce` as the API client's default while
+  identification explicitly chooses `.never`. A simulated response-loss test proves exactly one
+  identification upload attempt, while a separate characterization test proves ordinary multipart
+  uploads still retry once by default. A future identification API may restore safe retries only
+  after accepting and deduplicating a client idempotency key.
+
+The camera usage description now truthfully covers user-initiated sighting attachments and
+dorsal-fin visual comparison.

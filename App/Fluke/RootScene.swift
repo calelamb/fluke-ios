@@ -45,6 +45,7 @@ struct RootScene: View {
 
   @State private var authSession: AuthSession
   @State private var capabilities = LaunchCapabilityState.loading
+  @State private var identifyService: (any IdentifyServiceProtocol)?
   @State private var selectedTab = RootTab.sightings
   @State private var requestedTraceWhaleID: String?
   @State private var atlasRouteRevision = 0
@@ -106,12 +107,7 @@ struct RootScene: View {
         .tag(RootTab.whales)
 
         NavigationStack {
-          FlukeFeatures.IdentifyView(
-            capability: identificationAvailable,
-            service: environment.identifyService,
-            browseWhales: { selectedTab = .whales },
-            submitSighting: { isSubmitPresented = true }
-          )
+          identifyDestination
         }
         .flukeNavigationBackground()
         .tabItem { tabLabel(for: .identify) }
@@ -150,8 +146,13 @@ struct RootScene: View {
         Task { await submissionReplay.flush() }
       }
       networkMonitor.start(queue: DispatchQueue(label: "app.fluke.Fluke.submission-network"))
-      capabilities = await LaunchCapabilityState.load(
+      let loadedCapabilities = await LaunchCapabilityState.load(
         using: environment.fetchCapabilities
+      )
+      capabilities = loadedCapabilities
+      identifyService = IdentifyComposition.resolve(
+        enabled: loadedCapabilities.identificationEnabled,
+        factory: environment.identifyServiceFactory
       )
       if accountAvailability == .enabled {
         await authSession.restore()
@@ -222,9 +223,20 @@ struct RootScene: View {
     return value.submissions
   }
 
-  private var identificationAvailable: Bool {
-    guard case .available(let value) = capabilities else { return false }
-    return value.identification
+  @ViewBuilder
+  private var identifyDestination: some View {
+    if let identifyService {
+      FlukeFeatures.IdentifyView(
+        service: identifyService,
+        browseWhales: { selectedTab = .whales },
+        submitSighting: { isSubmitPresented = true }
+      )
+    } else {
+      FlukeFeatures.IdentifyView(
+        browseWhales: { selectedTab = .whales },
+        submitSighting: { isSubmitPresented = true }
+      )
+    }
   }
 
   private var youAuthState: YouAuthState {
@@ -250,6 +262,13 @@ struct RootScene: View {
         )
       }
     }
+  }
+}
+
+extension LaunchCapabilityState {
+  fileprivate var identificationEnabled: Bool {
+    guard case .available(let value) = self else { return false }
+    return value.identification
   }
 }
 

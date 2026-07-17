@@ -1,4 +1,5 @@
 import FlukeKit
+import FlukeReleaseB
 import Foundation
 import Testing
 
@@ -16,13 +17,14 @@ struct LaunchCapabilityTests {
     let state = await LaunchCapabilityState.load { decoded }
 
     #expect(
-      state == .available(
-        LaunchCapabilities(
-          accounts: true,
-          identification: false,
-          submissions: true
+      state
+        == .available(
+          LaunchCapabilities(
+            accounts: true,
+            identification: false,
+            submissions: true
+          )
         )
-      )
     )
   }
 
@@ -52,13 +54,43 @@ struct LaunchCapabilityTests {
     )
 
     #expect(
-      state == .available(
-        LaunchCapabilities(
-          accounts: false,
-          identification: true,
-          submissions: false
+      state
+        == .available(
+          LaunchCapabilities(
+            accounts: false,
+            identification: true,
+            submissions: false
+          )
         )
-      )
     )
+  }
+
+  @Test("Disabled identification never constructs its service")
+  func disabledIdentificationCompositionIsLazy() {
+    let recorder = IdentifyFactoryRecorder()
+
+    let service = IdentifyComposition.resolve(
+      enabled: false,
+      factory: { recorder.makeService() }
+    )
+
+    #expect(service == nil)
+    #expect(recorder.constructionCount == 0)
+  }
+}
+
+@MainActor
+private final class IdentifyFactoryRecorder {
+  private(set) var constructionCount = 0
+
+  func makeService() -> any IdentifyServiceProtocol {
+    constructionCount += 1
+    return NeverIdentifyService()
+  }
+}
+
+private struct NeverIdentifyService: IdentifyServiceProtocol {
+  func identify(photo: IdentifyPhoto) async throws -> IdentifyResponse {
+    throw CancellationError()
   }
 }

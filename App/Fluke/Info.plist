@@ -27,7 +27,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Fluke uses the camera only when you choose to attach an orca photo to a sighting.</string>
+	<string>Fluke uses the camera only when you choose to attach an orca photo to a sighting or compare dorsal-fin visual similarity.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UILaunchScreen</key>

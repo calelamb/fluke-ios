@@ -45,6 +45,7 @@ enum LaunchCapabilityState: Equatable, Sendable {
 
 struct AppEnvironment {
   typealias CapabilitiesFetch = () async throws -> Capabilities
+  typealias IdentifyServiceFactory = @MainActor @Sendable () -> any IdentifyServiceProtocol
 
   let apiBaseURL: URL
   let authService: any AuthServiceProtocol
@@ -52,7 +53,7 @@ struct AppEnvironment {
   let configuration: AppBuildConfiguration
   let fetchCapabilities: CapabilitiesFetch
   let historicalSightingsRepository: HistoricalSightingsRepository
-  let identifyService: any IdentifyServiceProtocol
+  let identifyServiceFactory: IdentifyServiceFactory
   let logbookRepository: any LogbookRepositoryProtocol
   let predictionRepository: PredictionRepository
   let sightingsRepository: SightingsRepository
@@ -106,7 +107,7 @@ struct AppEnvironment {
         try await client.get("/api/v1/capabilities")
       },
       historicalSightingsRepository: HistoricalSightingsRepository(api: client, cache: cacheStore),
-      identifyService: IdentifyService(api: client),
+      identifyServiceFactory: { IdentifyService(api: client) },
       logbookRepository: LogbookRepository(api: client),
       predictionRepository: PredictionRepository(api: client, cache: cacheStore),
       sightingsRepository: SightingsRepository(api: client, cache: cacheStore),
@@ -176,5 +177,16 @@ struct AppEnvironment {
       && bytes[11] == 0xff
       && bytes[12] == 127
     return isIPv6Loopback || isIPv4MappedLoopback
+  }
+}
+
+@MainActor
+enum IdentifyComposition {
+  static func resolve(
+    enabled: Bool,
+    factory: AppEnvironment.IdentifyServiceFactory
+  ) -> (any IdentifyServiceProtocol)? {
+    guard enabled else { return nil }
+    return factory()
   }
 }

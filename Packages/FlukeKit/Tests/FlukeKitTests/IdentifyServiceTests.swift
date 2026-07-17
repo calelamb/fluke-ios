@@ -37,6 +37,21 @@ struct IdentifyServiceTests {
         "multipart/form-data") == true)
   }
 
+  @Test("Equal score and rank matches preserve response order")
+  func stableTieOrdering() async throws {
+    let tied =
+      #"{"matches":[{"catalogId":"J2","name":"Second","score":0.8,"rank":1,"matchedReferencePhotoIds":["r2"],"explanation":"Visual overlap."},{"catalogId":"J1","name":"First","score":0.8,"rank":1,"matchedReferencePhotoIds":["r1"],"explanation":"Visual overlap."},{"catalogId":"J3","name":"Third","score":0.8,"rank":1,"matchedReferencePhotoIds":["r3"],"explanation":"Visual overlap."}],"confidenceBand":"medium","model":"model-v1","indexVersion":"index-v1","uploadUrl":null}"#
+    let service = IdentifyService(
+      api: APIClient(
+        baseURL: URL(string: "https://example.com")!,
+        transport: IdentifyTransport(response: .json(200, tied))
+      ))
+
+    let response = try await service.identify(photo: IdentifyPhoto(bytes: jpeg()))
+
+    #expect(response.matches.map(\.catalogId) == ["J2", "J1", "J3"])
+  }
+
   @Test("Rejects scores outside zero through one")
   func rejectsInvalidScores() async throws {
     let transport = IdentifyTransport(response: .json(200, responseJSON(scores: [1.01])))
@@ -87,6 +102,29 @@ struct IdentifyServiceTests {
     await #expect(throws: CancellationError.self) {
       try await cancelled.identify(photo: IdentifyPhoto(bytes: try jpeg()))
     }
+  }
+
+  @Test("Identification upload never retries a transient response-loss failure")
+  func uploadDoesNotRetry() async throws {
+    let transport = TransientIdentifyTransport()
+    let service = IdentifyService(
+      api: APIClient(
+        baseURL: URL(string: "https://example.com")!, transport: transport
+      ))
+
+    await #expect(throws: APIError.transport) {
+      try await service.identify(photo: IdentifyPhoto(bytes: try jpeg()))
+    }
+    #expect(await transport.requestCount == 1)
+  }
+}
+
+private actor TransientIdentifyTransport: HTTPTransport {
+  private(set) var requestCount = 0
+
+  func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    requestCount += 1
+    throw URLError(.networkConnectionLost)
   }
 }
 

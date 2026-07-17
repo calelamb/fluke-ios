@@ -56,8 +56,12 @@ public struct IdentifyService: IdentifyServiceProtocol, Sendable {
       bytes: photo.bytes
     )
     do {
+      // Keep this upload single-attempt until the API accepts a client idempotency key.
+      // Once that contract exists, send the key and opt into `.transientOnce` safely.
       let response: IdentifyResponse = try await api.postMultipart(
-        APIRequest(path: ReleaseBEndpoint.identify), parts: [part]
+        APIRequest(path: ReleaseBEndpoint.identify),
+        parts: [part],
+        retryPolicy: .never
       )
       return try validated(response)
     } catch is CancellationError {
@@ -75,13 +79,19 @@ public struct IdentifyService: IdentifyServiceProtocol, Sendable {
       response.uploadURL.map(isValidHTTPSURL) ?? true
     else { throw IdentifyServiceError.invalidResponse }
 
-    let ordered = response.matches
+    let ordered = response.matches.enumerated()
       .sorted { lhs, rhs in
-        lhs.score == rhs.score ? lhs.rank < rhs.rank : lhs.score > rhs.score
+        if lhs.element.score != rhs.element.score {
+          return lhs.element.score > rhs.element.score
+        }
+        if lhs.element.rank != rhs.element.rank {
+          return lhs.element.rank < rhs.element.rank
+        }
+        return lhs.offset < rhs.offset
       }
       .prefix(3)
     return IdentifyResponse(
-      matches: Array(ordered),
+      matches: ordered.map(\.element),
       confidenceBand: response.confidenceBand,
       model: response.model,
       indexVersion: response.indexVersion,

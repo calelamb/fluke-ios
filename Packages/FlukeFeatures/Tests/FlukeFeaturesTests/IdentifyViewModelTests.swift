@@ -117,15 +117,51 @@ struct IdentifyViewModelTests {
     #expect(model.errorMessage == "Choose a valid JPEG photo with a clearly visible dorsal fin.")
     #expect(model.matches.isEmpty)
   }
+
+  @Test(
+    "Denied, restricted, and unavailable cameras show safe copy without presenting",
+    arguments: [
+      PhotoSelectionPresentation.cameraState(for: .denied),
+      PhotoSelectionPresentation.cameraState(for: .restricted),
+      PhotoSelectionPresentation.cameraState(for: .unavailable),
+    ])
+  func unavailableCameraDoesNoWork(state: PhotoCameraState) async {
+    let media = RecordingMediaAuthorization(cameraState: state, photo: .fixture)
+    let service = RecordingIdentifyService()
+    let model = IdentifyViewModel(
+      capability: true, online: true, media: media, service: service
+    )
+
+    await model.openCamera()
+
+    #expect(model.cameraState == state)
+    #expect(media.requestCount == 0)
+    #expect(await service.requestCount == 0)
+    guard case .unavailable(let message) = model.cameraState else {
+      Issue.record("Expected unavailable camera copy")
+      return
+    }
+    #expect(!message.isEmpty && message.count < 160)
+  }
 }
 
 @MainActor
 private final class RecordingMediaAuthorization: IdentifyMediaProviding {
   private let result: Result<IdentifyPhoto?, Error>
+  let cameraState: PhotoCameraState
   private(set) var requestCount = 0
 
-  init(photo: IdentifyPhoto? = nil) { result = .success(photo) }
-  init(result: Result<IdentifyPhoto?, Error>) { self.result = result }
+  init(cameraState: PhotoCameraState = .available, photo: IdentifyPhoto? = nil) {
+    self.cameraState = cameraState
+    result = .success(photo)
+  }
+  init(
+    cameraState: PhotoCameraState = .available,
+    result: Result<IdentifyPhoto?, Error>
+  ) {
+    self.cameraState = cameraState
+    self.result = result
+  }
 
   func requestCameraPhoto() async throws -> IdentifyPhoto? {
     requestCount += 1

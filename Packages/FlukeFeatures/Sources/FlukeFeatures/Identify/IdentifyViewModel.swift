@@ -12,6 +12,7 @@ public enum IdentifyAvailability: Equatable, Sendable {
 
 @MainActor
 public protocol IdentifyMediaProviding: AnyObject {
+  var cameraState: PhotoCameraState { get }
   func requestCameraPhoto() async throws -> IdentifyPhoto?
 }
 
@@ -54,8 +55,11 @@ public final class IdentifyViewModel {
     }
   }
 
+  public var cameraState: PhotoCameraState { media.cameraState }
+
   public func openCamera() async {
     guard capability, availability != .needsInternet, !isIdentifying else { return }
+    guard case .available = media.cameraState else { return }
     do {
       guard let photo = try await media.requestCameraPhoto() else { return }
       await identify(photo: photo)

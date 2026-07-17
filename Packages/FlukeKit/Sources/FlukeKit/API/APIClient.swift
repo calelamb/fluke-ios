@@ -1,5 +1,10 @@
 import Foundation
 
+public enum MultipartRetryPolicy: Sendable {
+  case transientOnce
+  case never
+}
+
 public struct APIClient: Sendable {
   public static let defaultRequestTimeout: Duration = .seconds(15)
 
@@ -88,7 +93,8 @@ public struct APIClient: Sendable {
   public func postMultipart<Response: Decodable>(
     _ request: APIRequest,
     parts: [MultipartPart],
-    headers: [String: String] = [:]
+    headers: [String: String] = [:],
+    retryPolicy: MultipartRetryPolicy = .transientOnce
   ) async throws -> Response {
     let form = try MultipartForm(parts: parts)
     let mutation = try MutationRequest(
@@ -100,7 +106,7 @@ public struct APIClient: Sendable {
       method: "POST",
       request: request,
       mutation: mutation,
-      retriesTransientFailure: true
+      retriesTransientFailure: retryPolicy == .transientOnce
     )
   }
 
