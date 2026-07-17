@@ -49,10 +49,13 @@ public enum SubmissionQueueError: Error, Equatable, Sendable {
   case invalidPartialFailure
 }
 
-public actor SubmissionQueue: SubmissionQueueProtocol {
-  private let context: ModelContext
+public actor SubmissionQueue: SubmissionQueueProtocol, ModelActor {
+  public nonisolated let modelContainer: ModelContainer
+  public nonisolated let modelExecutor: any ModelExecutor
   private let photoStore: QueuedPhotoStore
   private let saveContext: (ModelContext) throws -> Void
+
+  private var context: ModelContext { modelContext }
 
   public init(
     directory: URL = SubmissionQueue.applicationSupportDirectory(),
@@ -86,7 +89,9 @@ public actor SubmissionQueue: SubmissionQueueProtocol {
       )
     }
     let container = try ModelContainer(for: schema, configurations: [configuration])
-    context = ModelContext(container)
+    let context = ModelContext(container)
+    modelContainer = container
+    modelExecutor = DefaultSerialModelExecutor(modelContext: context)
     self.photoStore = photoStore ?? QueuedPhotoStore(directory: directory)
     self.saveContext = saveContext
   }
