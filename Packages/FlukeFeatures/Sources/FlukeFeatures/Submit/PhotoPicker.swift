@@ -2,6 +2,7 @@ import FlukeReleaseB
 import PhotosUI
 import SwiftUI
 #if canImport(UIKit)
+import AVFoundation
 import UIKit
 #endif
 
@@ -11,8 +12,15 @@ public struct PhotoPicker: View {
   @State private var showsCamera = false
   #endif
   let addPhotos: ([ProcessedPhoto]) -> Void
+  let reportFailure: (PhotoSelectionFailure) -> Void
 
-  public init(addPhotos: @escaping ([ProcessedPhoto]) -> Void) { self.addPhotos = addPhotos }
+  public init(
+    addPhotos: @escaping ([ProcessedPhoto]) -> Void,
+    reportFailure: @escaping (PhotoSelectionFailure) -> Void
+  ) {
+    self.addPhotos = addPhotos
+    self.reportFailure = reportFailure
+  }
 
   public var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -20,28 +28,68 @@ public struct PhotoPicker: View {
         Label("Choose photos", systemImage: "photo.on.rectangle")
       }
       #if canImport(UIKit)
-      Button("Take photo", systemImage: "camera") { showsCamera = true }
-        .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+      switch cameraState {
+      case .available:
+        Button("Take photo", systemImage: "camera") { showsCamera = true }
+      case .unavailable(let message):
+        Text(message).font(.footnote).foregroundStyle(.secondary)
+      }
       #endif
     }
     .onChange(of: selections) { _, values in
       Task {
-        let processed: [ProcessedPhoto] = await values.asyncCompactMap { item in
-          guard let data = try? await item.loadTransferable(type: Data.self) else { return nil }
-          return try? ImageProcessor.process(data)
-        }
-        await MainActor.run { addPhotos(processed) }
+        await process(values)
       }
     }
     #if canImport(UIKit)
     .sheet(isPresented: $showsCamera) {
       CameraPicker { data in
-        guard let photo = try? ImageProcessor.process(data) else { return }
-        addPhotos([photo])
+        do {
+          addPhotos([try ImageProcessor.process(data)])
+        } catch {
+          reportFailure(.processingFailed)
+        }
       }
     }
     #endif
   }
+
+  private func process(_ values: [PhotosPickerItem]) async {
+    var processed: [ProcessedPhoto] = []
+    for item in values {
+      let data: Data
+      do {
+        guard let loaded = try await item.loadTransferable(type: Data.self) else {
+          await MainActor.run { reportFailure(.loadFailed) }
+          continue
+        }
+        data = loaded
+      } catch {
+        await MainActor.run { reportFailure(.loadFailed) }
+        continue
+      }
+      do {
+        processed.append(try ImageProcessor.process(data))
+      } catch {
+        await MainActor.run { reportFailure(.processingFailed) }
+      }
+    }
+    if !processed.isEmpty { await MainActor.run { addPhotos(processed) } }
+  }
+
+  #if canImport(UIKit)
+  private var cameraState: PhotoCameraState {
+    guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+      return PhotoSelectionPresentation.cameraState(for: .unavailable)
+    }
+    let authorization: PhotoCameraAuthorization = switch AVCaptureDevice.authorizationStatus(for: .video) {
+    case .denied: .denied
+    case .restricted: .restricted
+    default: .available
+    }
+    return PhotoSelectionPresentation.cameraState(for: authorization)
+  }
+  #endif
 }
 
 #if canImport(UIKit)
@@ -71,13 +119,3 @@ private struct CameraPicker: UIViewControllerRepresentable {
   }
 }
 #endif
-
-private extension Array {
-  func asyncCompactMap<T>(_ transform: (Element) async -> T?) async -> [T] {
-    var result: [T] = []
-    for element in self {
-      if let value = await transform(element) { result.append(value) }
-    }
-    return result
-  }
-}

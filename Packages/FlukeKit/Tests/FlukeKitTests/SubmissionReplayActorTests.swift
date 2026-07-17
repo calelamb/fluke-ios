@@ -34,6 +34,9 @@ struct SubmissionReplayActorTests {
 
     #expect(try await queue.list().isEmpty)
     #expect(await service.payloads.map { $0.existingReceipt?.id } == [nil, "created"])
+    let photoIDs = await service.photoIDs
+    #expect(photoIDs.count == 2)
+    #expect(photoIDs[1] == [photoIDs[0][1]])
     #expect(value.id == retained.id)
   }
 
@@ -55,6 +58,25 @@ struct SubmissionReplayActorTests {
     #expect(failed.state == .failed)
   }
 
+  @Test("Concurrent flush calls coalesce into one in-flight submission")
+  func concurrentFlushCoalesces() async throws {
+    let (queue, _) = try await makeQueue()
+    let service = BlockingReplayService()
+    let replay = SubmissionReplayActor(queue: queue, service: service)
+
+    let first = Task { await replay.flush() }
+    await service.waitUntilCalled()
+    let second = Task { await replay.flush() }
+    await Task.yield()
+    #expect(await service.callCount == 1)
+    await service.release()
+    await first.value
+    await second.value
+
+    #expect(await service.callCount == 1)
+    #expect(try await queue.list().isEmpty)
+  }
+
   private func makeQueue(photoCount: Int = 1) async throws -> (SubmissionQueue, QueuedSubmissionValue) {
     let directory = FileManager.default.temporaryDirectory
       .appending(path: UUID().uuidString, directoryHint: .isDirectory)
@@ -65,10 +87,33 @@ struct SubmissionReplayActorTests {
   }
 }
 
+private actor BlockingReplayService: SubmissionServiceProtocol {
+  private(set) var callCount = 0
+  private var submitContinuation: CheckedContinuation<Void, Never>?
+  private var callWaiters: [CheckedContinuation<Void, Never>] = []
+
+  func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws -> SubmissionReceipt {
+    callCount += 1
+    let waiters = callWaiters
+    callWaiters = []
+    waiters.forEach { $0.resume() }
+    await withCheckedContinuation { submitContinuation = $0 }
+    return SubmissionReceipt(id: "created", photoUploadToken: "token")
+  }
+
+  func waitUntilCalled() async {
+    if callCount > 0 { return }
+    await withCheckedContinuation { callWaiters.append($0) }
+  }
+
+  func release() { submitContinuation?.resume(); submitContinuation = nil }
+}
+
 private actor ReplayService: SubmissionServiceProtocol {
   enum Failure: Error, Sendable { case offline }
   private var results: [Result<SubmissionReceipt, any Error & Sendable>]
   private(set) var payloads: [SubmissionPayload] = []
+  private(set) var photoIDs: [[UUID]] = []
 
   init(results: [Result<SubmissionReceipt, any Error & Sendable>] = [
     .success(SubmissionReceipt(id: "created", photoUploadToken: "token"))
@@ -76,6 +121,7 @@ private actor ReplayService: SubmissionServiceProtocol {
 
   func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws -> SubmissionReceipt {
     payloads = payloads + [payload]
+    photoIDs = photoIDs + [photos.map(\.idempotencyID)]
     return try results.removeFirst().get()
   }
 }

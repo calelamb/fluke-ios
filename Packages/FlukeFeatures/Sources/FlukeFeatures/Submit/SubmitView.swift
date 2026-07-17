@@ -42,9 +42,14 @@ public struct SubmitView: View {
       TextField("Location name", text: $model.locationName)
       DatePicker("Observed", selection: $model.observedAt)
       Stepper("Group size: \(model.groupSize)", value: $model.groupSize, in: 1...200)
-      TextField("Observer email", text: $model.email).textContentType(.emailAddress)
+      if model.showsObserverEmail {
+        TextField("Observer email", text: $model.email).textContentType(.emailAddress)
+      }
       TextField("Notes", text: $model.notes, axis: .vertical).lineLimit(3...8)
-      PhotoPicker(addPhotos: model.addPhotos)
+      PhotoPicker(addPhotos: model.addPhotos, reportFailure: model.reportPhotoFailure)
+      if let message = model.photoErrorMessage {
+        Text(message).foregroundStyle(Color.ember)
+      }
       Text("\(model.photos.count) of 5 photos")
       if case .validation = model.state { Text("Check the highlighted sighting details.").foregroundStyle(Color.ember) }
       Button(model.state == .submitting ? "Submitting…" : "Submit sighting") {

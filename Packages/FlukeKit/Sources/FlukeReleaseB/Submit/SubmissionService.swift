@@ -10,6 +10,13 @@ public enum SubmissionServiceError: Error, Equatable, Sendable {
   case partial(receipt: SubmissionReceipt, failedPhotoIndices: [Int])
 }
 
+public enum SubmissionUploadLimits {
+  /// Leaves room for the maximum legal filename, MIME and multipart framing.
+  public static let multipartReservedBytes = 2_048
+  public static let maximumProcessedPhotoBytes =
+    MutationBodyLimits.maximumBytes - multipartReservedBytes
+}
+
 public struct SubmissionService: SubmissionServiceProtocol, Sendable {
   private let api: APIClient
 
@@ -20,7 +27,10 @@ public struct SubmissionService: SubmissionServiceProtocol, Sendable {
     photos: [ProcessedPhoto]
   ) async throws -> SubmissionReceipt {
     guard !photos.isEmpty, photos.count <= 5,
-      photos.allSatisfy({ $0.bytes.count <= 10 * 1_024 * 1_024 && $0.mimeType == "image/jpeg" })
+      photos.allSatisfy({
+        $0.bytes.count <= SubmissionUploadLimits.maximumProcessedPhotoBytes
+          && $0.mimeType == "image/jpeg"
+      })
     else { throw SubmissionServiceError.invalidPhotos }
 
     let receipt: SubmissionReceipt
@@ -43,7 +53,10 @@ public struct SubmissionService: SubmissionServiceProtocol, Sendable {
         let _: EmptySubmissionResponse = try await api.postMultipart(
           APIRequest(path: "/api/v1/sightings/\(receipt.id)/photos"),
           parts: [part],
-          headers: ["x-photo-upload-token": receipt.photoUploadToken]
+          headers: [
+            "x-photo-upload-token": receipt.photoUploadToken,
+            "Idempotency-Key": "\(payload.clientSubmissionID.uuidString):\(photo.idempotencyID.uuidString)",
+          ]
         )
       } catch is CancellationError {
         throw CancellationError()

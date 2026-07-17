@@ -3,6 +3,7 @@ import Foundation
 public enum QueuedSubmissionState: String, Codable, Hashable, Sendable {
   case queued
   case failed
+  case discarding
 }
 
 public struct QueuedSubmissionValue: Codable, Hashable, Identifiable, Sendable {

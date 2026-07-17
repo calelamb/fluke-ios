@@ -27,6 +27,8 @@ struct SubmissionServiceTests {
     ])
     #expect(requests.dropFirst().allSatisfy { $0.value(forHTTPHeaderField: "x-photo-upload-token") == "token-1" })
     #expect(requests.first?.value(forHTTPHeaderField: "Idempotency-Key") == payload.clientSubmissionID.uuidString)
+    #expect(requests[1].value(forHTTPHeaderField: "Idempotency-Key") == "\(payload.clientSubmissionID.uuidString):11111111-1111-1111-1111-111111111111")
+    #expect(requests[2].value(forHTTPHeaderField: "Idempotency-Key") == "\(payload.clientSubmissionID.uuidString):22222222-2222-2222-2222-222222222222")
   }
 
   @Test("Partial photo retry skips sighting creation and reports only failed indices")
@@ -60,6 +62,30 @@ struct SubmissionServiceTests {
     )
     #expect(await retryTransport.requests.count == 1)
     #expect(await retryTransport.requests.first?.url?.path == "/api/v1/sightings/s-1/photos")
+    #expect(
+      await retryTransport.requests.first?.value(forHTTPHeaderField: "Idempotency-Key")
+        == "\(payload.clientSubmissionID.uuidString):22222222-2222-2222-2222-222222222222"
+    )
+  }
+
+  @Test("Processed photo limit reserves enough bytes for multipart framing")
+  func multipartBoundaryFitsMutationLimit() async throws {
+    let transport = SubmissionTransport(responses: [
+      .json(201, #"{"id":"s-1","photo_upload_token":"token-1"}"#),
+      .json(201, "{}"),
+    ])
+    let service = SubmissionService(api: APIClient(
+      baseURL: URL(string: "https://example.com")!, transport: transport
+    ))
+    let payload = try SubmissionValidator.validate(.fixture())
+    let boundaryPhoto = ProcessedPhoto(
+      bytes: Data(repeating: 1, count: SubmissionUploadLimits.maximumProcessedPhotoBytes),
+      fileName: String(repeating: "a", count: 251) + ".jpg",
+      idempotencyID: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+    )
+
+    _ = try await service.submit(payload: payload, photos: [boundaryPhoto])
+    #expect(await transport.requests.last?.httpBody?.count ?? 0 <= MutationBodyLimits.maximumBytes)
   }
 }
 
@@ -89,6 +115,9 @@ private actor SubmissionTransport: HTTPTransport {
 
 extension ProcessedPhoto {
   static func fixture(_ byte: UInt8) -> ProcessedPhoto {
-    ProcessedPhoto(bytes: Data(repeating: byte, count: 32), fileName: "photo.jpg")
+    let id = byte == 1
+      ? UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+      : UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+    return ProcessedPhoto(bytes: Data(repeating: byte, count: 32), fileName: "photo.jpg", idempotencyID: id)
   }
 }

@@ -114,11 +114,18 @@ public struct ProcessedPhoto: Codable, Hashable, Sendable {
   public let bytes: Data
   public let fileName: String
   public let mimeType: String
+  public let idempotencyID: UUID
 
-  public init(bytes: Data, fileName: String, mimeType: String = "image/jpeg") {
+  public init(
+    bytes: Data,
+    fileName: String,
+    mimeType: String = "image/jpeg",
+    idempotencyID: UUID = UUID()
+  ) {
     self.bytes = bytes
     self.fileName = fileName
     self.mimeType = mimeType
+    self.idempotencyID = idempotencyID
   }
 }
 

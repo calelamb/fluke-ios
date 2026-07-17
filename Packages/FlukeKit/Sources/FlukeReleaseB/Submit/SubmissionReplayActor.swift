@@ -3,6 +3,7 @@ import Foundation
 public actor SubmissionReplayActor {
   private let queue: SubmissionQueue
   private let service: any SubmissionServiceProtocol
+  private var isFlushing = false
 
   public init(queue: SubmissionQueue, service: any SubmissionServiceProtocol) {
     self.queue = queue
@@ -10,6 +11,9 @@ public actor SubmissionReplayActor {
   }
 
   public func flush() async {
+    guard !isFlushing else { return }
+    isFlushing = true
+    defer { isFlushing = false }
     guard let entries = try? await queue.list() else { return }
     for entry in entries where entry.state == .queued {
       if Task.isCancelled { return }

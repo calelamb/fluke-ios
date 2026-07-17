@@ -13,6 +13,7 @@ private final class QueuedSubmissionRow {
   @Attribute(.unique) var id: UUID
   var payloadData: Data
   var photoFileNames: [String]
+  var cleanupFileNames: [String] = []
   var stateRawValue: String
   var attempts: Int
   var createdAt: Date
@@ -21,6 +22,7 @@ private final class QueuedSubmissionRow {
     id = value.id
     payloadData = try JSONEncoder().encode(value.payload)
     photoFileNames = value.photoFileNames
+    cleanupFileNames = []
     stateRawValue = value.state.rawValue
     attempts = value.attempts
     createdAt = value.createdAt
@@ -97,10 +99,12 @@ public actor SubmissionQueue: SubmissionQueueProtocol {
 
   public func discard(id: UUID) async throws {
     let row = try requiredRow(id: id)
-    let names = row.photoFileNames
-    context.delete(row)
+    let names = row.photoFileNames + row.cleanupFileNames
+    row.stateRawValue = QueuedSubmissionState.discarding.rawValue
     try context.save()
     try await photoStore.remove(names)
+    context.delete(row)
+    try context.save()
   }
 
   public func photoBytes(for value: QueuedSubmissionValue) async throws -> [Data] {
@@ -128,10 +132,13 @@ public actor SubmissionQueue: SubmissionQueueProtocol {
     let removedNames = old.photoFileNames.filter { !retainedNames.contains($0) }
     row.payloadData = try JSONEncoder().encode(old.payload.resuming(receipt: receipt))
     row.photoFileNames = retainedNames
+    row.cleanupFileNames = removedNames
     row.attempts = 0
     row.stateRawValue = QueuedSubmissionState.queued.rawValue
     try context.save()
     try await photoStore.remove(removedNames)
+    row.cleanupFileNames = []
+    try context.save()
   }
 
   public func clearAccountAssociation() throws {

@@ -70,16 +70,12 @@ struct AppEnvironment {
       throw AppConfigurationError.unknownBuildConfiguration
     }
 
-    let replayConfiguration = URLSessionConfiguration.background(
-      withIdentifier: "app.fluke.Fluke.submissions"
-    )
-    replayConfiguration.waitsForConnectivity = true
     return try make(
       apiBaseURLString: bundle.object(
         forInfoDictionaryKey: "FLUKE_API_BASE_URL"
       ) as? String,
       configuration: configuration,
-      submissionSession: URLSession(configuration: replayConfiguration),
+      session: URLSession(configuration: submissionSessionConfiguration()),
       cacheStore: FileBrowseCacheStore(
         directory: FileBrowseCacheStore.liveDirectory()
       )
@@ -90,7 +86,6 @@ struct AppEnvironment {
     apiBaseURLString: String?,
     configuration: AppBuildConfiguration,
     session: URLSession = .shared,
-    submissionSession: URLSession? = nil,
     capabilitiesFetch: CapabilitiesFetch? = nil,
     cacheStore: any BrowseCacheStore = MemoryBrowseCacheStore()
   ) throws -> AppEnvironment {
@@ -115,11 +110,15 @@ struct AppEnvironment {
       sightingsRepository: SightingsRepository(api: client, cache: cacheStore),
       sessionHintStore: KeychainSessionHintStore(),
       submissionQueue: submissionQueue,
-      submissionService: SubmissionService(
-        api: APIClient(baseURL: apiBaseURL, session: submissionSession ?? session)
-      ),
+      submissionService: SubmissionService(api: client),
       whalesRepository: WhalesRepository(api: client, cache: cacheStore)
     )
+  }
+
+  static func submissionSessionConfiguration() -> URLSessionConfiguration {
+    let configuration = URLSessionConfiguration.default
+    configuration.waitsForConnectivity = true
+    return configuration
   }
 
   private static func validatedAPIBaseURL(

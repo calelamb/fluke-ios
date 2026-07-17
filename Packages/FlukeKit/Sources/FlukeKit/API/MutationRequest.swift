@@ -1,7 +1,11 @@
 import Foundation
 
+public enum MutationBodyLimits {
+    public static let maximumBytes = 10_000_000
+}
+
 struct MutationRequest: Sendable {
-    static let maximumBodyBytes = 10_000_000
+    static let maximumBodyBytes = MutationBodyLimits.maximumBytes
 
     let body: Data
     let contentType: String

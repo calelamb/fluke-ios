@@ -27,6 +27,7 @@ public final class SubmitViewModel {
   public var email = ""
   public var photos: [ProcessedPhoto] = []
   public private(set) var state = State.editing
+  public private(set) var photoErrorMessage: String?
 
   private let service: any SubmissionServiceProtocol
   private let queue: any SubmissionQueueProtocol
@@ -46,8 +47,10 @@ public final class SubmitViewModel {
   }
 
   public var dismissal: Dismissal {
-    isDirty ? .requiresConfirmation : .allowed
+    isTerminal || !isDirty ? .allowed : .requiresConfirmation
   }
+
+  public var showsObserverEmail: Bool { !isSignedIn }
 
   public var disabledMessage: String? {
     submissionsEnabled ? nil : "Sighting submissions are temporarily unavailable."
@@ -55,6 +58,11 @@ public final class SubmitViewModel {
 
   public func addPhotos(_ additions: [ProcessedPhoto]) {
     photos = Array((photos + additions).prefix(5))
+    photoErrorMessage = nil
+  }
+
+  public func reportPhotoFailure(_ failure: PhotoSelectionFailure) {
+    photoErrorMessage = PhotoSelectionPresentation.message(for: failure)
   }
 
   public func submit() async {
@@ -100,5 +108,12 @@ public final class SubmitViewModel {
 
   private var isDirty: Bool {
     !locationName.isEmpty || !notes.isEmpty || !email.isEmpty || !photos.isEmpty || groupSize != 1
+  }
+
+  private var isTerminal: Bool {
+    switch state {
+    case .queued, .success, .partial: true
+    default: false
+    }
   }
 }

@@ -13,7 +13,7 @@ public enum ImageProcessingError: Error, Equatable, Sendable {
 public enum ImageProcessor {
   public static let maximumDimension = 2_048
   public static let maximumDecodedPixels = 40_000_000
-  public static let maximumOutputBytes = 10 * 1_024 * 1_024
+  public static let maximumOutputBytes = SubmissionUploadLimits.maximumProcessedPhotoBytes
 
   public static func process(_ input: Data) throws -> ProcessedPhoto {
     guard let source = CGImageSourceCreateWithData(input as CFData, nil),

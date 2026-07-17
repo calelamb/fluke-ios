@@ -5,6 +5,12 @@ import Testing
 
 @MainActor
 struct AppEnvironmentTests {
+  @Test("Live submission replay uses a data-task-compatible foreground session")
+  func submissionSessionIsNotBackground() {
+    let configuration = AppEnvironment.submissionSessionConfiguration()
+    #expect(configuration.identifier == nil)
+  }
+
   @Test("Debug accepts an explicit localhost API URL")
   func debugAcceptsLocalhost() throws {
     let environment = try AppEnvironment.make(
