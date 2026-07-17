@@ -49,11 +49,11 @@ struct RootScene: View {
   @State private var capabilities = LaunchCapabilityState.loading
   @State private var identifyService: (any IdentifyServiceProtocol)?
   @State private var movementNavigation: MovementNavigationModel
+  @State private var movementSubmitPresentation = MovementSubmitPresentationRouter()
   @State private var selectedTab = RootTab.sightings
   @State private var requestedTraceWhaleID: String?
   @State private var atlasRouteRevision = 0
   @State private var isAtlasPresented = false
-  @State private var submitRoute: MovementSubmitRoute?
 
   init(environment: AppEnvironment) {
     let submissionQueue = DeferredSubmissionQueueBridge(queue: environment.submissionQueue)
@@ -186,7 +186,7 @@ struct RootScene: View {
       presentAtlas(for: whaleID)
     }
     .environment(\.openSubmit) { presentSubmit() }
-    .sheet(item: $submitRoute) { route in
+    .sheet(item: $movementSubmitPresentation.presentedRoute) { route in
       SubmitView(
         model: SubmitViewModel(
           service: environment.submissionService,
@@ -215,7 +215,8 @@ struct RootScene: View {
         .padding()
       }
     }
-    .fullScreenCover(item: movementDestination) { destination in
+    .fullScreenCover(item: movementDestination, onDismiss: completeMovementDismissal) {
+      destination in
       movementDestination(destination)
     }
   }
@@ -235,9 +236,16 @@ struct RootScene: View {
   }
 
   private func presentSubmit() {
-    submitRoute = movementNavigation.routeToSubmit(
-      submissionsEnabled: submissionsAvailable
+    let movementPresented = movementNavigation.destination != nil
+    movementSubmitPresentation.request(
+      submissionsEnabled: submissionsAvailable,
+      movementPresented: movementPresented
     )
+    if movementPresented { movementNavigation.dismiss() }
+  }
+
+  private func completeMovementDismissal() {
+    movementSubmitPresentation.movementDidDismiss()
   }
 
   private var movementDestination: Binding<MovementDestination?> {

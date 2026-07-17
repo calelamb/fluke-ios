@@ -35,6 +35,28 @@ struct MovementSubmitRoute: Identifiable {
 
 @MainActor
 @Observable
+final class MovementSubmitPresentationRouter {
+  var presentedRoute: MovementSubmitRoute?
+  private(set) var pendingRoute: MovementSubmitRoute?
+
+  func request(submissionsEnabled: Bool, movementPresented: Bool) {
+    let route = MovementSubmitRoute(submissionsEnabled: submissionsEnabled)
+    if movementPresented {
+      pendingRoute = route
+    } else {
+      presentedRoute = route
+    }
+  }
+
+  func movementDidDismiss() {
+    guard let pendingRoute else { return }
+    self.pendingRoute = nil
+    presentedRoute = pendingRoute
+  }
+}
+
+@MainActor
+@Observable
 final class MovementNavigationModel {
   var destination: MovementDestination?
 
@@ -71,11 +93,6 @@ final class MovementNavigationModel {
     destination = nil
   }
 
-  func routeToSubmit(submissionsEnabled: Bool) -> MovementSubmitRoute {
-    dismiss()
-    return MovementSubmitRoute(submissionsEnabled: submissionsEnabled)
-  }
-
   private static func resolve(
     _ result: BrowseResult<[Whale]>,
     catalogID: String
@@ -106,8 +123,10 @@ final class MovementNavigationModel {
     _ whales: [Whale],
     catalogID: String
   ) -> MovementDestination {
-    guard let whale = whales.first(where: { $0.catalogId == catalogID }) else {
-      return .unavailable(catalogID: catalogID, reason: .notFound)
+    let matches = whales.filter { $0.catalogId == catalogID }
+    guard matches.count == 1, let whale = matches.first else {
+      let reason: MovementUnavailableReason = matches.isEmpty ? .notFound : .catalogUnavailable
+      return .unavailable(catalogID: catalogID, reason: reason)
     }
     return .movement(whale)
   }

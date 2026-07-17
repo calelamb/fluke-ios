@@ -1,10 +1,12 @@
 import FlukeKit
 import FlukeUI
+import Observation
 import SwiftUI
 
 public struct SightingsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel: SightingsViewModel
+    @State private var movementRouter = SightingMovementPresentationRouter()
     private let openWhaleMovement: ((String) -> Void)?
 
     public init(
@@ -30,10 +32,19 @@ public struct SightingsView: View {
         .navigationTitle("Sightings")
         .task { await viewModel.load() }
         .refreshable { await viewModel.load() }
-        .sheet(item: $viewModel.selectedItem) { item in
-            SightingDetailView(item: item, onOpenWhaleMovement: openWhaleMovement)
+        .sheet(item: $viewModel.selectedItem, onDismiss: openPendingMovement) { item in
+            SightingDetailView(item: item, onOpenWhaleMovement: detailMovementAction)
                 .presentationDetents([.medium, .large])
         }
+    }
+
+    private var detailMovementAction: ((String) -> Void)? {
+        guard openWhaleMovement != nil else { return nil }
+        return movementRouter.request
+    }
+
+    private func openPendingMovement() {
+        movementRouter.detailDidDismiss(open: openWhaleMovement)
     }
 
     @ViewBuilder
@@ -120,6 +131,22 @@ public struct SightingsView: View {
         if let failure = viewModel.primaryFailure, !viewModel.items.isEmpty {
             BrowseStatusView(kind: .failure(failure)) { Task { await viewModel.retry() } }
         }
+    }
+}
+
+@MainActor
+@Observable
+final class SightingMovementPresentationRouter {
+    private(set) var pendingCatalogID: String?
+
+    func request(catalogID: String) {
+        pendingCatalogID = catalogID
+    }
+
+    func detailDidDismiss(open: ((String) -> Void)?) {
+        guard let pendingCatalogID else { return }
+        self.pendingCatalogID = nil
+        open?(pendingCatalogID)
     }
 }
 

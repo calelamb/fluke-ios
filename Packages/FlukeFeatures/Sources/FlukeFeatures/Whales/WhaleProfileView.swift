@@ -1,10 +1,12 @@
 import FlukeKit
 import FlukeUI
+import Observation
 import SwiftUI
 
 public struct WhaleProfileView: View {
     @State private var viewModel: WhaleProfileViewModel
     @State private var isMovementPresented = false
+    @State private var movementSubmitRouter = WhaleMovementSubmitRouter()
     private let repository: any WhalesRepositoryProtocol
     private let openTrace: () -> Void
     private let openSubmit: () -> Void
@@ -54,13 +56,20 @@ public struct WhaleProfileView: View {
         .background(Color.fog)
         .navigationTitle(viewModel.whale.catalogId)
         .task { await viewModel.load() }
-        .movementCover(isPresented: $isMovementPresented) {
+        .movementCover(
+            isPresented: $isMovementPresented,
+            onDismiss: openPendingSubmit
+        ) {
             MovementTrackView(
                 repository: repository,
                 whale: viewModel.whale,
-                onSubmitSighting: openSubmit
+                onSubmitSighting: movementSubmitRouter.requestSubmit
             )
         }
+    }
+
+    private func openPendingSubmit() {
+        movementSubmitRouter.movementDidDismiss(openSubmit: openSubmit)
     }
 
     private func profileContent(_ profile: WhaleProfile) -> some View {
@@ -210,13 +219,30 @@ extension View {
     @ViewBuilder
     fileprivate func movementCover<Destination: View>(
         isPresented: Binding<Bool>,
+        onDismiss: @escaping () -> Void = {},
         @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
         #if os(macOS)
-        sheet(isPresented: isPresented, content: destination)
+        sheet(isPresented: isPresented, onDismiss: onDismiss, content: destination)
         #else
-        fullScreenCover(isPresented: isPresented, content: destination)
+        fullScreenCover(isPresented: isPresented, onDismiss: onDismiss, content: destination)
         #endif
+    }
+}
+
+@MainActor
+@Observable
+final class WhaleMovementSubmitRouter {
+    private(set) var isSubmitPending = false
+
+    func requestSubmit() {
+        isSubmitPending = true
+    }
+
+    func movementDidDismiss(openSubmit: () -> Void) {
+        guard isSubmitPending else { return }
+        isSubmitPending = false
+        openSubmit()
     }
 }
 

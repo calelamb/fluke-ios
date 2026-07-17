@@ -78,8 +78,8 @@ public struct SightingDetailView: View {
                         Button {
                             SightingDetailNavigation.openMovement(
                                 catalogID: whale.catalogId,
-                                dismiss: dismiss.callAsFunction,
-                                open: openWhaleMovement
+                                stage: openWhaleMovement,
+                                dismiss: dismiss.callAsFunction
                             )
                         } label: {
                             Label(
@@ -137,10 +137,10 @@ enum SightingDetailNavigation {
     @MainActor
     static func openMovement(
         catalogID: String,
-        dismiss: () -> Void,
-        open: (String) -> Void
+        stage: (String) -> Void,
+        dismiss: () -> Void
     ) {
+        stage(catalogID)
         dismiss()
-        open(catalogID)
     }
 }

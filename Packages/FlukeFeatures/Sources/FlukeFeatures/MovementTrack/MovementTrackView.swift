@@ -95,8 +95,10 @@ public struct MovementTrackView: View {
       Text(model.sparseMessage)
     } actions: {
       Button("Submit a sighting") {
-        dismiss()
-        submitSighting()
+        MovementTrackNavigation.submit(
+          stage: submitSighting,
+          dismiss: dismiss.callAsFunction
+        )
       }
       .frame(minHeight: Self.minimumControlSize)
     }
@@ -316,5 +318,13 @@ public struct MovementTrackView: View {
         BrowseStatusView(kind: .stale(failure)) { Task { await model.retry() } }
       }
     }
+  }
+}
+
+enum MovementTrackNavigation {
+  @MainActor
+  static func submit(stage: () -> Void, dismiss: () -> Void) {
+    stage()
+    dismiss()
   }
 }
