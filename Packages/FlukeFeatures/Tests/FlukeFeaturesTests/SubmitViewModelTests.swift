@@ -216,6 +216,9 @@ struct SubmitViewModelTests {
   func coordinateSelection() {
     #expect(SubmissionCoordinate(latitude: 95, longitude: 190) == .init(latitude: 90, longitude: -170))
     #expect(SubmissionCoordinate(latitude: -95, longitude: -190) == .init(latitude: -90, longitude: 170))
+    let coarse = SubmissionCoordinate(latitude: 48.123_456, longitude: -123.987_654)
+    #expect(coarse.latitude == 48.12)
+    #expect(coarse.longitude == -123.99)
   }
 
   @Test("Photo and camera failures map to bounded safe copy")

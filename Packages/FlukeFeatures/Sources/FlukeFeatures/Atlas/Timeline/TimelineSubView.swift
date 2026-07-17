@@ -68,6 +68,8 @@ public struct TimelineSubView: View {
       guard loadsAutomatically else { return }
       await viewModel.load()
     }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("atlas.timeline.surface")
   }
 
   private var tracks: some View {

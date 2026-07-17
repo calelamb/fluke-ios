@@ -6,6 +6,7 @@ import FlukeUI
 import Foundation
 import Network
 import SwiftUI
+import UIKit
 
 enum RootTab: CaseIterable, Hashable {
   case sightings
@@ -54,6 +55,7 @@ struct RootScene: View {
   @State private var requestedTraceWhaleID: String?
   @State private var atlasRouteRevision = 0
   @State private var isAtlasPresented = false
+  @State private var isQueueFlushInFlight = false
 
   init(environment: AppEnvironment) {
     let submissionQueue = DeferredSubmissionQueueBridge(queue: environment.submissionQueue)
@@ -157,10 +159,10 @@ struct RootScene: View {
     }
     .flukeSystemContrast()
     .task {
-      await submissionReplay.flush()
+      await flushQueuedSubmissions()
       networkMonitor.pathUpdateHandler = { path in
         guard path.status == .satisfied else { return }
-        Task { await submissionReplay.flush() }
+        Task { await flushQueuedSubmissions() }
       }
       networkMonitor.start(queue: DispatchQueue(label: "app.fluke.Fluke.submission-network"))
       let loadedCapabilities = await LaunchCapabilityState.load(
@@ -178,7 +180,7 @@ struct RootScene: View {
       }
     }
     .onChange(of: scenePhase) { _, phase in
-      if phase == .active { Task { await submissionReplay.flush() } }
+      if phase == .active { Task { await flushQueuedSubmissions() } }
     }
     .onDisappear { networkMonitor.cancel() }
     .environment(\.launchCapabilities, capabilities)
@@ -214,6 +216,7 @@ struct RootScene: View {
         .accessibilityLabel("Close Atlas")
         .padding()
       }
+      .accessibilityAction(.escape) { isAtlasPresented = false }
     }
     .fullScreenCover(item: movementDestination, onDismiss: completeMovementDismissal) {
       destination in
@@ -248,6 +251,19 @@ struct RootScene: View {
     movementSubmitPresentation.movementDidDismiss()
   }
 
+  private func flushQueuedSubmissions() async {
+    guard !isQueueFlushInFlight else { return }
+    isQueueFlushInFlight = true
+    defer { isQueueFlushInFlight = false }
+
+    let before = await submissionQueue.queuedEntries().count
+    await submissionReplay.flush()
+    let after = await submissionQueue.queuedEntries().count
+    if let message = SubmissionFlushAnnouncement.message(before: before, after: after) {
+      UIAccessibility.post(notification: .announcement, argument: message)
+    }
+  }
+
   private var movementDestination: Binding<MovementDestination?> {
     Binding(
       get: { movementNavigation.destination },
@@ -279,6 +295,7 @@ struct RootScene: View {
           }
         }
       }
+      .accessibilityAction(.escape) { movementNavigation.dismiss() }
     }
   }
 
@@ -347,6 +364,14 @@ struct RootScene: View {
     case .failure:
       authSession.reportInvalidCredential()
     }
+  }
+}
+
+enum SubmissionFlushAnnouncement {
+  static func message(before: Int, after: Int) -> String? {
+    let uploaded = before - after
+    guard before >= 0, after >= 0, uploaded > 0 else { return nil }
+    return uploaded == 1 ? "1 queued sighting uploaded" : "\(uploaded) queued sightings uploaded"
   }
 }
 

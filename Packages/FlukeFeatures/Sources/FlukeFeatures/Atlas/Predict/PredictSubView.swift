@@ -62,6 +62,8 @@ public struct PredictSubView: View {
       if viewModel.subject == nil { viewModel.subject = .pod(.j) }
       await viewModel.loadIfNeeded()
     }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("atlas.predict.surface")
   }
 
   private var subjectPicker: some View {

@@ -1,16 +1,17 @@
 import FlukeReleaseB
 import PhotosUI
 import SwiftUI
+
 #if canImport(UIKit)
-import AVFoundation
-import UIKit
+  import AVFoundation
+  import UIKit
 #endif
 
 public struct PhotoPicker: View {
   @State private var selections: [PhotosPickerItem] = []
   @State private var selectionTracker = PhotoSelectionTracker()
   #if canImport(UIKit)
-  @State private var showsCamera = false
+    @State private var showsCamera = false
   #endif
   let addPhotos: ([ProcessedPhoto]) -> Void
   let reportFailure: (PhotoSelectionFailure) -> Void
@@ -27,14 +28,16 @@ public struct PhotoPicker: View {
     VStack(alignment: .leading, spacing: 12) {
       PhotosPicker(selection: $selections, maxSelectionCount: 5, matching: .images) {
         Label("Choose photos", systemImage: "photo.on.rectangle")
+          .frame(minHeight: 44)
       }
       #if canImport(UIKit)
-      switch cameraState {
-      case .available:
-        Button("Take photo", systemImage: "camera") { showsCamera = true }
-      case .unavailable(let message):
-        Text(message).font(.footnote).foregroundStyle(.secondary)
-      }
+        switch cameraState {
+        case .available:
+          Button("Take photo", systemImage: "camera") { showsCamera = true }
+            .frame(minHeight: 44)
+        case .unavailable(let message):
+          Text(message).font(.footnote).foregroundStyle(.secondary)
+        }
       #endif
     }
     .onChange(of: selections) { _, values in
@@ -45,20 +48,20 @@ public struct PhotoPicker: View {
       if !newValues.isEmpty { Task { await process(newValues) } }
     }
     #if canImport(UIKit)
-    .sheet(isPresented: $showsCamera) {
-      CameraPicker { result in
-        switch result {
-        case .success(let data):
-          do {
-            addPhotos([try ImageProcessor.process(data)])
-          } catch {
-            reportFailure(.processingFailed)
+      .sheet(isPresented: $showsCamera) {
+        CameraPicker { result in
+          switch result {
+          case .success(let data):
+            do {
+              addPhotos([try ImageProcessor.process(data)])
+            } catch {
+              reportFailure(.processingFailed)
+            }
+          case .failure(let failure):
+            reportFailure(failure)
           }
-        case .failure(let failure):
-          reportFailure(failure)
         }
       }
-    }
     #endif
   }
 
@@ -86,48 +89,54 @@ public struct PhotoPicker: View {
   }
 
   #if canImport(UIKit)
-  private var cameraState: PhotoCameraState {
-    guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
-      return PhotoSelectionPresentation.cameraState(for: .unavailable)
+    private var cameraState: PhotoCameraState {
+      guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+        return PhotoSelectionPresentation.cameraState(for: .unavailable)
+      }
+      let authorization: PhotoCameraAuthorization =
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .denied: .denied
+        case .restricted: .restricted
+        default: .available
+        }
+      return PhotoSelectionPresentation.cameraState(for: authorization)
     }
-    let authorization: PhotoCameraAuthorization = switch AVCaptureDevice.authorizationStatus(for: .video) {
-    case .denied: .denied
-    case .restricted: .restricted
-    default: .available
-    }
-    return PhotoSelectionPresentation.cameraState(for: authorization)
-  }
   #endif
 }
 
 #if canImport(UIKit)
-private struct CameraPicker: UIViewControllerRepresentable {
-  let completion: (Result<Data, PhotoSelectionFailure>) -> Void
-  func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
-  func makeUIViewController(context: Context) -> UIImagePickerController {
-    let controller = UIImagePickerController()
-    controller.sourceType = .camera
-    controller.delegate = context.coordinator
-    return controller
-  }
-  func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
-
-  final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+  private struct CameraPicker: UIViewControllerRepresentable {
     let completion: (Result<Data, PhotoSelectionFailure>) -> Void
-    init(completion: @escaping (Result<Data, PhotoSelectionFailure>) -> Void) {
-      self.completion = completion
+    func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+      let controller = UIImagePickerController()
+      controller.sourceType = .camera
+      controller.delegate = context.coordinator
+      return controller
     }
-    func imagePickerController(
-      _ picker: UIImagePickerController,
-      didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-    ) {
-      defer { picker.dismiss(animated: true) }
-      let image = info[.originalImage] as? UIImage
-      completion(PhotoSelectionPresentation.cameraResult(
-        data: image?.jpegData(compressionQuality: 0.95)
-      ))
+    func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate,
+      UIImagePickerControllerDelegate
+    {
+      let completion: (Result<Data, PhotoSelectionFailure>) -> Void
+      init(completion: @escaping (Result<Data, PhotoSelectionFailure>) -> Void) {
+        self.completion = completion
+      }
+      func imagePickerController(
+        _ picker: UIImagePickerController,
+        didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+      ) {
+        defer { picker.dismiss(animated: true) }
+        let image = info[.originalImage] as? UIImage
+        completion(
+          PhotoSelectionPresentation.cameraResult(
+            data: image?.jpegData(compressionQuality: 0.95)
+          ))
+      }
+      func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+      }
     }
-    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { picker.dismiss(animated: true) }
   }
-}
 #endif

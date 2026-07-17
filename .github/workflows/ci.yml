@@ -41,7 +41,12 @@ jobs:
         run: mkdir -p build/verification/package-coverage build/verification/snapshot-artifacts
 
       - name: Test verification scripts
-        run: scripts/tests/verification-scripts-tests.sh
+        run: |
+          scripts/tests/verification-scripts-tests.sh
+          scripts/tests/full-launch-privacy-tests.sh
+
+      - name: Verify full-launch privacy contract
+        run: scripts/verify-full-launch-privacy.sh
 
       - name: Verify packaged canonical API fixtures
         run: scripts/verify-contract-fixtures.sh --no-upstream

@@ -67,6 +67,7 @@ private struct IdentifyTrainingView: View {
         FlukeCard {
           VStack(alignment: .leading, spacing: 10) {
             EditorialHeading(level: .card, text: "Identification is in training")
+              .accessibilityIdentifier("identify.training.title")
             Text(IdentifyViewModel.trainingMessage)
               .font(.flukeBody)
               .foregroundStyle(Color.deep)

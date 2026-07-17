@@ -43,6 +43,7 @@ public struct MovementTrackView: View {
     }
     .onAppear { model.setReduceMotion(reduceMotion) }
     .onChange(of: reduceMotion) { _, enabled in model.setReduceMotion(enabled) }
+    .accessibilityAction(.escape) { dismiss() }
   }
 
   @ViewBuilder

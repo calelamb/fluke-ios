@@ -32,6 +32,9 @@ public struct AtlasView: View {
     VStack(spacing: 0) {
       header
       activeMode
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(viewModel.activeSubView.rawValue) Atlas mode")
+        .accessibilityIdentifier("atlas.active.surface")
     }
     .background(Color.fog)
     .task { await viewModel.loadCatalog() }
@@ -58,16 +61,23 @@ public struct AtlasView: View {
   @ViewBuilder
   private var modePicker: some View {
     if dynamicTypeSize.isAccessibilitySize {
-      Picker("Atlas mode", selection: $viewModel.activeSubView) {
-        modeOptions
+      Menu {
+        ForEach(AtlasViewModel.SubView.allCases) { mode in
+          Button(mode.rawValue) { viewModel.activeSubView = mode }
+            .accessibilityAddTraits(viewModel.activeSubView == mode ? .isSelected : [])
+        }
+      } label: {
+        Label("Atlas mode: \(viewModel.activeSubView.rawValue)", systemImage: "map")
+          .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
       }
-      .pickerStyle(.menu)
       .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityIdentifier("atlas.mode.picker")
     } else {
       Picker("Atlas mode", selection: $viewModel.activeSubView) {
         modeOptions
       }
       .pickerStyle(.segmented)
+      .accessibilityIdentifier("atlas.mode.picker")
     }
   }
 
@@ -112,13 +122,17 @@ public struct AtlasView: View {
 
 struct AtlasControlShelf<Content: View>: View {
   @ViewBuilder let content: Content
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       content
     }
     .padding(12)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    .background(
+      reduceTransparency ? AnyShapeStyle(Color.bone) : AnyShapeStyle(.ultraThinMaterial),
+      in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+    )
     .overlay {
       RoundedRectangle(cornerRadius: 18, style: .continuous)
         .stroke(Color.mist.opacity(0.55), lineWidth: 0.5)

@@ -6,8 +6,12 @@ public struct SubmissionCoordinate: Equatable, Sendable {
   public let longitude: Double
 
   public init(latitude: Double, longitude: Double) {
-    self.latitude = min(max(latitude, -90), 90)
-    self.longitude = Self.wrapped(longitude)
+    self.latitude = Self.coarse(min(max(latitude, -90), 90))
+    self.longitude = Self.coarse(Self.wrapped(longitude))
+  }
+
+  private static func coarse(_ value: Double) -> Double {
+    (value * 100).rounded() / 100
   }
 
   private static func wrapped(_ longitude: Double) -> Double {
@@ -21,10 +25,11 @@ public struct SubmissionCoordinate: Equatable, Sendable {
 public struct LocationPickerView: View {
   @Binding var latitude: Double
   @Binding var longitude: Double
-  @State private var position = MapCameraPosition.region(MKCoordinateRegion(
-    center: CLLocationCoordinate2D(latitude: 48.52, longitude: -123.15),
-    span: MKCoordinateSpan(latitudeDelta: 3, longitudeDelta: 3)
-  ))
+  @State private var position = MapCameraPosition.region(
+    MKCoordinateRegion(
+      center: CLLocationCoordinate2D(latitude: 48.52, longitude: -123.15),
+      span: MKCoordinateSpan(latitudeDelta: 3, longitudeDelta: 3)
+    ))
 
   public init(latitude: Binding<Double>, longitude: Binding<Double>) {
     _latitude = latitude
@@ -33,7 +38,8 @@ public struct LocationPickerView: View {
 
   public var body: some View {
     Map(position: $position) {
-      Marker("Observation", coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude))
+      Marker(
+        "Observation", coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude))
     }
     .onMapCameraChange(frequency: .onEnd) { context in
       let selected = SubmissionCoordinate(

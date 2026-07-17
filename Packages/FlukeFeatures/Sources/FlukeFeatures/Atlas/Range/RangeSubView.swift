@@ -50,6 +50,8 @@ public struct RangeSubView: View {
       guard loadsAutomatically else { return }
       Task { await viewModel.load() }
     }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("atlas.range.surface")
   }
 
   private var heatmapLayer: some View {

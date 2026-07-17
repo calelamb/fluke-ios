@@ -89,6 +89,8 @@ public struct TraceSubView: View {
       guard loadsAutomatically else { return }
       Task { await viewModel.loadIfNeeded() }
     }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("atlas.trace.surface")
   }
 
   @ViewBuilder
