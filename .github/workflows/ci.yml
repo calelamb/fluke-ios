@@ -34,7 +34,7 @@ jobs:
           xcrun simctl list devices available | grep -F 'iPhone 17 ('
 
       - name: Prepare verification artifacts
-        run: mkdir -p build/verification/package-coverage
+        run: mkdir -p build/verification/package-coverage build/verification/snapshot-artifacts
 
       - name: Test verification scripts
         run: scripts/tests/verification-scripts-tests.sh
@@ -43,6 +43,8 @@ jobs:
         run: scripts/verify-contract-fixtures.sh --no-upstream
 
       - name: Run all Swift package tests with coverage
+        env:
+          SNAPSHOT_ARTIFACTS: ${{ github.workspace }}/build/verification/snapshot-artifacts
         run: |
           set -euo pipefail
           for package in FlukeKit FlukeUI FlukeFeatures; do
@@ -105,4 +107,5 @@ jobs:
             build/verification/AppTests.xcresult
             build/verification/app-coverage.json
             build/verification/package-coverage
+            build/verification/snapshot-artifacts
             build/verification/archive-metadata.plist
