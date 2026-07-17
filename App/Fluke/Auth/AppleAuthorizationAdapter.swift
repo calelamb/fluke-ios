@@ -3,7 +3,7 @@ import FlukeReleaseB
 import Foundation
 
 enum AppleAuthorizationAdapter {
-  static func configure(_ request: ASAuthorizationAppleIDRequest) {
+  nonisolated static func configure(_ request: ASAuthorizationAppleIDRequest) {
     request.requestedScopes = [.fullName, .email]
   }
 

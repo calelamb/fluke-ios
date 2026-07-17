@@ -1,6 +1,9 @@
+import AuthenticationServices
 import FlukeFeatures
 import FlukeKit
+import FlukeReleaseB
 import FlukeUI
+import Foundation
 import SwiftUI
 
 enum RootTab: CaseIterable, Hashable {
@@ -34,11 +37,22 @@ enum RootTab: CaseIterable, Hashable {
 struct RootScene: View {
   let environment: AppEnvironment
 
+  @State private var authSession: AuthSession
   @State private var capabilities = LaunchCapabilityState.loading
   @State private var selectedTab = RootTab.sightings
   @State private var requestedTraceWhaleID: String?
   @State private var atlasRouteRevision = 0
   @State private var isAtlasPresented = false
+
+  init(environment: AppEnvironment) {
+    self.environment = environment
+    _authSession = State(
+      initialValue: AuthSession(
+        service: environment.authService,
+        hints: environment.sessionHintStore
+      )
+    )
+  }
 
   var body: some View {
     ZStack {
@@ -85,7 +99,16 @@ struct RootScene: View {
         .tag(RootTab.learn)
 
         NavigationStack {
-          YouView(capabilities: capabilities)
+          FlukeFeatures.YouView(
+            availability: accountAvailability,
+            authState: youAuthState,
+            repository: environment.logbookRepository,
+            configureAppleRequest: AppleAuthorizationAdapter.configure,
+            completeAppleAuthorization: completeAppleAuthorization,
+            signOut: { Task { await authSession.signOut() } },
+            deleteAccount: { Task { await authSession.deleteAccount() } },
+            sessionExpired: { authSession.expire() }
+          )
         }
         .flukeNavigationBackground()
         .tabItem { tabLabel(for: .you) }
@@ -97,6 +120,11 @@ struct RootScene: View {
       capabilities = await LaunchCapabilityState.load(
         using: environment.fetchCapabilities
       )
+      if accountAvailability == .enabled {
+        await authSession.restore()
+      } else {
+        authSession.expire()
+      }
     }
     .environment(\.launchCapabilities, capabilities)
     .environment(\.openAtlas) { whaleID in
@@ -131,10 +159,43 @@ struct RootScene: View {
     atlasRouteRevision += 1
     isAtlasPresented = true
   }
+
+  private var accountAvailability: YouAccountAvailability {
+    switch capabilities {
+    case .loading: .loading
+    case .available(let value): value.accounts ? .enabled : .disabled
+    case .unavailable: .disabled
+    }
+  }
+
+  private var youAuthState: YouAuthState {
+    let notice = authSession.notice?.message
+    switch authSession.state {
+    case .restoring: return YouAuthState.restoring
+    case .signingIn: return YouAuthState.signingIn
+    case .signedOut(let error):
+      return YouAuthState.signedOut(message: error?.message ?? notice)
+    case .signedIn(let user):
+      return YouAuthState.signedIn(user: user, notice: notice)
+    }
+  }
+
+  private func completeAppleAuthorization(_ result: Result<ASAuthorization, Error>) {
+    switch AppleAuthorizationAdapter.credential(from: result) {
+    case .success(let credential):
+      Task { await authSession.signIn(credential: credential) }
+    case .failure:
+      Task {
+        await authSession.signIn(
+          credential: AppleCredential(identityToken: Data(), fullName: nil)
+        )
+      }
+    }
+  }
 }
 
-private extension View {
-  func flukeNavigationBackground() -> some View {
+extension View {
+  fileprivate func flukeNavigationBackground() -> some View {
     toolbarBackground(Color.fog, for: .navigationBar)
       .toolbarBackground(.visible, for: .navigationBar)
   }
@@ -186,15 +247,13 @@ private struct IdentifyView: View {
   }
 }
 
-private struct YouView: View {
-  let capabilities: LaunchCapabilityState
-
-  var body: some View {
-    ContentUnavailableView(
-      "Your Fluke activity",
-      systemImage: "person.crop.circle",
-      description: Text("Account and sighting history will appear here when available.")
-    )
-    .navigationTitle("You")
+extension AuthPresentationError {
+  fileprivate var message: String {
+    switch self {
+    case .invalidAppleCredential:
+      "Sign in with Apple did not return a valid credential. Please try again."
+    case .retryable(let message), .unavailable(let message):
+      message
+    }
   }
 }

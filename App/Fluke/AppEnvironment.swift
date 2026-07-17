@@ -1,4 +1,5 @@
 import FlukeKit
+import FlukeReleaseB
 import Foundation
 import Network
 
@@ -46,12 +47,15 @@ struct AppEnvironment {
   typealias CapabilitiesFetch = () async throws -> Capabilities
 
   let apiBaseURL: URL
+  let authService: any AuthServiceProtocol
   let browseCacheStore: any BrowseCacheStore
   let configuration: AppBuildConfiguration
   let fetchCapabilities: CapabilitiesFetch
   let historicalSightingsRepository: HistoricalSightingsRepository
+  let logbookRepository: any LogbookRepositoryProtocol
   let predictionRepository: PredictionRepository
   let sightingsRepository: SightingsRepository
+  let sessionHintStore: any SessionHintStore
   let whalesRepository: WhalesRepository
 
   static func live(bundle: Bundle = .main) throws -> AppEnvironment {
@@ -90,14 +94,17 @@ struct AppEnvironment {
 
     return AppEnvironment(
       apiBaseURL: apiBaseURL,
+      authService: AuthService(api: client),
       browseCacheStore: cacheStore,
       configuration: configuration,
       fetchCapabilities: capabilitiesFetch ?? {
         try await client.get("/api/v1/capabilities")
       },
       historicalSightingsRepository: HistoricalSightingsRepository(api: client, cache: cacheStore),
+      logbookRepository: LogbookRepository(api: client),
       predictionRepository: PredictionRepository(api: client, cache: cacheStore),
       sightingsRepository: SightingsRepository(api: client, cache: cacheStore),
+      sessionHintStore: KeychainSessionHintStore(),
       whalesRepository: WhalesRepository(api: client, cache: cacheStore)
     )
   }

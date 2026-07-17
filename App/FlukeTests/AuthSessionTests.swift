@@ -1,9 +1,9 @@
+import FlukeKit
+import FlukeReleaseB
 import Foundation
 import Testing
 
 @testable import Fluke
-import FlukeKit
-import FlukeReleaseB
 
 @MainActor
 struct AuthSessionTests {
@@ -81,7 +81,8 @@ struct AuthSessionTests {
       deleteResult: .failure(APIError.offline)
     )
     let hints = MemorySessionHintStore()
-    let session = AuthSession(service: service, hints: hints)
+    let associations = AccountAssociationSpy()
+    let session = AuthSession(service: service, hints: hints, accountAssociations: associations)
     await session.signIn(credential: .init(identityToken: Data("jwt".utf8), fullName: nil))
 
     await session.deleteAccount()
@@ -89,19 +90,30 @@ struct AuthSessionTests {
     #expect(session.state == .signedIn(.fixture))
     #expect(session.notice == .retryable("You're offline."))
     #expect(try await hints.hasReauthenticationHint())
+    #expect(await associations.clearCallCount == 0)
   }
 
   @Test("A 204 deletion clears local authenticated state and hints")
   func successfulDeletion() async throws {
     let service = AuthServiceSpy(signInResult: .success(.fixture))
     let hints = MemorySessionHintStore()
-    let session = AuthSession(service: service, hints: hints)
+    let associations = AccountAssociationSpy()
+    let session = AuthSession(service: service, hints: hints, accountAssociations: associations)
     await session.signIn(credential: .init(identityToken: Data("jwt".utf8), fullName: nil))
 
     await session.deleteAccount()
 
     #expect(session.state == .signedOut(error: nil))
     #expect(try await hints.hasReauthenticationHint() == false)
+    #expect(await associations.clearCallCount == 1)
+  }
+}
+
+private actor AccountAssociationSpy: AccountAssociationClearing {
+  private(set) var clearCallCount = 0
+
+  func clearAccountAssociation() async {
+    clearCallCount += 1
   }
 }
 
@@ -150,8 +162,8 @@ private actor MemorySessionHintStore: SessionHintStore {
   func clear() async throws { value = false }
 }
 
-private extension AuthenticatedUser {
-  static let fixture = AuthenticatedUser(
+extension AuthenticatedUser {
+  fileprivate static let fixture = AuthenticatedUser(
     id: "observer-1",
     email: "cale@example.com",
     displayName: "Cale Lamb",

@@ -9,6 +9,14 @@ enum AuthPresentationError: Error, Equatable {
   case unavailable(String)
 }
 
+nonisolated protocol AccountAssociationClearing: Sendable {
+  func clearAccountAssociation() async
+}
+
+nonisolated struct EmptyAccountAssociationStore: AccountAssociationClearing {
+  func clearAccountAssociation() async {}
+}
+
 @MainActor
 @Observable
 final class AuthSession {
@@ -24,10 +32,16 @@ final class AuthSession {
 
   private let service: any AuthServiceProtocol
   private let hints: any SessionHintStore
+  private let accountAssociations: any AccountAssociationClearing
 
-  init(service: any AuthServiceProtocol, hints: any SessionHintStore) {
+  init(
+    service: any AuthServiceProtocol,
+    hints: any SessionHintStore,
+    accountAssociations: any AccountAssociationClearing = EmptyAccountAssociationStore()
+  ) {
     self.service = service
     self.hints = hints
+    self.accountAssociations = accountAssociations
   }
 
   func restore() async {
@@ -77,11 +91,16 @@ final class AuthSession {
     notice = nil
     do {
       try await service.signOut()
-      try await hints.saveReauthenticationHint()
-      state = .signedOut(error: nil)
     } catch {
       if let knownUser { state = .signedIn(knownUser) }
       notice = presentationError(for: error)
+      return
+    }
+    state = .signedOut(error: nil)
+    do {
+      try await hints.saveReauthenticationHint()
+    } catch {
+      notice = .unavailable("Fluke couldn't save your sign-in preference.")
     }
   }
 
@@ -90,11 +109,17 @@ final class AuthSession {
     notice = nil
     do {
       try await service.deleteAccount()
-      try await hints.clear()
-      state = .signedOut(error: nil)
     } catch {
       state = .signedIn(knownUser)
       notice = presentationError(for: error)
+      return
+    }
+    await accountAssociations.clearAccountAssociation()
+    state = .signedOut(error: nil)
+    do {
+      try await hints.clear()
+    } catch {
+      notice = .unavailable("Your account was deleted, but local cleanup needs another attempt.")
     }
   }
 
