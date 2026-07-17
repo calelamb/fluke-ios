@@ -10,31 +10,56 @@ struct QueuedPhotoStoreReconciliationTests {
     defer { try? FileManager.default.removeItem(at: directory) }
     let protectedNames = ["SubmissionQueue.store", "SubmissionQueue.store-shm", "SubmissionQueue.store-wal"]
     for name in protectedNames { try Data(name.utf8).write(to: directory.appending(path: name)) }
-    try writeLegacyManifest(protectedNames, submissionID: UUID(), directory: directory)
-
-    try await QueuedPhotoStore(directory: directory).reconcileStaging(liveFileNames: [])
-
-    #expect(protectedNames.allSatisfy { FileManager.default.fileExists(atPath: directory.appending(path: $0).path()) })
-    #expect(try quarantinedManifests(in: directory).count == 1)
+    try await assertBoundManifestIsQuarantined(
+      names: protectedNames,
+      submissionID: UUID(),
+      directory: directory
+    )
   }
 
-  @Test("Traversal and malformed names quarantine the whole manifest without deletion")
-  func rejectsTraversalAndMalformedNames() async throws {
+  @Test("A bound manifest cannot traverse outside photo storage")
+  func rejectsTraversal() async throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let directory = root.appending(path: "photos", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let outside = root.appending(path: "outside-\(UUID().uuidString).jpg")
     try Data([1]).write(to: outside)
-    let malformed = "not-a-generated-photo.jpg"
-    try Data([2]).write(to: directory.appending(path: malformed))
-    try writeLegacyManifest(["../\(outside.lastPathComponent)", malformed], submissionID: UUID(), directory: directory)
+    try writeBoundManifest(
+      ["../\(outside.lastPathComponent)"],
+      submissionID: UUID(),
+      directory: directory
+    )
 
     try await QueuedPhotoStore(directory: directory).reconcileStaging(liveFileNames: [])
 
     #expect(FileManager.default.fileExists(atPath: outside.path()))
-    #expect(FileManager.default.fileExists(atPath: directory.appending(path: malformed).path()))
     #expect(try quarantinedManifests(in: directory).count == 1)
+  }
+
+  @Test("Malformed generated filename patterns are quarantined")
+  func rejectsMalformedNames() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let submissionID = UUID()
+    let names = ["not-a-generated-photo.jpg"]
+    for name in names { try Data([2]).write(to: directory.appending(path: name)) }
+
+    try await assertBoundManifestIsQuarantined(
+      names: names, submissionID: submissionID, directory: directory
+    )
+  }
+
+  @Test("A generated filename with an invalid photo UUID is quarantined")
+  func rejectsInvalidPhotoUUID() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let submissionID = UUID()
+    let name = "\(submissionID.uuidString)_0_not-a-uuid.jpg"
+    try Data([2]).write(to: directory.appending(path: name))
+    try await assertBoundManifestIsQuarantined(
+      names: [name], submissionID: submissionID, directory: directory
+    )
   }
 
   @Test("A manifest cannot claim a valid photo owned by another submission")
@@ -45,28 +70,71 @@ struct QueuedPhotoStoreReconciliationTests {
     let manifestID = UUID()
     let name = generatedName(submissionID: ownerID, index: 0)
     try Data([3]).write(to: directory.appending(path: name))
-    try writeLegacyManifest([name], submissionID: manifestID, directory: directory)
-
-    try await QueuedPhotoStore(directory: directory).reconcileStaging(liveFileNames: [])
-
-    #expect(FileManager.default.fileExists(atPath: directory.appending(path: name).path()))
-    #expect(try quarantinedManifests(in: directory).count == 1)
+    try await assertBoundManifestIsQuarantined(
+      names: [name], submissionID: manifestID, directory: directory
+    )
   }
 
-  @Test("Duplicate, noncontiguous, and oversized index sets are quarantined as a unit")
-  func rejectsInvalidIndexSets() async throws {
+  @Test("Duplicate photo indices quarantine the complete bound manifest")
+  func rejectsDuplicateIndices() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let submissionID = UUID()
+    let names = [0, 0].map { generatedName(submissionID: submissionID, index: $0) }
+    for name in names { try Data([4]).write(to: directory.appending(path: name)) }
+    try await assertBoundManifestIsQuarantined(
+      names: names, submissionID: submissionID, directory: directory
+    )
+  }
+
+  @Test("Noncontiguous photo indices quarantine the complete bound manifest")
+  func rejectsNoncontiguousIndices() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let submissionID = UUID()
+    let names = [0, 2].map { generatedName(submissionID: submissionID, index: $0) }
+    for name in names { try Data([4]).write(to: directory.appending(path: name)) }
+    try await assertBoundManifestIsQuarantined(
+      names: names, submissionID: submissionID, directory: directory
+    )
+  }
+
+  @Test("More than five manifest photos are quarantined before index inspection")
+  func rejectsOversizedManifest() async throws {
     let directory = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let submissionID = UUID()
     let names = (0..<6).map { generatedName(submissionID: submissionID, index: $0) }
-      + [generatedName(submissionID: submissionID, index: 0)]
-    for name in Set(names) { try Data([4]).write(to: directory.appending(path: name)) }
-    try writeLegacyManifest(names, submissionID: submissionID, directory: directory)
+    for name in names { try Data([4]).write(to: directory.appending(path: name)) }
+    try await assertBoundManifestIsQuarantined(
+      names: names, submissionID: submissionID, directory: directory
+    )
+  }
 
-    try await QueuedPhotoStore(directory: directory).reconcileStaging(liveFileNames: [])
+  @Test("An unsupported bound manifest schema version is quarantined")
+  func rejectsWrongVersion() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let submissionID = UUID()
+    let name = generatedName(submissionID: submissionID, index: 0)
+    try Data([4]).write(to: directory.appending(path: name))
+    try await assertBoundManifestIsQuarantined(
+      names: [name], submissionID: submissionID, version: 2, directory: directory
+    )
+  }
 
-    #expect(Set(names).allSatisfy { FileManager.default.fileExists(atPath: directory.appending(path: $0).path()) })
-    #expect(try quarantinedManifests(in: directory).count == 1)
+  @Test("A payload submission ID that differs from the manifest filename is quarantined")
+  func rejectsMismatchedPayloadSubmissionID() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let fileID = UUID()
+    let payloadID = UUID()
+    let name = generatedName(submissionID: payloadID, index: 0)
+    try Data([4]).write(to: directory.appending(path: name))
+    try await assertBoundManifestIsQuarantined(
+      names: [name], submissionID: payloadID, fileSubmissionID: fileID,
+      directory: directory
+    )
   }
 
   @Test("Generated photo names require canonical UUIDs and decimal indices")
@@ -76,12 +144,9 @@ struct QueuedPhotoStoreReconciliationTests {
     let submissionID = UUID()
     let name = "\(submissionID.uuidString)_00_\(UUID().uuidString).jpg"
     try Data([6]).write(to: directory.appending(path: name))
-    try writeBoundManifest([name], submissionID: submissionID, directory: directory)
-
-    try await QueuedPhotoStore(directory: directory).reconcileStaging(liveFileNames: [])
-
-    #expect(FileManager.default.fileExists(atPath: directory.appending(path: name).path()))
-    #expect(try quarantinedManifests(in: directory).count == 1)
+    try await assertBoundManifestIsQuarantined(
+      names: [name], submissionID: submissionID, directory: directory
+    )
   }
 
   @Test("A legitimate manifest binds its schema to the submission and removes orphan photos")
@@ -115,21 +180,43 @@ private func temporaryDirectory() throws -> URL {
   return directory
 }
 
-private func writeLegacyManifest(_ names: [String], submissionID: UUID, directory: URL) throws {
-  try JSONEncoder().encode(names).write(
-    to: directory.appending(path: ".pending-\(submissionID.uuidString).json")
-  )
-}
-
-private func writeBoundManifest(_ names: [String], submissionID: UUID, directory: URL) throws {
+private func writeBoundManifest(
+  _ names: [String],
+  submissionID: UUID,
+  fileSubmissionID: UUID? = nil,
+  version: Int = 1,
+  directory: URL
+) throws {
   let value: [String: Any] = [
-    "version": 1,
+    "version": version,
     "submissionID": submissionID.uuidString,
     "photoFileNames": names,
   ]
   try JSONSerialization.data(withJSONObject: value).write(
-    to: directory.appending(path: ".pending-\(submissionID.uuidString).json")
+    to: directory.appending(path: ".pending-\((fileSubmissionID ?? submissionID).uuidString).json")
   )
+}
+
+private func assertBoundManifestIsQuarantined(
+  names: [String],
+  submissionID: UUID,
+  fileSubmissionID: UUID? = nil,
+  version: Int = 1,
+  directory: URL
+) async throws {
+  try writeBoundManifest(
+    names,
+    submissionID: submissionID,
+    fileSubmissionID: fileSubmissionID,
+    version: version,
+    directory: directory
+  )
+  try await QueuedPhotoStore(directory: directory).reconcileStaging(liveFileNames: [])
+  let siblingNames = names.filter { $0 == URL(filePath: $0).lastPathComponent }
+  #expect(siblingNames.allSatisfy {
+    FileManager.default.fileExists(atPath: directory.appending(path: $0).path())
+  })
+  #expect(try quarantinedManifests(in: directory).count == 1)
 }
 
 private func generatedName(submissionID: UUID, index: Int) -> String {
