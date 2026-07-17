@@ -4,8 +4,8 @@ import FlukeKit
 import FlukeReleaseB
 import FlukeUI
 import Foundation
-import SwiftUI
 import Network
+import SwiftUI
 
 enum RootTab: CaseIterable, Hashable {
   case sightings
@@ -106,7 +106,12 @@ struct RootScene: View {
         .tag(RootTab.whales)
 
         NavigationStack {
-          IdentifyView(capabilities: capabilities)
+          FlukeFeatures.IdentifyView(
+            capability: identificationAvailable,
+            service: environment.identifyService,
+            browseWhales: { selectedTab = .whales },
+            submitSighting: { isSubmitPresented = true }
+          )
         }
         .flukeNavigationBackground()
         .tabItem { tabLabel(for: .identify) }
@@ -164,13 +169,15 @@ struct RootScene: View {
     }
     .environment(\.openSubmit) { isSubmitPresented = true }
     .sheet(isPresented: $isSubmitPresented) {
-      SubmitView(model: SubmitViewModel(
-        service: environment.submissionService,
-        queue: environment.submissionQueue,
-        isSignedIn: authSession.isAuthenticated,
-        signedInObserverEmail: authSession.authenticatedEmail,
-        submissionsEnabled: submissionsAvailable
-      ))
+      SubmitView(
+        model: SubmitViewModel(
+          service: environment.submissionService,
+          queue: environment.submissionQueue,
+          isSignedIn: authSession.isAuthenticated,
+          signedInObserverEmail: authSession.authenticatedEmail,
+          submissionsEnabled: submissionsAvailable
+        )
+      )
       .presentationDetents([.large])
     }
     .fullScreenCover(isPresented: $isAtlasPresented) {
@@ -213,6 +220,11 @@ struct RootScene: View {
   private var submissionsAvailable: Bool {
     guard case .available(let value) = capabilities else { return false }
     return value.submissions
+  }
+
+  private var identificationAvailable: Bool {
+    guard case .available(let value) = capabilities else { return false }
+    return value.identification
   }
 
   private var youAuthState: YouAuthState {
@@ -274,23 +286,6 @@ extension EnvironmentValues {
   var openSubmit: () -> Void {
     get { self[OpenSubmitKey.self] }
     set { self[OpenSubmitKey.self] = newValue }
-  }
-}
-
-private struct IdentifyView: View {
-  let capabilities: LaunchCapabilityState
-
-  var body: some View {
-    ContentUnavailableView(
-      "Photo identification is in training",
-      systemImage: "camera.viewfinder",
-      description: Text(description)
-    )
-    .navigationTitle("Identify")
-  }
-
-  private var description: String {
-    "Photo identification is still in training. We are building a rights-cleared reference catalog before we compare your photo. Browse the whale catalog or submit a sighting in the meantime."
   }
 }
 

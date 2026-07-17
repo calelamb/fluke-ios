@@ -52,6 +52,7 @@ struct AppEnvironment {
   let configuration: AppBuildConfiguration
   let fetchCapabilities: CapabilitiesFetch
   let historicalSightingsRepository: HistoricalSightingsRepository
+  let identifyService: any IdentifyServiceProtocol
   let logbookRepository: any LogbookRepositoryProtocol
   let predictionRepository: PredictionRepository
   let sightingsRepository: SightingsRepository
@@ -105,6 +106,7 @@ struct AppEnvironment {
         try await client.get("/api/v1/capabilities")
       },
       historicalSightingsRepository: HistoricalSightingsRepository(api: client, cache: cacheStore),
+      identifyService: IdentifyService(api: client),
       logbookRepository: LogbookRepository(api: client),
       predictionRepository: PredictionRepository(api: client, cache: cacheStore),
       sightingsRepository: SightingsRepository(api: client, cache: cacheStore),
