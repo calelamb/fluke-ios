@@ -64,6 +64,8 @@ expected_types = {
     "NSPrivacyCollectedDataTypeName",
     "NSPrivacyCollectedDataTypePhotosorVideos",
     "NSPrivacyCollectedDataTypeCoarseLocation",
+    "NSPrivacyCollectedDataTypeUserID",
+    "NSPrivacyCollectedDataTypeOtherUserContent",
 }
 entries = privacy.get("NSPrivacyCollectedDataTypes")
 if not isinstance(entries, list) or {entry.get("NSPrivacyCollectedDataType") for entry in entries} != expected_types:
