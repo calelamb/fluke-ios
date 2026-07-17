@@ -1,15 +1,22 @@
 import Foundation
 
+enum FixtureLoadingError: Error, Equatable, LocalizedError {
+    case missingResource(name: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingResource(let name):
+            return "Required packaged API contract fixture '\(name).json' is missing."
+        }
+    }
+}
+
 enum FixtureLoader {
     static func data(named name: String) throws -> Data {
-        if let bundledURL = Bundle.module.url(forResource: name, withExtension: "json") {
-            return try Data(contentsOf: bundledURL)
+        guard let bundledURL = Bundle.module.url(forResource: name, withExtension: "json") else {
+            throw FixtureLoadingError.missingResource(name: name)
         }
 
-        let sourceURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures", isDirectory: true)
-            .appendingPathComponent("\(name).json")
-        return try Data(contentsOf: sourceURL)
+        return try Data(contentsOf: bundledURL)
     }
 }

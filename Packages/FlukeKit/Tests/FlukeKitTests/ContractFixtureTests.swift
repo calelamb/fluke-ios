@@ -4,6 +4,15 @@ import Testing
 
 @Suite("Standalone API contract fixtures")
 struct ContractFixtureTests {
+    @Test("Missing packaged fixtures fail closed with a clear error")
+    func missingPackagedFixtureFailsClosed() {
+        #expect(
+            throws: FixtureLoadingError.missingResource(name: "missing-contract")
+        ) {
+            try FixtureLoader.data(named: "missing-contract")
+        }
+    }
+
     @Test("Health decodes the released readiness shape")
     func healthDecodes() throws {
         let health = try JSONDecoder.fluke.decode(
