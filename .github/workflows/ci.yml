@@ -17,6 +17,7 @@ env:
   XCODE_VERSION: 26.0.1
   FLUKE_SIMULATOR_NAME: iPhone 17
   FLUKE_SIMULATOR_RUNTIME_IDENTIFIER: com.apple.CoreSimulator.SimRuntime.iOS-26-0
+  FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS: 120
 
 jobs:
   release-a-verification:
