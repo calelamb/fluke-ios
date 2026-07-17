@@ -4,12 +4,17 @@ import Testing
 @testable import FlukeKit
 @testable import FlukeReleaseB
 
+private let validCSRFToken =
+  "\(String(repeating: "a", count: 43)).\(String(repeating: "b", count: 43))"
+private let otherCSRFToken =
+  "\(String(repeating: "c", count: 43)).\(String(repeating: "d", count: 43))"
+
 struct AuthServiceTests {
   @Test("Apple sign in sends the strict API credential and decodes its wrapper")
   func appleSignInContract() async throws {
     let harness = try AuthHarness(
       body:
-        #"{"csrfToken":"abcdefghijklmnopqrstuvwxyzABCDEF","user":{"id":"observer-1","email":null,"displayName":"Cale Lamb","role":"OBSERVER"}}"#
+        #"{"csrfToken":"\#(validCSRFToken)","user":{"id":"observer-1","email":null,"displayName":"Cale Lamb","role":"OBSERVER"}}"#
     )
     let credential = AppleCredential(
       authorizationCode: Data("one-use-code".utf8),
@@ -75,9 +80,9 @@ struct AuthServiceTests {
   @Test(
     "Sign-in response rejects wrong roles and malformed wrappers",
     arguments: [
-      #"{"csrfToken":"abcdefghijklmnopqrstuvwxyzABCDEF","user":{"id":"observer-1","email":null,"displayName":null,"role":"ADMIN"}}"#,
-      #"{"csrfToken":"abcdefghijklmnopqrstuvwxyzABCDEF","user":{"id":"observer-1","email":null,"displayName":null,"role":"OBSERVER"},"extra":true}"#,
-      #"{"csrfToken":"abcdefghijklmnopqrstuvwxyzABCDEF","user":{"id":"observer-1","email":null,"displayName":null,"role":"OBSERVER","extra":true}}"#,
+      #"{"csrfToken":"\#(validCSRFToken)","user":{"id":"observer-1","email":null,"displayName":null,"role":"ADMIN"}}"#,
+      #"{"csrfToken":"\#(validCSRFToken)","user":{"id":"observer-1","email":null,"displayName":null,"role":"OBSERVER"},"extra":true}"#,
+      #"{"csrfToken":"\#(validCSRFToken)","user":{"id":"observer-1","email":null,"displayName":null,"role":"OBSERVER","extra":true}}"#,
       #"{"user":{"id":"observer-1","email":null,"displayName":null,"role":"OBSERVER"}}"#,
     ])
   func rejectsMalformedSignInResponse(body: String) async throws {
@@ -91,8 +96,8 @@ struct AuthServiceTests {
   func rejectsMismatchedCSRF() async throws {
     let harness = try AuthHarness(
       body:
-        #"{"csrfToken":"responseTokenResponseToken12345678","user":{"id":"observer-1","email":null,"displayName":null,"role":"OBSERVER"}}"#,
-      csrf: "cookieTokenCookieTokenCookieToken12"
+        #"{"csrfToken":"\#(otherCSRFToken)","user":{"id":"observer-1","email":null,"displayName":null,"role":"OBSERVER"}}"#,
+      csrf: validCSRFToken
     )
     await #expect(throws: APIError.malformedResponse) {
       try await harness.service.signIn(credential: .validFixture)
@@ -109,6 +114,18 @@ struct AuthServiceTests {
     #expect(user.email == nil)
   }
 
+  @Test("Observer display names above the API maximum fail closed")
+  func rejectsOversizedDisplayName() async throws {
+    let name = String(repeating: "n", count: 121)
+    let harness = try AuthHarness(
+      body:
+        #"{"id":"observer-1","email":null,"displayName":"\#(name)","role":"OBSERVER","userId":"observer-1"}"#
+    )
+    await #expect(throws: APIError.malformedResponse) {
+      try await harness.service.currentUser()
+    }
+  }
+
   @Test("Current observer maps unauthorized without inventing a user")
   func currentUserUnauthorized() async throws {
     let harness = try AuthHarness(status: 401, body: "")
@@ -122,7 +139,7 @@ struct AuthServiceTests {
     let request = try #require(await harness.transport.lastRequest)
     #expect(request.httpMethod == "POST")
     #expect(request.url?.path == ReleaseBEndpoint.authLogout)
-    #expect(request.value(forHTTPHeaderField: "x-fluke-csrf") == "abcdefghijklmnopqrstuvwxyzABCDEF")
+    #expect(request.value(forHTTPHeaderField: "x-fluke-csrf") == validCSRFToken)
   }
 
   @Test("Deletion sends a fresh strict credential body with CSRF")
@@ -132,7 +149,7 @@ struct AuthServiceTests {
     let request = try #require(await harness.transport.lastRequest)
     #expect(request.httpMethod == "DELETE")
     #expect(request.url?.path == ReleaseBEndpoint.authAccount)
-    #expect(request.value(forHTTPHeaderField: "x-fluke-csrf") == "abcdefghijklmnopqrstuvwxyzABCDEF")
+    #expect(request.value(forHTTPHeaderField: "x-fluke-csrf") == validCSRFToken)
     let body = try #require(request.httpBody)
     let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: String])
     #expect(Set(json.keys) == ["authorizationCode", "identityToken", "nonce"])
@@ -148,18 +165,45 @@ struct AuthServiceTests {
     let harness = try AuthHarness(status: status, body: body)
     await #expect(throws: APIError.self) { try await harness.service.signOut() }
   }
+
+  @Test("Apple sign in never retries a one-use authorization code after response loss")
+  func appleSignInDoesNotRetry() async throws {
+    let storage = HTTPCookieStorage.sharedCookieStorage(
+      forGroupContainerIdentifier: UUID().uuidString)
+    storage.setCookie(
+      try #require(
+        HTTPCookie(properties: [
+          .domain: "api.fluke.test", .path: "/api/v1", .name: "fluke_csrf",
+          .value: validCSRFToken, .secure: "TRUE",
+        ])))
+    let transport = AuthResponseLossTransport(
+      successBody:
+        #"{"csrfToken":"\#(validCSRFToken)","user":{"id":"observer-1","email":null,"displayName":null,"role":"OBSERVER"}}"#
+    )
+    let service = AuthService(
+      api: APIClient(
+        baseURL: try #require(URL(string: "https://api.fluke.test")),
+        transport: transport,
+        cookieStorage: storage
+      ))
+
+    await #expect(throws: APIError.transport) {
+      try await service.signIn(credential: .validFixture)
+    }
+    #expect(await transport.requestCount == 1)
+  }
 }
 
 private struct AuthHarness {
   let transport: AuthRecordingTransport
   let service: AuthService
 
-  init(status: Int = 200, body: String, csrf: String = "abcdefghijklmnopqrstuvwxyzABCDEF") throws {
+  init(status: Int = 200, body: String, csrf: String = validCSRFToken) throws {
     let storage = HTTPCookieStorage.sharedCookieStorage(
       forGroupContainerIdentifier: UUID().uuidString)
     let cookie = try #require(
       HTTPCookie(properties: [
-        .domain: "api.fluke.test", .path: "/", .name: "fluke_csrf", .value: csrf,
+        .domain: "api.fluke.test", .path: "/api/v1", .name: "fluke_csrf", .value: csrf,
         .secure: "TRUE",
       ]))
     storage.setCookie(cookie)
@@ -187,6 +231,22 @@ private actor AuthRecordingTransport: HTTPTransport {
     return (
       body,
       HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+    )
+  }
+}
+
+private actor AuthResponseLossTransport: HTTPTransport {
+  private let successBody: Data
+  private(set) var requestCount = 0
+
+  init(successBody: String) { self.successBody = Data(successBody.utf8) }
+
+  func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    requestCount += 1
+    if requestCount == 1 { throw URLError(.networkConnectionLost) }
+    return (
+      successBody,
+      HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
     )
   }
 }

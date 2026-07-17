@@ -19,6 +19,9 @@ public enum YouAuthState: Equatable, Sendable {
 public struct YouView: View {
   private let availability: YouAccountAvailability
   private let authState: YouAuthState
+  private let accountMutationInFlight: Bool
+  private let signInAuthorizationPending: Bool
+  private let deletionAuthorizationPending: Bool
   private let repository: any LogbookRepositoryProtocol
   private let queue: any QueuedLogbookProviding
   private let configureAppleRequest: (ASAuthorizationAppleIDRequest) -> Void
@@ -34,6 +37,9 @@ public struct YouView: View {
   public init(
     availability: YouAccountAvailability,
     authState: YouAuthState,
+    accountMutationInFlight: Bool,
+    signInAuthorizationPending: Bool,
+    deletionAuthorizationPending: Bool,
     repository: any LogbookRepositoryProtocol,
     queue: any QueuedLogbookProviding,
     configureAppleRequest: @escaping (ASAuthorizationAppleIDRequest) -> Void,
@@ -45,6 +51,9 @@ public struct YouView: View {
   ) {
     self.availability = availability
     self.authState = authState
+    self.accountMutationInFlight = accountMutationInFlight
+    self.signInAuthorizationPending = signInAuthorizationPending
+    self.deletionAuthorizationPending = deletionAuthorizationPending
     self.repository = repository
     self.queue = queue
     self.configureAppleRequest = configureAppleRequest
@@ -69,7 +78,10 @@ public struct YouView: View {
     .navigationTitle("You")
     .alert("Delete your Fluke account?", isPresented: $confirmsDeletion) {
       Button("Cancel", role: .cancel) {}
-      Button("Continue", role: .destructive) { requestsDeletionReauthentication = true }
+      Button("Continue", role: .destructive) {
+        guard !controlState.isDisabled(.deleteAccount) else { return }
+        requestsDeletionReauthentication = true
+      }
     } message: {
       Text(
         "Your linked personal details will be removed. Approved public wildlife observations may remain in anonymized form. This cannot be undone."
@@ -139,6 +151,8 @@ public struct YouView: View {
       .signInWithAppleButtonStyle(.black)
       .frame(height: 50)
       .frame(maxWidth: 360)
+      .youMinimumHitTarget(.signIn)
+      .disabled(controlState.isDisabled(.signIn))
       .accessibilityHint("Signs in without sharing an Apple password with Fluke")
     }
     .padding(24)
@@ -172,10 +186,12 @@ public struct YouView: View {
         .buttonStyle(.bordered)
         .tint(Color.tide)
         .youMinimumHitTarget(.signOut)
+        .disabled(controlState.isDisabled(.signOut))
       Button("Delete account", role: .destructive) {
         confirmsDeletion = true
       }
       .youMinimumHitTarget(.deleteAccount)
+      .disabled(controlState.isDisabled(.deleteAccount))
       if requestsDeletionReauthentication {
         VStack(alignment: .leading, spacing: 10) {
           Text("Confirm with Apple")
@@ -195,6 +211,7 @@ public struct YouView: View {
           .signInWithAppleButtonStyle(.black)
           .frame(maxWidth: 360, minHeight: 50)
           .accessibilityIdentifier(YouInteractiveControl.reauthenticateDeletion.rawValue)
+          .disabled(controlState.isDisabled(.reauthenticateDeletion))
           .accessibilityHint("Reauthenticates with Apple before deleting your account")
         }
         .padding(14)
@@ -221,5 +238,13 @@ public struct YouView: View {
     let name = user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
     if let name, !name.isEmpty { return name }
     return user.email ?? "orca observer"
+  }
+
+  private var controlState: YouAccountControlState {
+    YouAccountControlState(
+      accountMutationInFlight: accountMutationInFlight,
+      signInAuthorizationPending: signInAuthorizationPending,
+      deletionAuthorizationPending: deletionAuthorizationPending
+    )
   }
 }

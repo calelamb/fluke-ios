@@ -40,12 +40,12 @@ struct RootScene: View {
   private let submissionQueue: DeferredSubmissionQueueBridge
   private let submissionReplay: SubmissionReplayActor
   private let networkMonitor = NWPathMonitor()
-  private let signInAuthorizationFlow: AppleAuthorizationFlow
-  private let deletionAuthorizationFlow: AppleAuthorizationFlow
 
   @Environment(\.scenePhase) private var scenePhase
 
   @State private var authSession: AuthSession
+  @State private var signInAuthorizationFlow: AppleAuthorizationFlow
+  @State private var deletionAuthorizationFlow: AppleAuthorizationFlow
   @State private var capabilities = LaunchCapabilityState.loading
   @State private var identifyService: (any IdentifyServiceProtocol)?
   @State private var selectedTab = RootTab.sightings
@@ -62,8 +62,8 @@ struct RootScene: View {
       queue: environment.submissionQueue,
       service: environment.submissionService
     )
-    self.signInAuthorizationFlow = AppleAuthorizationFlow()
-    self.deletionAuthorizationFlow = AppleAuthorizationFlow()
+    _signInAuthorizationFlow = State(initialValue: AppleAuthorizationFlow())
+    _deletionAuthorizationFlow = State(initialValue: AppleAuthorizationFlow())
     _authSession = State(
       initialValue: AuthSession(
         service: environment.authService,
@@ -128,6 +128,9 @@ struct RootScene: View {
           FlukeFeatures.YouView(
             availability: accountAvailability,
             authState: youAuthState,
+            accountMutationInFlight: authSession.isAccountMutationInFlight,
+            signInAuthorizationPending: signInAuthorizationFlow.hasPendingNonce,
+            deletionAuthorizationPending: deletionAuthorizationFlow.hasPendingNonce,
             repository: environment.logbookRepository,
             queue: submissionQueue,
             configureAppleRequest: signInAuthorizationFlow.configure,

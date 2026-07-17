@@ -5,6 +5,11 @@ public enum MultipartRetryPolicy: Sendable {
   case never
 }
 
+public enum JSONRetryPolicy: Sendable {
+  case transientOnce
+  case never
+}
+
 public struct APIClient: Sendable {
   public static let defaultRequestTimeout: Duration = .seconds(15)
 
@@ -70,7 +75,8 @@ public struct APIClient: Sendable {
   public func post<Request: Encodable & Sendable, Response: Decodable>(
     _ request: APIRequest,
     body: Request,
-    headers: [String: String] = [:]
+    headers: [String: String] = [:],
+    retryPolicy: JSONRetryPolicy = .transientOnce
   ) async throws -> Response {
     let encodedBody: Data
     do {
@@ -87,7 +93,7 @@ public struct APIClient: Sendable {
       method: "POST",
       request: request,
       mutation: mutation,
-      retriesTransientFailure: true
+      retriesTransientFailure: retryPolicy == .transientOnce
     )
   }
 
@@ -166,14 +172,23 @@ public struct APIClient: Sendable {
     guard candidates.count == 1, let cookie = candidates.first,
       cookie.name == "fluke_csrf", cookie.isSecure,
       cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")) == host,
-      cookie.value.count >= 32, cookie.value.count <= 512,
-      cookie.value.unicodeScalars.allSatisfy({
-        CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_"
-      })
+      cookie.path == "/api/v1",
+      Self.isValidCSRFToken(cookie.value)
     else {
       throw APIError.invalidRequest
     }
     return cookie.value
+  }
+
+  private static func isValidCSRFToken(_ value: String) -> Bool {
+    let segments = value.split(separator: ".", omittingEmptySubsequences: false)
+    guard value.count == 87, segments.count == 2 else { return false }
+    return segments.allSatisfy { segment in
+      segment.count == 43
+        && segment.unicodeScalars.allSatisfy {
+          CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_"
+        }
+    }
   }
 
   public func clearCookies() {

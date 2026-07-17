@@ -51,6 +51,27 @@ struct AppleAuthorizationFlowTests {
     #expect(!flow.hasPendingNonce)
   }
 
+  @Test("A duplicate authorization request cancels rather than replacing the pending nonce")
+  func duplicateConfigureCancelsPendingNonce() {
+    var generated = 0
+    let flow = AppleAuthorizationFlow(nonceGenerator: {
+      generated += 1
+      return generated == 1
+        ? "abcdefghijklmnopqrstuvwxyzABCDEF"
+        : "0123456789abcdefghijklmnopqrstuv"
+    })
+    let first = ASAuthorizationAppleIDProvider().createRequest()
+    let duplicate = ASAuthorizationAppleIDProvider().createRequest()
+
+    flow.configure(first)
+    flow.configure(duplicate)
+
+    #expect(first.nonce == "abcdefghijklmnopqrstuvwxyzABCDEF")
+    #expect(duplicate.nonce == nil)
+    #expect(generated == 1)
+    #expect(!flow.hasPendingNonce)
+  }
+
   @Test("Production nonce has at least 32 random bytes encoded as unpadded base64url")
   func secureNonceShape() throws {
     let first = try AppleAuthorizationFlow.secureNonce()

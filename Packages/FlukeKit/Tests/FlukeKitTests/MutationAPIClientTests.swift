@@ -3,21 +3,31 @@ import Testing
 
 @testable import FlukeKit
 
+private let validMutationCSRFToken =
+  "\(String(repeating: "a", count: 43)).\(String(repeating: "b", count: 43))"
+private let otherMutationCSRFToken =
+  "\(String(repeating: "c", count: 43)).\(String(repeating: "d", count: 43))"
+
 @Suite("Mutation API client")
 struct MutationAPIClientTests {
   @Test(
     "CSRF cookie must be exact secure and API-origin matching",
     arguments: [
-      ("fluke_csrf", "api.fluke.test", false),
-      ("Fluke_Csrf", "api.fluke.test", true),
-      ("fluke_csrf", "other.fluke.test", true),
+      ("fluke_csrf", "api.fluke.test", "/api/v1", false),
+      ("Fluke_Csrf", "api.fluke.test", "/api/v1", true),
+      ("fluke_csrf", "other.fluke.test", "/api/v1", true),
+      ("fluke_csrf", "api.fluke.test", "/", true),
+      ("fluke_csrf", "api.fluke.test", "/api", true),
+      ("fluke_csrf", "api.fluke.test", "/api/v1/auth", true),
     ])
-  func rejectsUnsafeCSRFCookie(name: String, domain: String, secure: Bool) async throws {
+  func rejectsUnsafeCSRFCookie(name: String, domain: String, path: String, secure: Bool)
+    async throws
+  {
     let storage = HTTPCookieStorage.sharedCookieStorage(
       forGroupContainerIdentifier: UUID().uuidString)
     var properties: [HTTPCookiePropertyKey: Any] = [
-      .domain: domain, .path: "/", .name: name,
-      .value: String(repeating: "c", count: 32),
+      .domain: domain, .path: path, .name: name,
+      .value: validMutationCSRFToken,
     ]
     if secure { properties[.secure] = "TRUE" }
     let cookie = try #require(HTTPCookie(properties: properties))
@@ -38,13 +48,12 @@ struct MutationAPIClientTests {
   func rejectsDuplicateCSRFCookies() async throws {
     let storage = HTTPCookieStorage.sharedCookieStorage(
       forGroupContainerIdentifier: UUID().uuidString)
-    for path in ["/", "/api"] {
+    for path in ["/", "/api/v1"] {
       storage.setCookie(
         try #require(
           HTTPCookie(properties: [
             .domain: "api.fluke.test", .path: path, .name: "fluke_csrf",
-            .value: path == "/"
-              ? String(repeating: "a", count: 32) : String(repeating: "b", count: 32),
+            .value: path == "/" ? otherMutationCSRFToken : validMutationCSRFToken,
             .secure: "TRUE",
           ])))
     }
@@ -60,8 +69,10 @@ struct MutationAPIClientTests {
   @Test(
     "CSRF cookie rejects missing and malformed values",
     arguments: [
-      nil, String(repeating: "c", count: 31), String(repeating: "c", count: 513),
-      String(repeating: "c", count: 31) + "!",
+      nil, String(repeating: "c", count: 86),
+      "\(String(repeating: "c", count: 42)).\(String(repeating: "d", count: 43))",
+      "\(String(repeating: "c", count: 43))..\(String(repeating: "d", count: 43))",
+      "\(String(repeating: "c", count: 43)).\(String(repeating: "d", count: 42))!",
     ])
   func rejectsMalformedCSRFValue(value: String?) async throws {
     let storage = HTTPCookieStorage.sharedCookieStorage(
@@ -70,7 +81,7 @@ struct MutationAPIClientTests {
       storage.setCookie(
         try #require(
           HTTPCookie(properties: [
-            .domain: "api.fluke.test", .path: "/", .name: "fluke_csrf",
+            .domain: "api.fluke.test", .path: "/api/v1", .name: "fluke_csrf",
             .value: value, .secure: "TRUE",
           ])))
     }
@@ -147,6 +158,24 @@ struct MutationAPIClientTests {
 
     #expect(response.id == "retried")
     #expect(await transport.requests.count == 2)
+  }
+
+  @Test("JSON POST can disable retry for one-use credentials")
+  func jsonPostWithoutRetry() async throws {
+    let transport = MutationTransport([
+      .failure(URLError(.networkConnectionLost)),
+      .response(status: 200, body: Data(#"{"id":"must-not-run"}"#.utf8)),
+    ])
+    let client = makeClient(transport: transport)
+
+    await #expect(throws: APIError.transport) {
+      let _: MutationResponse = try await client.post(
+        APIRequest(path: "/api/v1/auth/apple"),
+        body: MutationBody(note: "one use"),
+        retryPolicy: .never
+      )
+    }
+    #expect(await transport.requests.count == 1)
   }
 
   @Test("Multipart keeps one transient retry by default")

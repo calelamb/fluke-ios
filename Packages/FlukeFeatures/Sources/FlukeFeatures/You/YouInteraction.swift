@@ -3,6 +3,7 @@ import SwiftUI
 
 enum YouInteractiveControl: String, CaseIterable {
   case retry = "you.retry"
+  case signIn = "you.sign-in"
   case signOut = "you.sign-out"
   case deleteAccount = "you.delete-account"
   case reauthenticateDeletion = "you.reauthenticate-deletion"
@@ -12,6 +13,35 @@ enum YouInteractiveControl: String, CaseIterable {
   case attribution = "you.attribution"
 
   var minimumHitDimension: CGFloat { 44 }
+}
+
+struct YouAccountControlState: Equatable {
+  let accountMutationInFlight: Bool
+  let signInAuthorizationPending: Bool
+  let deletionAuthorizationPending: Bool
+
+  init(
+    accountMutationInFlight: Bool = false,
+    signInAuthorizationPending: Bool = false,
+    deletionAuthorizationPending: Bool = false
+  ) {
+    self.accountMutationInFlight = accountMutationInFlight
+    self.signInAuthorizationPending = signInAuthorizationPending
+    self.deletionAuthorizationPending = deletionAuthorizationPending
+  }
+
+  func isDisabled(_ control: YouInteractiveControl) -> Bool {
+    switch control {
+    case .signIn:
+      accountMutationInFlight || signInAuthorizationPending
+    case .signOut:
+      accountMutationInFlight
+    case .deleteAccount, .reauthenticateDeletion:
+      accountMutationInFlight || deletionAuthorizationPending
+    case .retry, .about, .privacy, .support, .attribution:
+      false
+    }
+  }
 }
 
 extension View {

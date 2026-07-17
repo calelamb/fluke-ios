@@ -1,6 +1,6 @@
 # Task 4B Report: Observer Auth Contract Integration
 
-Status: DONE_WITH_CONCERNS
+Status: DONE_WITH_CONCERNS (review findings resolved)
 
 Base: `84c9a9b`
 
@@ -24,6 +24,14 @@ Base: `84c9a9b`
 - Preserved optional anonymous browsing, authenticated state/cookies after failed deletion, and server-success-before-local-cleanup ordering.
 - Kept credentials and CSRF material out of Keychain and logging; the existing Keychain entry remains a non-secret Boolean reauthentication hint.
 
+## Review Hardening
+
+- Matched API commit `6cb1cae` exactly for CSRF: one secure, exact-host cookie at `/api/v1`, with an exact `43-base64url.43-base64url` token and response/cookie equality.
+- Added a typed JSON retry policy and disabled retries only for the one-use Apple authorization-code exchange; existing JSON and multipart callers retain their prior transient retry default.
+- Serialized sign-out and deletion with an observable account-mutation gate and generation checks so an older completion cannot restore authenticated state after a newer expiration.
+- Made Apple authorization flow state observable, cancelled duplicate configuration without replacing its valid pending nonce, and disabled conflicting account controls while authorization or mutation work is pending.
+- Enforced the API's exact 120-character observer display-name maximum on decoded current-user and sign-in responses.
+
 ## TDD / Security Evidence
 
 - Initial contract tests failed to compile against the old two-field credential, bodyless deletion, 204 response, and API client without cookie-backed CSRF support.
@@ -34,15 +42,17 @@ Base: `84c9a9b`
   - the same focused test passed with exit 0
 - Focused FlukeKit auth/mutation run: 20 tests across 3 suites passed, including 9 malformed credential cases, 4 malformed CSRF cases, strict response keys/role, exact status, and fresh deletion body.
 - Focused app auth/nonce run: 12 tests passed before the final full app run; final full app run included all added tests.
+- Review RED proof: focused package tests initially failed to compile because the typed no-retry JSON option and pending-control state did not exist; production code was added only after those tests.
+- Review focused GREEN proof: 23 FlukeKit auth/mutation tests, 4 You interaction tests, and the focused app AuthSession/Apple authorization targets passed.
 - Secret/log diff scan found no new `print`, logger, `os_log`, or credential-to-Keychain path.
 
 ## Fresh Verification
 
-- Full `FlukeKit`: 133 tests in 21 suites passed; source coverage 92.32% (1850/2004).
+- Full `FlukeKit`: passed; source coverage 92.03% (1860/2021).
 - Full `FlukeUI`: passed; source coverage 93.33% (532/570).
-- Full `FlukeFeatures`: 64 Swift Testing cases plus legacy render tests passed; selected logic coverage 86.50% (801/926).
-- Full app unit target on iPhone 17 / iOS 26.0.1: 28 tests / 42 parameterized runs, 0 failures.
-- App line coverage: 80.42% (805/1001), above the 80% gate.
+- Full `FlukeFeatures`: 65 Swift Testing cases plus legacy render tests passed; selected logic coverage 87.87% (840/956).
+- Full app unit target on iPhone 17 / iOS 26.0.1: 31 tests plus parameterized cases, 0 failures; the public-browse UI boundary test also passed.
+- App line coverage: 85.32% (901/1056), above the 80% gate.
 - Generic iOS Simulator Release build: exit 0.
 - `swift-format lint --strict` on every changed Swift file: exit 0.
 - `git diff --check`: exit 0.

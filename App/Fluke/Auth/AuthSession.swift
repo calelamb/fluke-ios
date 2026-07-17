@@ -25,10 +25,13 @@ final class AuthSession {
 
   private(set) var state: State = .restoring
   private(set) var notice: AuthPresentationError?
+  private(set) var isAccountMutationInFlight = false
 
   private let service: any AuthServiceProtocol
   private let hints: any SessionHintStore
   private let accountAssociations: any AccountAssociationClearing
+  private var accountMutationGeneration: UInt64 = 0
+  private var activeAccountMutationGeneration: UInt64?
 
   init(
     service: any AuthServiceProtocol,
@@ -41,6 +44,7 @@ final class AuthSession {
   }
 
   func restore() async {
+    guard !isAccountMutationInFlight else { return }
     let knownUser = signedInUser
     if knownUser == nil { state = .restoring }
     notice = nil
@@ -60,6 +64,7 @@ final class AuthSession {
   }
 
   func signIn(credential: AppleCredential) async {
+    guard !isAccountMutationInFlight else { return }
     guard credential.isStructurallyValid else {
       state = .signedOut(error: .invalidAppleCredential)
       return
@@ -81,19 +86,24 @@ final class AuthSession {
   }
 
   func signOut() async {
+    guard let generation = beginAccountMutation() else { return }
+    defer { finishAccountMutation(generation) }
     let knownUser = signedInUser
     notice = nil
     do {
       try await service.signOut()
     } catch {
+      guard isCurrentAccountMutation(generation) else { return }
       if let knownUser { state = .signedIn(knownUser) }
       notice = presentationError(for: error)
       return
     }
+    guard isCurrentAccountMutation(generation) else { return }
     state = .signedOut(error: nil)
     do {
       try await hints.saveReauthenticationHint()
     } catch {
+      guard isCurrentAccountMutation(generation) else { return }
       notice = .unavailable("Fluke couldn't save your sign-in preference.")
     }
   }
@@ -104,10 +114,13 @@ final class AuthSession {
       notice = .invalidAppleCredential
       return
     }
+    guard let generation = beginAccountMutation() else { return }
+    defer { finishAccountMutation(generation) }
     notice = nil
     do {
       try await service.deleteAccount(credential: credential)
     } catch {
+      guard isCurrentAccountMutation(generation) else { return }
       state = .signedIn(knownUser)
       notice = deletionPresentationError(for: error)
       return
@@ -129,15 +142,18 @@ final class AuthSession {
           "Your account was deleted, but local cleanup needs another attempt."
         )
     }
+    guard isCurrentAccountMutation(generation) else { return }
     state = .signedOut(error: cleanupError)
   }
 
   func expire() {
+    invalidateAccountMutation()
     state = .signedOut(error: nil)
     notice = nil
   }
 
   func expireWithInvalidCredential() {
+    invalidateAccountMutation()
     state = .signedOut(error: .invalidAppleCredential)
     notice = nil
   }
@@ -154,6 +170,32 @@ final class AuthSession {
 
   var isAuthenticated: Bool { signedInUser != nil }
   var authenticatedEmail: String? { signedInUser?.email }
+
+  private func beginAccountMutation() -> UInt64? {
+    guard !isAccountMutationInFlight else { return nil }
+    accountMutationGeneration &+= 1
+    activeAccountMutationGeneration = accountMutationGeneration
+    isAccountMutationInFlight = true
+    return accountMutationGeneration
+  }
+
+  private func isCurrentAccountMutation(_ generation: UInt64) -> Bool {
+    isAccountMutationInFlight
+      && activeAccountMutationGeneration == generation
+      && accountMutationGeneration == generation
+  }
+
+  private func finishAccountMutation(_ generation: UInt64) {
+    guard isCurrentAccountMutation(generation) else { return }
+    activeAccountMutationGeneration = nil
+    isAccountMutationInFlight = false
+  }
+
+  private func invalidateAccountMutation() {
+    accountMutationGeneration &+= 1
+    activeAccountMutationGeneration = nil
+    isAccountMutationInFlight = false
+  }
 
   private func presentationError(for error: Error) -> AuthPresentationError {
     if error as? AuthServiceError == .invalidAppleCredential {

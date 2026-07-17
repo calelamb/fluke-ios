@@ -24,6 +24,7 @@
       #expect(
         YouInteractiveControl.allCases == [
           .retry,
+          .signIn,
           .signOut,
           .deleteAccount,
           .reauthenticateDeletion,
@@ -34,6 +35,21 @@
         ]
       )
       #expect(YouInteractiveControl.allCases.allSatisfy { $0.minimumHitDimension == 44 })
+    }
+
+    @Test("Pending authorization and account mutations disable conflicting controls")
+    func pendingControlsAreDisabled() {
+      let mutation = YouAccountControlState(accountMutationInFlight: true)
+      #expect(mutation.isDisabled(.signOut))
+      #expect(mutation.isDisabled(.deleteAccount))
+      #expect(mutation.isDisabled(.reauthenticateDeletion))
+
+      let signIn = YouAccountControlState(signInAuthorizationPending: true)
+      #expect(signIn.isDisabled(.signIn))
+
+      let deletion = YouAccountControlState(deletionAuthorizationPending: true)
+      #expect(deletion.isDisabled(.deleteAccount))
+      #expect(deletion.isDisabled(.reauthenticateDeletion))
     }
 
     @Test("Resource links stack at compact width with accessibility text")

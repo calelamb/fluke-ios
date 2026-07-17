@@ -28,7 +28,8 @@ public struct AuthService: AuthServiceProtocol, Sendable {
         identityToken: values.identityToken,
         nonce: credential.nonce,
         fullName: name?.isEmpty == false ? name : nil
-      )
+      ),
+      retryPolicy: .never
     )
     let cookieToken = try api.validatedCSRFCookieValue(
       for: APIRequest(path: ReleaseBEndpoint.authApple)
@@ -79,7 +80,7 @@ public struct AuthService: AuthServiceProtocol, Sendable {
       throw APIError.malformedResponse
     }
     let displayName = user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard displayName == nil || isValid(displayName ?? "", maximum: 200) else {
+    guard displayName == nil || isValid(displayName ?? "", maximum: 120) else {
       throw APIError.malformedResponse
     }
     return AuthenticatedUser(

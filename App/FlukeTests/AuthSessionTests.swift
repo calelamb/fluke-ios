@@ -192,6 +192,59 @@ struct AuthSessionTests {
     #expect(await associations.clearCallCount == 1)
   }
 
+  @Test("A stale sign-out failure cannot restore a session expired by newer state")
+  func staleSignOutCannotRestoreExpiredSession() async {
+    let gate = AsyncTestGate()
+    let service = AuthServiceSpy(
+      signInResult: .success(.fixture),
+      signOutResult: .failure(APIError.offline),
+      signOutGate: gate
+    )
+    let session = AuthSession(
+      service: service,
+      hints: MemorySessionHintStore(),
+      accountAssociations: AccountAssociationSpy()
+    )
+    await session.signIn(credential: .validFixture)
+
+    let signOut = Task { await session.signOut() }
+    while await service.signOutCallCount == 0 { await Task.yield() }
+    #expect(session.isAccountMutationInFlight)
+
+    session.expire()
+    await gate.open()
+    await signOut.value
+
+    #expect(session.state == .signedOut(error: nil))
+    #expect(!session.isAccountMutationInFlight)
+  }
+
+  @Test("Account deletion serializes against sign out")
+  func deletionSerializesAgainstSignOut() async {
+    let gate = AsyncTestGate()
+    let service = AuthServiceSpy(
+      signInResult: .success(.fixture),
+      deleteGate: gate
+    )
+    let session = AuthSession(
+      service: service,
+      hints: MemorySessionHintStore(),
+      accountAssociations: AccountAssociationSpy()
+    )
+    await session.signIn(credential: .validFixture)
+
+    let deletion = Task { await session.deleteAccount(credential: .validFixture) }
+    while await service.deleteCallCount == 0 { await Task.yield() }
+    await session.signOut()
+
+    #expect(await service.signOutCallCount == 0)
+    #expect(session.isAccountMutationInFlight)
+    await gate.open()
+    await deletion.value
+    #expect(session.state == .signedOut(error: nil))
+    #expect(!session.isAccountMutationInFlight)
+  }
+
   @Test("The durable submission queue bridge exposes queued sightings and clears account email")
   func durableSubmissionQueueBridge() async throws {
     let directory = FileManager.default.temporaryDirectory
@@ -237,6 +290,8 @@ private actor AuthServiceSpy: AuthServiceProtocol {
   private let currentUserResult: Result<AuthenticatedUser, Error>
   private let signOutResult: Result<Void, Error>
   private let deleteResult: Result<Void, Error>
+  private let signOutGate: AsyncTestGate?
+  private let deleteGate: AsyncTestGate?
   private(set) var signOutCallCount = 0
   private(set) var deleteCallCount = 0
 
@@ -244,12 +299,16 @@ private actor AuthServiceSpy: AuthServiceProtocol {
     signInResult: Result<AuthenticatedUser, Error> = .failure(APIError.transport),
     currentUserResult: Result<AuthenticatedUser, Error> = .failure(APIError.transport),
     signOutResult: Result<Void, Error> = .success(()),
-    deleteResult: Result<Void, Error> = .success(())
+    deleteResult: Result<Void, Error> = .success(()),
+    signOutGate: AsyncTestGate? = nil,
+    deleteGate: AsyncTestGate? = nil
   ) {
     self.signInResult = signInResult
     self.currentUserResult = currentUserResult
     self.signOutResult = signOutResult
     self.deleteResult = deleteResult
+    self.signOutGate = signOutGate
+    self.deleteGate = deleteGate
   }
 
   func signIn(credential: AppleCredential) async throws -> AuthenticatedUser {
@@ -262,12 +321,30 @@ private actor AuthServiceSpy: AuthServiceProtocol {
 
   func signOut() async throws {
     signOutCallCount += 1
+    if let signOutGate { await signOutGate.wait() }
     try signOutResult.get()
   }
 
   func deleteAccount(credential: AppleCredential) async throws {
     deleteCallCount += 1
+    if let deleteGate { await deleteGate.wait() }
     try deleteResult.get()
+  }
+}
+
+private actor AsyncTestGate {
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var isOpen = false
+
+  func wait() async {
+    if isOpen { return }
+    await withCheckedContinuation { continuation = $0 }
+  }
+
+  func open() {
+    isOpen = true
+    continuation?.resume()
+    continuation = nil
   }
 }
 

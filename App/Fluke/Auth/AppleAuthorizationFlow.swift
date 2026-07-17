@@ -1,9 +1,11 @@
 import AuthenticationServices
 import FlukeReleaseB
 import Foundation
+import Observation
 import Security
 
 @MainActor
+@Observable
 final class AppleAuthorizationFlow {
   typealias NonceGenerator = @MainActor () throws -> String
 
@@ -17,8 +19,12 @@ final class AppleAuthorizationFlow {
   var hasPendingNonce: Bool { pendingNonce != nil }
 
   func configure(_ request: ASAuthorizationAppleIDRequest) {
-    pendingNonce = nil
     request.requestedScopes = [.fullName, .email]
+    guard pendingNonce == nil else {
+      cancel()
+      request.nonce = nil
+      return
+    }
     guard let nonce = try? nonceGenerator(), Self.isValidNonce(nonce) else {
       request.nonce = nil
       return
