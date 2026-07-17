@@ -101,6 +101,41 @@ public struct APIClient: Sendable {
         )
     }
 
+    public func postNoContent<Request: Encodable & Sendable>(
+        _ request: APIRequest,
+        body: Request
+    ) async throws {
+        let encodedBody: Data
+        do {
+            encodedBody = try JSONEncoder().encode(body)
+        } catch {
+            throw APIError.invalidRequest
+        }
+        try await sendNoContent(
+            method: "POST",
+            request: request,
+            mutation: try MutationRequest(
+                body: encodedBody,
+                contentType: "application/json"
+            )
+        )
+    }
+
+    public func deleteNoContent(_ request: APIRequest) async throws {
+        try await sendNoContent(method: "DELETE", request: request, mutation: nil)
+    }
+
+    public func clearCookies() {
+        guard let cookies, let host = baseURL.host?.lowercased() else { return }
+        cookies.cookies?
+            .filter { cookie in
+                cookie.domain
+                    .lowercased()
+                    .trimmingCharacters(in: CharacterSet(charactersIn: ".")) == host
+            }
+            .forEach(cookies.deleteCookie)
+    }
+
     private func send<T: Decodable>(
         method: String,
         request apiRequest: APIRequest,
@@ -142,6 +177,46 @@ public struct APIClient: Sendable {
         case 401:
             throw APIError.unauthorized
         default:
+            throw decodeRemoteError(status: response.statusCode, data: data)
+        }
+    }
+
+    private func sendNoContent(
+        method: String,
+        request apiRequest: APIRequest,
+        mutation: MutationRequest?
+    ) async throws {
+        let request = try makeURLRequest(
+            method: method,
+            apiRequest: apiRequest,
+            mutation: mutation
+        )
+        let data: Data
+        let response: HTTPURLResponse
+        do {
+            (data, response) = try await transportData(
+                for: request,
+                retriesTransientFailure: false
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as APIError {
+            throw error
+        } catch let error as URLError where error.code == .notConnectedToInternet {
+            throw APIError.offline
+        } catch let error as URLError where error.code == .timedOut {
+            throw APIError.timeout
+        } catch {
+            throw APIError.transport
+        }
+
+        guard response.statusCode == 204, data.isEmpty else {
+            if response.statusCode == 401 {
+                throw APIError.unauthorized
+            }
+            if (200...299).contains(response.statusCode) {
+                throw APIError.malformedResponse
+            }
             throw decodeRemoteError(status: response.statusCode, data: data)
         }
     }
