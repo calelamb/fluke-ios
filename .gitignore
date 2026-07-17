@@ -33,5 +33,8 @@ fastlane/test_output
 .vscode/
 .idea/
 
+# Local isolated development worktrees
+.worktrees/
+
 # Script temporary data
 scripts/data/
