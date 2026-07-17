@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Prediction: Codable, Sendable {
+public struct Prediction: Codable, Hashable, Sendable {
     public let cells: [PredictionCell]
     public let confidence: Double
     public let modelVersion: String

@@ -16,7 +16,8 @@ let package = Package(
         .testTarget(
             name: "FlukeKitTests",
             dependencies: ["FlukeKit"],
-            path: "Tests/FlukeKitTests"
+            path: "Tests/FlukeKitTests",
+            resources: [.process("Fixtures")]
         ),
     ]
 )

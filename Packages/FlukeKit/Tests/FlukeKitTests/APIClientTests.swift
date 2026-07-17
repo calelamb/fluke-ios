@@ -21,19 +21,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func test_get_decodesArrayOfWhales() async throws {
-        let body = """
-        [{
-          "id": "wh_a",
-          "catalogId": "J35",
-          "name": "Tahlequah",
-          "ecotype": "RESIDENT",
-          "pod": "J",
-          "biography": null,
-          "heroImageUrl": null,
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "updatedAt": "2026-01-01T00:00:00.000Z"
-        }]
-        """.data(using: .utf8)!
+        let body = try FixtureLoader.data(named: "whales")
 
         MockURLProtocol.handler = { request in
             XCTAssertEqual(request.url?.path, "/api/v1/whales")
@@ -50,7 +38,7 @@ final class APIClientTests: XCTestCase {
 
         let whales: [Whale] = try await client.get("/api/v1/whales")
         XCTAssertEqual(whales.count, 1)
-        XCTAssertEqual(whales.first?.catalogId, "J35")
+        XCTAssertEqual(whales.first?.catalogId, "FX-001")
     }
 
     func test_get_throwsUnauthorizedOn401() async {

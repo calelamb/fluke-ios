@@ -1,0 +1,12 @@
+{
+  "cells": [
+    {
+      "lat": 34.567,
+      "lng": -67.89,
+      "probability": 0.72
+    }
+  ],
+  "computedAt": "2026-07-16T18:00:00.000Z",
+  "confidence": 0.68,
+  "modelVersion": "fixture-prediction-v1"
+}

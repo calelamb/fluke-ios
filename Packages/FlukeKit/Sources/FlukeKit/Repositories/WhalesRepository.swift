@@ -15,7 +15,7 @@ public actor WhalesRepository {
         try await api.get(Endpoint.whales)
     }
 
-    public func find(byId id: String) async throws -> Whale? {
+    public func find(byId id: String) async throws -> WhaleProfile? {
         try await api.get(Endpoint.whale(id: id))
     }
 

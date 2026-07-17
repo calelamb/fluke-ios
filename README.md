@@ -1,10 +1,10 @@
 # Fluke iOS
 
-Native iOS companion to [Fluke](../fluke), the Pacific Northwest orca sightings map.
+Native iOS companion to [Fluke](https://github.com/calelamb/fluke), the Pacific Northwest orca sightings map.
 
 ## What this is
 
-A SwiftUI iOS app that pairs with the existing Fluke web/API. Five tabs — **Sightings**, **Whales**, **Identify**, **Learn**, **You** — plus a full-screen **Movement Tracks** experience that visualizes a single whale's observed path across years. The app talks to the same Fastify+Prisma+Postgres backend the web app uses; there is no separate iOS server.
+A SwiftUI iOS app that pairs with the Fluke website and its standalone API. Five tabs — **Sightings**, **Whales**, **Identify**, **Learn**, **You** — plus a full-screen **Movement Tracks** experience that visualizes a single whale's observed path across years. The app talks directly to the shared Fastify+Prisma+Postgres service; there is no separate iOS server.
 
 ## Stack
 
@@ -13,7 +13,7 @@ A SwiftUI iOS app that pairs with the existing Fluke web/API. Five tabs — **Si
   - `FlukeKit` — pure-Swift domain layer (API client, models, persistence). No SwiftUI imports.
   - `FlukeUI` — design system (color/font/animation tokens, `DorsalFinShape`, components). SwiftUI-only.
   - `FlukeFeatures` — feature modules, one folder per tab. Depends on Kit + UI.
-- **Backend:** shared with the web at `../fluke/apps/api`.
+- **Backend:** [`calelamb/fluke-api`](https://github.com/calelamb/fluke-api), cloned locally as the sibling directory `../fluke-api`.
 - **Map basemap:** [MapLibre Native iOS](https://github.com/maplibre/maplibre-gl-native-distribution) with [OpenFreeMap](https://openfreemap.org/) tiles.
 - **No third-party HTTP library** — `URLSession` directly.
 
@@ -26,13 +26,32 @@ A SwiftUI iOS app that pairs with the existing Fluke web/API. Five tabs — **Si
 To talk to the local API:
 
 ```bash
-cd ../fluke
-pnpm install
+cd ../fluke-api
+pnpm install --frozen-lockfile
+pnpm db:generate
+pnpm db:migrate:deploy
 pnpm db:seed   # populates whales + sightings
 pnpm dev       # API runs on http://localhost:4000
 ```
 
 The iOS app's default API base is `http://localhost:4000` — set via `FlukeAPIBaseURL` in `App/Fluke/Info.plist`. Override per-build configuration when you need staging/production.
+
+## API contracts
+
+[`fluke-api`](https://github.com/calelamb/fluke-api) is the source of truth for API schemas and deterministic contract fixtures. `FlukeKit` decodes exact copies of the released fixtures so a backend shape change fails in the client test suite before release.
+
+After changing and releasing an API contract, refresh the iOS copies from sibling clones and run both package suites:
+
+```bash
+cp ../fluke-api/contracts/fixtures/*.json Packages/FlukeKit/Tests/FlukeKitTests/Fixtures/
+for fixture in ../fluke-api/contracts/fixtures/*.json; do
+  cmp "$fixture" "Packages/FlukeKit/Tests/FlukeKitTests/Fixtures/$(basename "$fixture")"
+done
+swift test --package-path Packages/FlukeKit
+swift test --package-path Packages/FlukeFeatures
+```
+
+Do not hand-edit the copied JSON or add client-only fields. Update the API contract and regenerate its artifacts first, then align the explicit Swift DTOs to the released shape.
 
 ## Documentation
 

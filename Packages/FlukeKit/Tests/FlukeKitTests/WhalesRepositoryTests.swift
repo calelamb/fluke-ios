@@ -19,15 +19,9 @@ final class WhalesRepositoryTests: XCTestCase {
     }
 
     func test_fetchAll_decodesArrayOfWhales() async throws {
+        let body = try FixtureLoader.data(named: "whales")
         MockURLProtocol.handler = { req in
             XCTAssertEqual(req.url?.path, "/api/v1/whales")
-            let body = """
-            [{
-              "id":"wh_a","catalogId":"J35","name":"Tahlequah","ecotype":"RESIDENT",
-              "pod":"J","biography":null,"heroImageUrl":null,
-              "createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"
-            }]
-            """.data(using: .utf8)!
             return (
                 HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                 body
@@ -35,7 +29,22 @@ final class WhalesRepositoryTests: XCTestCase {
         }
         let whales = try await repo.fetchAll()
         XCTAssertEqual(whales.count, 1)
-        XCTAssertEqual(whales.first?.catalogId, "J35")
+        XCTAssertEqual(whales.first?.catalogId, "FX-001")
+    }
+
+    func test_find_decodesWhaleProfile() async throws {
+        let body = try FixtureLoader.data(named: "whale-detail")
+        MockURLProtocol.handler = { req in
+            XCTAssertEqual(req.url?.path, "/api/v1/whales/fixture-whale-alpha")
+            return (
+                HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                body
+            )
+        }
+
+        let whale = try await repo.find(byId: "fixture-whale-alpha")
+        XCTAssertEqual(whale?.mother?.catalogId, "FX-000")
+        XCTAssertEqual(whale?.recentSightings.first?.id, "fixture-sighting-1")
     }
 
     func test_fetchTrack_decodesArrayOfTrackPoints() async throws {
