@@ -5,9 +5,14 @@ import SwiftUI
 public struct SightingDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let item: SightingsViewModel.DisplayItem
+    private let openWhaleMovement: ((String) -> Void)?
 
-    public init(item: SightingsViewModel.DisplayItem) {
+    public init(
+        item: SightingsViewModel.DisplayItem,
+        onOpenWhaleMovement: ((String) -> Void)? = nil
+    ) {
         self.item = item
+        openWhaleMovement = onOpenWhaleMovement
     }
 
     public var body: some View {
@@ -61,12 +66,27 @@ public struct SightingDetailView: View {
     private var sourceSection: some View {
         switch item.payload {
         case .fluke(let sighting):
-            detailSection(
-                "Source",
-                text: sighting.identifiedWhales.isEmpty
-                    ? "Fluke public sighting"
-                    : "Fluke public sighting. Identified whales: \(sighting.identifiedWhales.map(\.catalogId).joined(separator: ", "))."
-            )
+            VStack(alignment: .leading, spacing: 10) {
+                detailSection(
+                    "Source",
+                    text: sighting.identifiedWhales.isEmpty
+                        ? "Fluke public sighting"
+                        : "Fluke public sighting. Identified whales: \(sighting.identifiedWhales.map(\.catalogId).joined(separator: ", "))."
+                )
+                if let openWhaleMovement {
+                    ForEach(sighting.identifiedWhales, id: \.catalogId) { whale in
+                        Button {
+                            openWhaleMovement(whale.catalogId)
+                        } label: {
+                            Label("See \(whale.catalogId) movement", systemImage: "point.3.connected.trianglepath.dotted")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(minHeight: 44)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityHint("Opens the whale's full-screen movement record")
+                    }
+                }
+            }
         case .external(let sighting):
             VStack(alignment: .leading, spacing: 8) {
                 detailSection("Source", text: sighting.attribution)

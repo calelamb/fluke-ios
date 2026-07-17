@@ -4,15 +4,21 @@ import SwiftUI
 
 public struct WhaleProfileView: View {
     @State private var viewModel: WhaleProfileViewModel
+    @State private var isMovementPresented = false
+    private let repository: any WhalesRepositoryProtocol
     private let openTrace: () -> Void
+    private let openSubmit: () -> Void
 
     public init(
         whale: Whale,
         repository: any WhalesRepositoryProtocol,
-        onOpenTrace: @escaping () -> Void = {}
+        onOpenTrace: @escaping () -> Void = {},
+        onOpenSubmit: @escaping () -> Void = {}
     ) {
         _viewModel = State(initialValue: WhaleProfileViewModel(whale: whale, repository: repository))
+        self.repository = repository
         openTrace = onOpenTrace
+        openSubmit = onOpenSubmit
     }
 
     public var body: some View {
@@ -48,6 +54,13 @@ public struct WhaleProfileView: View {
         .background(Color.fog)
         .navigationTitle(viewModel.whale.catalogId)
         .task { await viewModel.load() }
+        .movementCover(isPresented: $isMovementPresented) {
+            MovementTrackView(
+                repository: repository,
+                whale: viewModel.whale,
+                onSubmitSighting: openSubmit
+            )
+        }
     }
 
     private func profileContent(_ profile: WhaleProfile) -> some View {
@@ -57,13 +70,20 @@ public struct WhaleProfileView: View {
                     noticeView(notice)
                 }
                 identity(profile.whale)
-                Button(action: openTrace) {
-                    Label("See movement in Atlas", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                Button { isMovementPresented = true } label: {
+                    Label("See movement", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: 48)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.tide)
+                Button(action: openTrace) {
+                    Label("Explore in Atlas", systemImage: "globe.americas")
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: 48)
+                }
+                .buttonStyle(.bordered)
+                .tint(.deep)
                 optionalTextSection("Biography", profile.whale.biography)
                 optionalTextSection("Distinguishing marks", profile.whale.distinguishingMarks)
                 family(profile)
@@ -183,6 +203,20 @@ public struct WhaleProfileView: View {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+extension View {
+    @ViewBuilder
+    fileprivate func movementCover<Destination: View>(
+        isPresented: Binding<Bool>,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        #if os(macOS)
+        sheet(isPresented: isPresented, content: destination)
+        #else
+        fullScreenCover(isPresented: isPresented, content: destination)
+        #endif
     }
 }
 
