@@ -25,7 +25,7 @@ final class LaunchComponentSnapshotTests: XCTestCase {
     func test_increasedContrast() throws {
         try assertGallery(
             named: "increased-contrast",
-            gallery: componentGallery()
+            gallery: componentGallery().flukeContrast(.increased)
         )
     }
 

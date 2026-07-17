@@ -92,6 +92,7 @@ struct RootScene: View {
         .tag(RootTab.you)
       }
     }
+    .flukeSystemContrast()
     .task {
       capabilities = await LaunchCapabilityState.load(
         using: environment.fetchCapabilities

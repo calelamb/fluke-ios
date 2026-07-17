@@ -25,6 +25,7 @@ public struct FlukeButtonStyle: ButtonStyle, Sendable {
 
 private struct FlukeButtonLabel: View {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.flukeContrast) private var contrast
 
     let configuration: FlukeButtonStyle.Configuration
     let kind: FlukeButtonKind
@@ -43,7 +44,7 @@ private struct FlukeButtonLabel: View {
     private var foregroundColor: Color {
         switch kind {
         case .primary: .bone
-        case .secondary: .tide
+        case .secondary: contrast == .increased ? .deep : .tide
         }
     }
 
@@ -52,11 +53,14 @@ private struct FlukeButtonLabel: View {
         switch kind {
         case .primary:
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.tide)
+                .fill(contrast == .increased ? Color.deep : Color.tide)
         case .secondary:
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color.bone)
-                .stroke(Color.tide, lineWidth: 1)
+                .stroke(
+                    contrast == .increased ? Color.deep : Color.tide,
+                    lineWidth: contrast == .increased ? 2 : 1
+                )
         }
     }
 }

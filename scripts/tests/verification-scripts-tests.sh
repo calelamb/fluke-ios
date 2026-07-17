@@ -206,6 +206,26 @@ expect_failure "Swift selected coverage rejects an empty selection" \
   "$swift_coverage_verifier" "$test_root/swift-coverage.json" 80 \
   --include '/Sources/FlukeFeatures/DoesNotExist\.swift$'
 
+expect_success "CI enforces FlukeUI source coverage" \
+  python3 - "$repo_root/.github/workflows/ci.yml" <<'PY'
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    workflow = source.read()
+
+pattern = re.compile(
+    r"(?m)^      - name: Enforce FlukeUI source line coverage\n"
+    r"        run: >-\n"
+    r"          scripts/verify-swift-package-coverage\.sh\n"
+    r"          build/verification/package-coverage/FlukeUI\.json\n"
+    r"          /Sources/FlukeUI/\n"
+    r"          80$"
+)
+if not pattern.search(workflow):
+    raise SystemExit("missing exact FlukeUI 80 percent source coverage gate")
+PY
+
 archive_path="$test_root/Fluke.xcarchive"
 python3 - "$archive_path" <<'PY'
 import os

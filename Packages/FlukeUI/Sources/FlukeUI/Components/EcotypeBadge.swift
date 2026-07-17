@@ -1,6 +1,8 @@
 import SwiftUI
 
 public struct EcotypeBadge: View {
+    @Environment(\.flukeContrast) private var contrast
+
     public let label: String
     public let color: Color
 
@@ -16,9 +18,12 @@ public struct EcotypeBadge: View {
             .lineLimit(1)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(color.opacity(0.22), in: Capsule())
+            .background(color.opacity(contrast == .increased ? 0.38 : 0.22), in: Capsule())
             .overlay {
-                Capsule().stroke(color, lineWidth: 1)
+                Capsule().stroke(
+                    contrast == .increased ? Color.abyss : color,
+                    lineWidth: contrast == .increased ? 2 : 1
+                )
             }
             .accessibilityLabel(label)
     }

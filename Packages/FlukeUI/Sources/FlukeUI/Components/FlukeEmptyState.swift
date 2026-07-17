@@ -1,6 +1,8 @@
 import SwiftUI
 
 public struct FlukeEmptyState: View {
+    @Environment(\.flukeContrast) private var contrast
+
     public let title: String
     public let message: String
 
@@ -34,7 +36,10 @@ public struct FlukeEmptyState: View {
         .fixedSize(horizontal: false, vertical: true)
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.mist, lineWidth: 1)
+                .stroke(
+                    contrast == .increased ? Color.deep : Color.mist,
+                    lineWidth: contrast == .increased ? 2 : 1
+                )
         }
     }
 }

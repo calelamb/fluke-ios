@@ -1,8 +1,14 @@
+import FlukeUI
 import SwiftUI
 
 @main
 struct FlukeApp: App {
-  private let bootstrap = AppBootstrap.load()
+  private let bootstrap: AppBootstrap
+
+  init() {
+    FlukeUIFontRegistration.registerIfNeeded()
+    bootstrap = AppBootstrap.load()
+  }
 
   var body: some Scene {
     WindowGroup {

@@ -1,6 +1,8 @@
 import SwiftUI
 
 public struct FlukeCard<Content: View>: View {
+    @Environment(\.flukeContrast) private var contrast
+
     private let content: Content
 
     public init(@ViewBuilder content: () -> Content) {
@@ -15,7 +17,10 @@ public struct FlukeCard<Content: View>: View {
             .background(Color.bone, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.mist, lineWidth: 1)
+                    .stroke(
+                        contrast == .increased ? Color.deep : Color.mist,
+                        lineWidth: contrast == .increased ? 2 : 1
+                    )
             }
     }
 }

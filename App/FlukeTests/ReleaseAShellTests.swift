@@ -1,6 +1,8 @@
 import FlukeKit
+import FlukeUI
 import Foundation
 import Testing
+import UIKit
 
 @testable import Fluke
 
@@ -16,6 +18,13 @@ struct ReleaseAShellTests {
         "Learn",
         "You",
       ])
+  }
+
+  @Test("App initialization registers the branded font before rendering")
+  func appRegistersFraunces() {
+    _ = FlukeApp()
+
+    #expect(UIFont(name: "Fraunces", size: 24) != nil)
   }
 
   @Test("The app environment accepts one isolated browse cache")

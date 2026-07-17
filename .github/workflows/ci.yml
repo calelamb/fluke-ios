@@ -65,6 +65,13 @@ jobs:
           /Sources/FlukeKit/
           80
 
+      - name: Enforce FlukeUI source line coverage
+        run: >-
+          scripts/verify-swift-package-coverage.sh
+          build/verification/package-coverage/FlukeUI.json
+          /Sources/FlukeUI/
+          80
+
       - name: Enforce FlukeFeatures testable-logic line coverage
         run: |
           scripts/verify-swift-package-coverage.sh \
