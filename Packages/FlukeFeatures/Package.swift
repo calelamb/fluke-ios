@@ -14,7 +14,11 @@ let package = Package(
     targets: [
         .target(
             name: "FlukeFeatures",
-            dependencies: ["FlukeKit", "FlukeUI"],
+            dependencies: [
+                .product(name: "FlukeKit", package: "FlukeKit"),
+                .product(name: "FlukeReleaseB", package: "FlukeKit"),
+                "FlukeUI",
+            ],
             path: "Sources/FlukeFeatures",
             resources: [.process("Resources")]
         ),

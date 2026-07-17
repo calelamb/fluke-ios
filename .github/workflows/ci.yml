@@ -20,8 +20,8 @@ env:
   FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS: 120
 
 jobs:
-  release-a-verification:
-    name: Release A iOS verification
+  full-launch-verification:
+    name: Full launch iOS verification
     runs-on: macos-15
     timeout-minutes: 50
     steps:
@@ -78,7 +78,7 @@ jobs:
       - name: Verify App Store release artifacts
         run: scripts/verify-app-store-release.sh
 
-      - name: Run meaningful app tests with coverage
+      - name: Full launch iOS verification
         timeout-minutes: 10
         env:
           FLUKE_RESULT_BUNDLE_PATH: build/verification/AppTests.xcresult
@@ -134,7 +134,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-a-ios-verification-${{ github.run_attempt }}
+          name: full-launch-ios-verification-${{ github.run_attempt }}
           if-no-files-found: warn
           retention-days: 14
           path: |

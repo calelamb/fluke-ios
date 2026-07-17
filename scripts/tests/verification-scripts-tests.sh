@@ -546,7 +546,7 @@ boundary_sources="$test_root/boundary-sources"
 feature_sources="$test_root/feature-sources"
 mkdir -p "$boundary_sources"
 mkdir -p "$feature_sources"
-printf 'let shippingViews = [SightingsView.self, WhalesView.self, LearnView.self, AtlasView.self]\n' \
+printf 'let shippingViews = [SightingsView.self, WhalesView.self, IdentifyView.self, LearnView.self, YouView.self, AtlasView.self]\n' \
   >"$boundary_sources/AllowedPersistence.swift"
 printf 'struct AtlasFeatureItem {}\n' >"$feature_sources/AllowedFeature.swift"
 expect_success "boundary verifier allows ordinary persistence names" env \
@@ -557,7 +557,7 @@ expect_success "boundary verifier allows ordinary persistence names" env \
   "$boundary_verifier"
 sed -i '' 's/AtlasView/AtlasMissing/' "$boundary_sources/AllowedPersistence.swift"
 expect_failure "boundary verifier requires every real shipping view" \
-  "Missing Release A shipping view: AtlasView" env \
+  "Missing full-launch shipping view: AtlasView" env \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
@@ -565,8 +565,7 @@ expect_failure "boundary verifier requires every real shipping view" \
   "$boundary_verifier"
 sed -i '' 's/AtlasMissing/AtlasView/' "$boundary_sources/AllowedPersistence.swift"
 printf 'struct SubmitView {}\n' >"$boundary_sources/ReleaseB.swift"
-expect_failure "boundary verifier rejects Release B presentation" \
-  "Release A boundary violation" env \
+expect_success "boundary verifier permits full-launch presentation" env \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
@@ -574,8 +573,7 @@ expect_failure "boundary verifier rejects Release B presentation" \
   "$boundary_verifier"
 rm "$boundary_sources/ReleaseB.swift"
 printf 'import FlukeReleaseB\nlet response: IdentifyResponse?\n' >"$feature_sources/ReleaseBImport.swift"
-expect_failure "boundary verifier rejects Release B feature imports" \
-  "Release B compile boundary violation" env \
+expect_success "boundary verifier permits the full-launch feature dependency" env \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
@@ -584,7 +582,7 @@ expect_failure "boundary verifier rejects Release B feature imports" \
 rm "$feature_sources/ReleaseBImport.swift"
 printf 'struct SightingsPlaceholder {}\n' >"$feature_sources/SightingsPlaceholder.swift"
 expect_failure "boundary verifier rejects shipping placeholder surfaces" \
-  "Release A placeholder boundary violation" env \
+  "Full-launch placeholder boundary violation" env \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
@@ -621,7 +619,7 @@ for documentation_path in README.md docs/architecture.md docs/build-and-ci.md do
 done
 printf 'Five tabs are currently released.\n' >"$documentation_root/README.md"
 expect_failure "boundary verifier rejects stale release documentation" \
-  "Stale Release A documentation" env \
+  "Stale full-launch documentation" env \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \

@@ -16,6 +16,7 @@ let package = Package(
         ),
         .target(
             name: "FlukeReleaseB",
+            dependencies: ["FlukeKit"],
             path: "Sources/FlukeReleaseB"
         ),
         .testTarget(

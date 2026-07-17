@@ -16,32 +16,28 @@ enum AppConfigurationError: Error, Equatable {
   case unknownBuildConfiguration
 }
 
-struct ReleaseACapabilityState: Equatable {
+struct LaunchCapabilities: Equatable, Sendable {
   let accounts: Bool
   let identification: Bool
   let submissions: Bool
+}
 
-  static let disabled = ReleaseACapabilityState(
-    accounts: false,
-    identification: false,
-    submissions: false
-  )
+enum LaunchCapabilityState: Equatable, Sendable {
+  case loading
+  case available(LaunchCapabilities)
+  case unavailable
 
   static func load(
     using fetch: () async throws -> Capabilities
-  ) async -> ReleaseACapabilityState {
-    guard let capabilities = try? await fetch(),
-      !capabilities.accounts,
-      !capabilities.identification,
-      !capabilities.submissions
-    else {
-      return .disabled
-    }
+  ) async -> LaunchCapabilityState {
+    guard let capabilities = try? await fetch() else { return .unavailable }
 
-    return ReleaseACapabilityState(
-      accounts: capabilities.accounts,
-      identification: capabilities.identification,
-      submissions: capabilities.submissions
+    return .available(
+      LaunchCapabilities(
+        accounts: capabilities.accounts,
+        identification: capabilities.identification,
+        submissions: capabilities.submissions
+      )
     )
   }
 }
