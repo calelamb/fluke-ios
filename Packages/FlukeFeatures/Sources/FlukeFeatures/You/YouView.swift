@@ -183,34 +183,10 @@ public struct YouView: View {
       Text("An independent guide to sourced Pacific Northwest orca observations.")
         .font(.flukeBody)
         .foregroundStyle(Color.deep)
-      links
+      YouResourceLinks()
     }
     .padding(18)
     .background(Color.bone, in: RoundedRectangle(cornerRadius: 14))
-  }
-
-  private var links: some View {
-    HStack(spacing: 16) {
-      resourceLink("About", path: "", control: .about)
-      resourceLink("Privacy", path: "privacy", control: .privacy)
-      resourceLink("Support", path: "support", control: .support)
-      resourceLink("Attribution", path: "sources", control: .attribution)
-    }
-    .font(.flukeBody)
-  }
-
-  @ViewBuilder
-  private func resourceLink(
-    _ title: String,
-    path: String,
-    control: YouInteractiveControl
-  ) -> some View {
-    if let base = URL(string: "https://fluke-pnw.vercel.app"),
-      let url = path.isEmpty ? base : URL(string: path, relativeTo: base)
-    {
-      Link(title, destination: url)
-        .youMinimumHitTarget(control)
-    }
   }
 
   private func greetingName(for user: AuthenticatedUser) -> String {

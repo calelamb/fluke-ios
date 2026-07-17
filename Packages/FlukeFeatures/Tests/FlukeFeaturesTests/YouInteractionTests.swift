@@ -34,5 +34,18 @@
       )
       #expect(YouInteractiveControl.allCases.allSatisfy { $0.minimumHitDimension == 44 })
     }
+
+    @Test("Resource links stack at compact width with accessibility text")
+    func resourceLinksAdaptToCompactAccessibilityLayout() {
+      let view = YouResourceLinks()
+        .environment(\.dynamicTypeSize, .accessibility3)
+        .frame(width: 180)
+      let hostingView = NSHostingView(rootView: view)
+
+      let size = hostingView.fittingSize
+
+      #expect(size.width <= 180)
+      #expect(size.height >= 4 * 44)
+    }
   }
 #endif
