@@ -10,11 +10,7 @@ enum AuthPresentationError: Error, Equatable {
 }
 
 nonisolated protocol AccountAssociationClearing: Sendable {
-  func clearAccountAssociation() async
-}
-
-nonisolated struct EmptyAccountAssociationStore: AccountAssociationClearing {
-  func clearAccountAssociation() async {}
+  func clearAccountAssociation() async throws
 }
 
 @MainActor
@@ -37,7 +33,7 @@ final class AuthSession {
   init(
     service: any AuthServiceProtocol,
     hints: any SessionHintStore,
-    accountAssociations: any AccountAssociationClearing = EmptyAccountAssociationStore()
+    accountAssociations: any AccountAssociationClearing
   ) {
     self.service = service
     self.hints = hints
@@ -114,13 +110,24 @@ final class AuthSession {
       notice = presentationError(for: error)
       return
     }
-    await accountAssociations.clearAccountAssociation()
-    state = .signedOut(error: nil)
+    var cleanupError: AuthPresentationError?
+    do {
+      try await accountAssociations.clearAccountAssociation()
+    } catch {
+      cleanupError = .unavailable(
+        "Your account was deleted, but queued sightings still need local cleanup."
+      )
+    }
     do {
       try await hints.clear()
     } catch {
-      notice = .unavailable("Your account was deleted, but local cleanup needs another attempt.")
+      cleanupError =
+        cleanupError
+        ?? .unavailable(
+          "Your account was deleted, but local cleanup needs another attempt."
+        )
     }
+    state = .signedOut(error: cleanupError)
   }
 
   func expire() {

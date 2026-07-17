@@ -55,7 +55,7 @@ public struct AuthService: AuthServiceProtocol, Sendable {
   private func validated(_ user: AuthenticatedUser) throws -> AuthenticatedUser {
     guard isValid(user.id, maximum: 200),
       isValid(user.email, maximum: 320),
-      user.email.contains("@"),
+      EmailAddressValidator.isValid(user.email),
       isValid(user.role, maximum: 100)
     else {
       throw APIError.malformedResponse

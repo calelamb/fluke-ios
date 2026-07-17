@@ -19,11 +19,6 @@ public protocol QueuedLogbookProviding: Sendable {
   func queuedEntries() async -> [QueuedLogbookEntry]
 }
 
-public struct EmptyLogbookQueue: QueuedLogbookProviding {
-  public init() {}
-  public func queuedEntries() async -> [QueuedLogbookEntry] { [] }
-}
-
 public struct LogbookRow: Hashable, Identifiable, Sendable {
   public let id: String
   public let observedAt: Date

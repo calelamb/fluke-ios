@@ -131,9 +131,10 @@ public struct APIClient: Sendable {
     let matchingCookies =
       cookies.cookies?
       .filter { cookie in
-        cookie.domain
+        let domain = cookie.domain
           .lowercased()
-          .trimmingCharacters(in: CharacterSet(charactersIn: ".")) == host
+          .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return host == domain || host.hasSuffix(".\(domain)")
       } ?? []
     for cookie in matchingCookies {
       cookies.deleteCookie(cookie)

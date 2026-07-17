@@ -33,7 +33,7 @@ public struct YouView: View {
     availability: YouAccountAvailability,
     authState: YouAuthState,
     repository: any LogbookRepositoryProtocol,
-    queue: any QueuedLogbookProviding = EmptyLogbookQueue(),
+    queue: any QueuedLogbookProviding,
     configureAppleRequest: @escaping (ASAuthorizationAppleIDRequest) -> Void,
     completeAppleAuthorization: @escaping (Result<ASAuthorization, Error>) -> Void,
     signOut: @escaping () -> Void,
@@ -167,9 +167,11 @@ public struct YouView: View {
       Button("Sign out", action: signOut)
         .buttonStyle(.bordered)
         .tint(Color.tide)
+        .youMinimumHitTarget(.signOut)
       Button("Delete account", role: .destructive) {
         confirmsDeletion = true
       }
+      .youMinimumHitTarget(.deleteAccount)
     }
   }
 
@@ -189,20 +191,25 @@ public struct YouView: View {
 
   private var links: some View {
     HStack(spacing: 16) {
-      resourceLink("About", path: "")
-      resourceLink("Privacy", path: "privacy")
-      resourceLink("Support", path: "support")
-      resourceLink("Attribution", path: "sources")
+      resourceLink("About", path: "", control: .about)
+      resourceLink("Privacy", path: "privacy", control: .privacy)
+      resourceLink("Support", path: "support", control: .support)
+      resourceLink("Attribution", path: "sources", control: .attribution)
     }
     .font(.flukeBody)
   }
 
   @ViewBuilder
-  private func resourceLink(_ title: String, path: String) -> some View {
+  private func resourceLink(
+    _ title: String,
+    path: String,
+    control: YouInteractiveControl
+  ) -> some View {
     if let base = URL(string: "https://fluke-pnw.vercel.app"),
       let url = path.isEmpty ? base : URL(string: path, relativeTo: base)
     {
       Link(title, destination: url)
+        .youMinimumHitTarget(control)
     }
   }
 

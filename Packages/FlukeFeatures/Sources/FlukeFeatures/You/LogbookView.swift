@@ -114,6 +114,7 @@ public struct LogbookView: View {
         Button("Retry") { Task { await load() } }
           .buttonStyle(.borderedProminent)
           .tint(Color.tide)
+          .youMinimumHitTarget(.retry)
       }
     }
     .foregroundStyle(Color.abyss)

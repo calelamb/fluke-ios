@@ -64,6 +64,40 @@ struct AuthServiceTests {
     }
   }
 
+  @Test(
+    "Malformed observer emails fail closed",
+    arguments: [
+      "@",
+      "observer@",
+      "@fluke.app",
+      "observer@fluke",
+      " observer@fluke.app ",
+      "observer..name@fluke.app",
+      "observer@-fluke.app",
+      String(repeating: "a", count: 65) + "@fluke.app",
+      "a@" + String(repeating: "b", count: 64) + ".app",
+      String(repeating: "a", count: 245) + "@fluke.app",
+    ]
+  )
+  func malformedEmail(email: String) async throws {
+    let escapedEmail = try #require(
+      String(data: JSONEncoder().encode(email), encoding: .utf8)
+    )
+    let service = AuthService(
+      api: APIClient(
+        baseURL: try #require(URL(string: "https://api.fluke.test")),
+        transport: RecordingTransport(
+          status: 200,
+          body:
+            #"{"id":"observer-1","email":\#(escapedEmail),"displayName":null,"role":"observer"}"#
+        )
+      ))
+
+    await #expect(throws: APIError.malformedResponse) {
+      try await service.currentUser()
+    }
+  }
+
   @Test("Account deletion requires the server's 204 response")
   func accountDeletionRequiresNoContent() async throws {
     let accepted = RecordingTransport(status: 204, body: "")

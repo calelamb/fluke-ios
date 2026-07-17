@@ -36,6 +36,7 @@ enum RootTab: CaseIterable, Hashable {
 
 struct RootScene: View {
   let environment: AppEnvironment
+  private let submissionQueue: DeferredSubmissionQueueBridge
 
   @State private var authSession: AuthSession
   @State private var capabilities = LaunchCapabilityState.loading
@@ -45,11 +46,14 @@ struct RootScene: View {
   @State private var isAtlasPresented = false
 
   init(environment: AppEnvironment) {
+    let submissionQueue = DeferredSubmissionQueueBridge()
     self.environment = environment
+    self.submissionQueue = submissionQueue
     _authSession = State(
       initialValue: AuthSession(
         service: environment.authService,
-        hints: environment.sessionHintStore
+        hints: environment.sessionHintStore,
+        accountAssociations: submissionQueue
       )
     )
   }
@@ -103,6 +107,7 @@ struct RootScene: View {
             availability: accountAvailability,
             authState: youAuthState,
             repository: environment.logbookRepository,
+            queue: submissionQueue,
             configureAppleRequest: AppleAuthorizationAdapter.configure,
             completeAppleAuthorization: completeAppleAuthorization,
             signOut: { Task { await authSession.signOut() } },

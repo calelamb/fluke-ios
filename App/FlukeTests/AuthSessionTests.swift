@@ -11,7 +11,8 @@ struct AuthSessionTests {
   func signIn() async {
     let session = AuthSession(
       service: AuthServiceSpy(signInResult: .success(.fixture)),
-      hints: MemorySessionHintStore()
+      hints: MemorySessionHintStore(),
+      accountAssociations: AccountAssociationSpy()
     )
 
     await session.signIn(
@@ -26,7 +27,11 @@ struct AuthSessionTests {
 
   @Test("Missing token fails closed")
   func missingToken() async {
-    let session = AuthSession(service: AuthServiceSpy(), hints: MemorySessionHintStore())
+    let session = AuthSession(
+      service: AuthServiceSpy(),
+      hints: MemorySessionHintStore(),
+      accountAssociations: AccountAssociationSpy()
+    )
 
     await session.signIn(credential: .init(identityToken: Data(), fullName: nil))
 
@@ -37,7 +42,8 @@ struct AuthSessionTests {
   func unauthorizedRestore() async {
     let session = AuthSession(
       service: AuthServiceSpy(currentUserResult: .failure(APIError.unauthorized)),
-      hints: MemorySessionHintStore()
+      hints: MemorySessionHintStore(),
+      accountAssociations: AccountAssociationSpy()
     )
 
     await session.restore()
@@ -51,7 +57,11 @@ struct AuthSessionTests {
       signInResult: .success(.fixture),
       currentUserResult: .failure(APIError.offline)
     )
-    let session = AuthSession(service: service, hints: MemorySessionHintStore())
+    let session = AuthSession(
+      service: service,
+      hints: MemorySessionHintStore(),
+      accountAssociations: AccountAssociationSpy()
+    )
     await session.signIn(credential: .init(identityToken: Data("jwt".utf8), fullName: nil))
 
     await session.restore()
@@ -64,7 +74,11 @@ struct AuthSessionTests {
   func logout() async throws {
     let service = AuthServiceSpy(signInResult: .success(.fixture))
     let hints = MemorySessionHintStore()
-    let session = AuthSession(service: service, hints: hints)
+    let session = AuthSession(
+      service: service,
+      hints: hints,
+      accountAssociations: AccountAssociationSpy()
+    )
     await session.signIn(credential: .init(identityToken: Data("jwt".utf8), fullName: nil))
 
     await session.signOut()
@@ -107,14 +121,60 @@ struct AuthSessionTests {
     #expect(try await hints.hasReauthenticationHint() == false)
     #expect(await associations.clearCallCount == 1)
   }
+
+  @Test("A failed post-204 queue cleanup signs out and reports local recovery")
+  func failedAssociationCleanup() async throws {
+    let service = AuthServiceSpy(signInResult: .success(.fixture))
+    let hints = MemorySessionHintStore()
+    let associations = AccountAssociationSpy(result: .failure(TestCleanupError.failed))
+    let session = AuthSession(
+      service: service,
+      hints: hints,
+      accountAssociations: associations
+    )
+    await session.signIn(credential: .init(identityToken: Data("jwt".utf8), fullName: nil))
+
+    await session.deleteAccount()
+
+    #expect(
+      session.state
+        == .signedOut(
+          error: .unavailable(
+            "Your account was deleted, but queued sightings still need local cleanup."
+          )
+        )
+    )
+    #expect(try await hints.hasReauthenticationHint() == false)
+    #expect(await associations.clearCallCount == 1)
+  }
+
+  @Test("The Task 3 submission queue bridge cannot silently clear associations")
+  func deferredSubmissionQueueBridge() async {
+    let bridge = DeferredSubmissionQueueBridge()
+
+    #expect(await bridge.queuedEntries().isEmpty)
+    await #expect(throws: SubmissionQueueBridgeError.notIntegrated) {
+      try await bridge.clearAccountAssociation()
+    }
+  }
 }
 
 private actor AccountAssociationSpy: AccountAssociationClearing {
+  private let result: Result<Void, Error>
   private(set) var clearCallCount = 0
 
-  func clearAccountAssociation() async {
-    clearCallCount += 1
+  init(result: Result<Void, Error> = .success(())) {
+    self.result = result
   }
+
+  func clearAccountAssociation() async throws {
+    clearCallCount += 1
+    try result.get()
+  }
+}
+
+private enum TestCleanupError: Error {
+  case failed
 }
 
 private actor AuthServiceSpy: AuthServiceProtocol {
