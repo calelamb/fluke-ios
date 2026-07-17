@@ -5,6 +5,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 project="$repo_root/App/Fluke.xcodeproj"
 app_source_root="${FLUKE_APP_SOURCE_ROOT:-$repo_root/App/Fluke}"
 feature_source_root="${FLUKE_FEATURE_SOURCE_ROOT:-$repo_root/Packages/FlukeFeatures/Sources}"
+documentation_root="${FLUKE_DOCUMENTATION_ROOT:-$repo_root}"
+configuration_root="${FLUKE_CONFIGURATION_ROOT:-$repo_root/App/Configuration}"
 destination="${FLUKE_TEST_DESTINATION:-platform=iOS Simulator,name=iPhone 17,OS=26.0.1}"
 result_bundle_path="${FLUKE_RESULT_BUNDLE_PATH:-}"
 enable_coverage="${FLUKE_ENABLE_COVERAGE:-NO}"
@@ -51,6 +53,24 @@ if contains_pattern 'FlukeReleaseB' "$repo_root/Packages/FlukeFeatures/Package.s
   exit 1
 fi
 
+documentation_paths=(
+  "$documentation_root/README.md"
+  "$documentation_root/docs/architecture.md"
+  "$documentation_root/docs/build-and-ci.md"
+  "$documentation_root/docs/testing.md"
+)
+for documentation_path in "${documentation_paths[@]}"; do
+  test -f "$documentation_path" || {
+    echo "Missing Release A documentation: $documentation_path" >&2
+    exit 1
+  }
+  if search_lines 'Five tabs|The 5-tab|all 5 tabs|AllFiveTabs|identify-tab placeholder|sign in \(mocked\)|Submit sheet|M-iOS-7 brings|Xcode 16|Node 20|pnpm 9|OS=latest|api\.fluke\.invalid|supply a real production API origin' \
+    "$documentation_path"; then
+    echo "Stale Release A documentation" >&2
+    exit 1
+  fi
+done
+
 for module in FlukeKit FlukeUI FlukeFeatures; do
   contains_pattern "productName = $module" "$project/project.pbxproj" || {
     echo "Missing app package product: $module" >&2
@@ -59,11 +79,17 @@ for module in FlukeKit FlukeUI FlukeFeatures; do
 done
 
 for configuration in Debug Staging Release; do
-  test -f "$repo_root/App/Configuration/$configuration.xcconfig" || {
+  test -f "$configuration_root/$configuration.xcconfig" || {
     echo "Missing $configuration.xcconfig" >&2
     exit 1
   }
 done
+
+release_api_setting='FLUKE_API_BASE_URL = https:/$()/fluke-api.onrender.com'
+if ! grep -Fxq -- "$release_api_setting" "$configuration_root/Release.xcconfig"; then
+  echo "Release API origin must be https://fluke-api.onrender.com" >&2
+  exit 1
+fi
 
 test -f "$project/xcshareddata/xcschemes/Fluke.xcscheme" || {
   echo "Missing shared Fluke scheme" >&2

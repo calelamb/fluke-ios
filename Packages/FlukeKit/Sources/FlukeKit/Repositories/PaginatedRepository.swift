@@ -8,6 +8,7 @@ struct PaginationQueryItem: Sendable {
 enum PaginatedRepository {
     static let maximumPageCount = 100
     static let maximumItemCount = 10_000
+    static let maximumCursorCount = 512
     static let defaultOperationTimeout: Duration = .seconds(30)
 
     static func fetchAll<Item: Codable & Hashable & Sendable>(
@@ -39,6 +40,9 @@ enum PaginatedRepository {
             let path = try requestPath(endpoint: endpoint, queryItems: queryItems, cursor: cursor)
             let response: PaginatedResponse<Item> = try await api.get(path)
             try Task.checkCancellation()
+            guard response.items.count <= maximumPageItemCount(for: endpoint) else {
+                throw APIError.invalidPagination
+            }
             guard response.items.count <= maximumItemCount - accumulatedItems.count else {
                 throw APIError.invalidPagination
             }
@@ -54,12 +58,24 @@ enum PaginatedRepository {
             }
             guard let nextCursor = response.page.nextCursor,
                   !nextCursor.isEmpty,
+                  nextCursor.utf16.count <= maximumCursorCount,
                   !seenCursors.contains(nextCursor) else {
                 throw APIError.invalidPagination
             }
             seenCursors.insert(nextCursor)
             cursor = nextCursor
             fetchedPageCount += 1
+        }
+    }
+
+    private static func maximumPageItemCount(for endpoint: String) -> Int {
+        switch endpoint {
+        case Endpoint.whales:
+            50
+        case Endpoint.sightings, Endpoint.externalSightings, Endpoint.historicalSightings:
+            100
+        default:
+            maximumItemCount
         }
     }
 

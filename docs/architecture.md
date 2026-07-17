@@ -17,9 +17,8 @@ The full design rationale lives in [`../../fluke/docs/specs/ios-app.md`](../../f
               ▼
 ┌────────────────────────────────────┐
 │  FlukeFeatures                     │
-│  - Sightings/, Whales/, Identify/, │
-│    Learn/, You/, Submit/,          │
-│    MovementTrack/                  │
+│  - Sightings/, Whales/, Learn/,    │
+│    Atlas/                          │
 └────┬───────────────────────────┬───┘
      │ imports                   │ imports
      ▼                           ▼
@@ -73,7 +72,7 @@ Each package is small enough that an agent (or human) can hold its full surface 
 | A new domain model (DTO) | `FlukeKit/Sources/FlukeKit/Models/` |
 | A repository (API + cache) | `FlukeKit/Sources/FlukeKit/Repositories/` |
 | A versioned browse-cache document/store | `FlukeKit/Sources/FlukeKit/Persistence/` |
-| A service (auth, identify, submit) | `FlukeKit/Sources/FlukeKit/Services/` |
+| A dormant authenticated DTO or endpoint | `FlukeKit/Sources/FlukeReleaseB/` |
 | A new tab | `FlukeFeatures/.../<NewTab>/` + wire in `App/Fluke/RootScene.swift` |
 | A view model | Co-located with its view in the feature folder |
 
@@ -109,7 +108,7 @@ Signed-in sightings, submissions, identify, and auth remain behind the compile-t
 
 Release A browse data uses actor-isolated `BrowseCacheStore` implementations. `FileBrowseCacheStore` writes versioned Codable JSON documents atomically under Application Support, excludes cache data from backup, and caps active-schema storage at 64 entries and 100 MiB total (20 MiB per document). Optional identity data is evicted before core browse snapshots, then oldest first. Corrupt, obsolete, future-dated, mismatched, and oversized documents are removed; unknown newer-schema bytes are preserved outside the active quota for forward compatibility. Read, write, and prune failures emit structured diagnostics. `MemoryBrowseCacheStore` provides the same validation contract for deterministic tests.
 
-Historical and track requests always carry finite ordered date bounds no wider than 366 days. All decoded public responses are checked for bounded arrays and text, finite coordinates/dates/probabilities, safe URLs, logical field combinations, and requested whale identity before cache replacement.
+Historical and track requests always carry finite ordered date bounds no wider than 366 days. Response validation mirrors the canonical API: stable IDs contain non-whitespace and cap at 200 characters; text caps at 20,000; HTTP(S) URLs cap at 2,048; nested arrays and tracks cap at 1,000; years span 1000–9999; and group sizes span 1–200. Whale pages cap at 50 items, other browse pages at 100, while requested whale identity is still checked before cache replacement.
 
 `AppEnvironment` constructs one shared file store and injects it into every public browse repository. Release B mutation and photo-queue persistence will be designed separately so browse cache semantics stay read-only and fail closed.
 
@@ -137,19 +136,19 @@ In `FlukeUI/Shapes/`:
 
 In `FlukeUI/Components/`:
 
-- `PlaceholderScreen` — empty-state scaffold (M-iOS-1 placeholders use this).
-- `EcotypeBadge`, `MapMarker`, `SearchField`, `FilterChip`, `PrimaryButton`, `SecondaryButton`, `FormField`, `QueueBadge`, `DisclaimerRibbon`, `ConfidenceBar` — landing in M-iOS-2 through M-iOS-6.
-- `Haptics` — sparing helper for `.impact(.soft)`/`.notification(.success)`. Lands in M-iOS-7.
+- `PlaceholderScreen` — empty-state scaffold used by the browse shell.
+- `EcotypeBadge`, `MapMarker`, `SearchField`, `FilterChip`, `PrimaryButton`, `SecondaryButton`, `FormField`, `QueueBadge`, `DisclaimerRibbon`, `ConfidenceBar` — reusable design-system components.
+- `Haptics` — sparing helper for `.impact(.soft)`/`.notification(.success)`.
 
 ## App target
 
 ### `FlukeApp.swift`
 
-The `@main` entry. Constructs `AppEnvironment` (and `AuthSession`, `SubmissionReplayer` when those land), injects them into the SwiftUI environment, and presents `RootScene`.
+The `@main` entry. Constructs `AppEnvironment`, injects it into the SwiftUI environment, and presents `RootScene`.
 
 ### `RootScene.swift`
 
-The 5-tab `TabView`. Each tab roots its own `NavigationStack`. The Submit `+` button opens a sheet from the Sightings nav bar; it's not a dedicated tab (it's an action, not a destination).
+The four-tab Release A `TabView`: Sightings, Whales, Learn, and Atlas. The first three tabs root navigation stacks; Atlas receives the public historical, prediction, and whale repositories directly.
 
 ### `AppEnvironment.swift`
 

@@ -1,4 +1,4 @@
-FLUKE_API_BASE_URL = https:/$()/api.fluke.invalid
+FLUKE_API_BASE_URL = https:/$()/fluke-api.onrender.com
 FLUKE_BUILD_CONFIGURATION = release
 IPHONEOS_DEPLOYMENT_TARGET = 17.0
 SUPPORTED_PLATFORMS = iphoneos iphonesimulator

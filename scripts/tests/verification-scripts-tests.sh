@@ -254,6 +254,44 @@ expect_failure "boundary verifier rejects Release B feature imports" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
   FLUKE_FEATURE_SOURCE_ROOT="$feature_sources" \
   "$boundary_verifier"
+rm "$feature_sources/ReleaseBImport.swift"
+
+configuration_root="$test_root/configuration"
+mkdir -p "$configuration_root"
+printf 'FLUKE_API_BASE_URL = http:/$()/localhost:4000\n' >"$configuration_root/Debug.xcconfig"
+printf 'FLUKE_API_BASE_URL = https:/$()/staging-api.fluke.invalid\n' >"$configuration_root/Staging.xcconfig"
+printf 'FLUKE_API_BASE_URL = https:/$()/api.fluke.invalid\n' >"$configuration_root/Release.xcconfig"
+expect_failure "boundary verifier rejects placeholder Release API origins" \
+  "Release API origin must be https://fluke-api.onrender.com" env \
+  PATH="$fake_bin:$PATH" \
+  FLUKE_XCODEBUILD_CAPTURE="$capture" \
+  FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
+  FLUKE_FEATURE_SOURCE_ROOT="$feature_sources" \
+  FLUKE_CONFIGURATION_ROOT="$configuration_root" \
+  "$boundary_verifier"
+printf 'FLUKE_API_BASE_URL = https:/$()/fluke-api.onrender.com\n' >"$configuration_root/Release.xcconfig"
+expect_success "boundary verifier accepts the certified Release API origin" env \
+  PATH="$fake_bin:$PATH" \
+  FLUKE_XCODEBUILD_CAPTURE="$capture" \
+  FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
+  FLUKE_FEATURE_SOURCE_ROOT="$feature_sources" \
+  FLUKE_CONFIGURATION_ROOT="$configuration_root" \
+  "$boundary_verifier"
+
+documentation_root="$test_root/documentation"
+mkdir -p "$documentation_root/docs"
+for documentation_path in README.md docs/architecture.md docs/build-and-ci.md docs/testing.md; do
+  printf 'Release A has four browse tabs.\n' >"$documentation_root/$documentation_path"
+done
+printf 'Five tabs are currently released.\n' >"$documentation_root/README.md"
+expect_failure "boundary verifier rejects stale release documentation" \
+  "Stale Release A documentation" env \
+  PATH="$fake_bin:$PATH" \
+  FLUKE_XCODEBUILD_CAPTURE="$capture" \
+  FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
+  FLUKE_FEATURE_SOURCE_ROOT="$feature_sources" \
+  FLUKE_DOCUMENTATION_ROOT="$documentation_root" \
+  "$boundary_verifier"
 
 default_capture="$test_root/xcodebuild-default-arguments"
 expect_success "boundary verifier accepts omitted result path" env \

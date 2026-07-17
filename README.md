@@ -4,11 +4,11 @@ Native iOS companion to [Fluke](https://github.com/calelamb/fluke), the Pacific 
 
 ## What this is
 
-A SwiftUI iOS app that pairs with the Fluke website and its standalone API. Five tabs — **Sightings**, **Whales**, **Identify**, **Learn**, **You** — plus a full-screen **Movement Tracks** experience that visualizes a single whale's observed path across years. The app talks directly to the shared Fastify+Prisma+Postgres service; there is no separate iOS server.
+A SwiftUI iOS app that pairs with the Fluke website and its standalone API. Release A is a browse-only shell with four tabs: **Sightings**, **Whales**, **Learn**, and **Atlas**. Atlas includes timeline, range, movement-trace, and prediction views. Authenticated mutation features remain isolated in the dormant `FlukeReleaseB` product and are not linked into the app.
 
 ## Stack
 
-- **Swift 5.10**, **SwiftUI**, **iOS 17+** deployment target.
+- **Swift tools 5.10**, verified with **Swift 6.2 / Xcode 26.0.1**, **SwiftUI**, and an **iOS 17+** deployment target.
 - **Three local Swift packages** at `Packages/`:
   - `FlukeKit` — pure-Swift domain layer (API client, models, persistence). No SwiftUI imports.
   - `FlukeUI` — design system (color/font/animation tokens, `DorsalFinShape`, components). SwiftUI-only.
@@ -19,7 +19,7 @@ A SwiftUI iOS app that pairs with the Fluke website and its standalone API. Five
 
 ## Quick start
 
-1. Open [`Fluke.xcworkspace`](./Fluke.xcworkspace) in **Xcode 16+**.
+1. Open [`Fluke.xcworkspace`](./Fluke.xcworkspace) in **Xcode 26.0.1**.
 2. Pick an iPhone 17 (or newer) simulator from the scheme dropdown.
 3. ⌘R.
 
@@ -34,7 +34,7 @@ pnpm db:seed   # populates whales + sightings
 pnpm dev       # API runs on http://localhost:4000
 ```
 
-The iOS app's default API base is `http://localhost:4000` — set via `FlukeAPIBaseURL` in `App/Fluke/Info.plist`. Override per-build configuration when you need staging/production.
+The Debug API base is `http://localhost:4000`; Release uses the certified production origin `https://fluke-api.onrender.com`. Both flow through `FLUKE_API_BASE_URL` in the build-specific xcconfig and `App/Fluke/Info.plist`. Staging remains intentionally non-deployable until its own origin is certified.
 
 ## API contracts
 
@@ -75,7 +75,8 @@ fluke-ios/
 │   ├── Fluke.xcodeproj/                # iOS app target
 │   └── Fluke/
 │       ├── FlukeApp.swift              # @main entry
-│       ├── ContentView.swift           # gets replaced by RootScene in M-iOS-1
+│       ├── RootScene.swift             # four-tab Release A shell
+│       ├── AppEnvironment.swift        # fail-closed configuration + DI
 │       ├── Assets.xcassets/            # AppIcon + tinted variants
 │       └── Info.plist
 ├── Packages/
@@ -85,6 +86,7 @@ fluke-ios/
 │   │   │   ├── Models/                 # Whale, Sighting, Ecotype, …
 │   │   │   ├── Services/               # JSONDecoder.fluke
 │   │   │   └── Persistence/            # Versioned actor-backed browse cache
+│   │   ├── Sources/FlukeReleaseB/      # dormant DTO/endpoint product; not app-linked
 │   │   └── Tests/FlukeKitTests/
 │   ├── FlukeUI/                        # design system
 │   │   ├── Sources/FlukeUI/
@@ -98,9 +100,8 @@ fluke-ios/
 │       └── Sources/FlukeFeatures/
 │           ├── Sightings/
 │           ├── Whales/
-│           ├── Identify/
 │           ├── Learn/
-│           └── You/
+│           └── Atlas/
 ├── docs/                               # ← engineering docs
 ├── scripts/                            # generators, e.g. placeholder app icon
 └── .github/workflows/ci.yml            # GitHub Actions test workflow
@@ -108,4 +109,4 @@ fluke-ios/
 
 ## Status
 
-Currently shipping **M-iOS-1 (Bootstrap)**. See [`../fluke/docs/plans/README.md`](../fluke/docs/plans/README.md) for the roadmap (M-iOS-1 through M-iOS-7) and [`docs/contributing.md`](docs/contributing.md) for how to pick up the next task.
+Release A currently ships the four-tab public browsing boundary, deterministic API fixtures, resilient read-only persistence, and fail-closed environment configuration. See [`docs/build-and-ci.md`](docs/build-and-ci.md) for the exact verification and submission-readiness state.

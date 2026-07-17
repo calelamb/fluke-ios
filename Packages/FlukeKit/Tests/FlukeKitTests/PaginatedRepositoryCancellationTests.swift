@@ -63,6 +63,47 @@ struct PaginatedRepositoryCancellationTests {
         }
         #expect(await transport.requestCount <= 2)
     }
+
+    @Test("Canonical browse endpoints reject oversized response pages")
+    func endpointPageLimits() async {
+        let cases = [
+            (Endpoint.whales, 51),
+            (Endpoint.sightings, 101),
+            (Endpoint.externalSightings, 101),
+            (Endpoint.historicalSightings, 101),
+        ]
+        for (endpoint, count) in cases {
+            let transport = SizedPageTransport(itemCount: count)
+            let api = APIClient(
+                baseURL: URL(string: "https://api.fluke.app")!,
+                transport: transport
+            )
+
+            await #expect(throws: APIError.invalidPagination) {
+                let _: [Int] = try await PaginatedRepository.fetchAll(
+                    api: api,
+                    endpoint: endpoint
+                )
+            }
+        }
+    }
+
+    @Test("Pagination rejects cursors above the canonical bound before another request")
+    func cursorLimit() async {
+        let transport = OversizedCursorTransport()
+        let api = APIClient(
+            baseURL: URL(string: "https://api.fluke.app")!,
+            transport: transport
+        )
+
+        await #expect(throws: APIError.invalidPagination) {
+            let _: [Int] = try await PaginatedRepository.fetchAll(
+                api: api,
+                endpoint: Endpoint.sightings
+            )
+        }
+        #expect(await transport.requestCount == 1)
+    }
 }
 
 private actor CountingPageTransport: HTTPTransport {
@@ -110,6 +151,41 @@ private actor SlowPagedTransport: HTTPTransport {
         let body = Data(
             #"{"items":[1],"page":{"hasMore":true,"nextCursor":"next"}}"#.utf8
         )
+        return (
+            body,
+            HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        )
+    }
+}
+
+private actor SizedPageTransport: HTTPTransport {
+    let itemCount: Int
+
+    init(itemCount: Int) {
+        self.itemCount = itemCount
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "items": Array(0..<itemCount),
+            "page": ["hasMore": false, "nextCursor": NSNull()],
+        ])
+        return (
+            body,
+            HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        )
+    }
+}
+
+private actor OversizedCursorTransport: HTTPTransport {
+    private(set) var requestCount = 0
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requestCount += 1
+        let body = try JSONSerialization.data(withJSONObject: [
+            "items": [1],
+            "page": ["hasMore": true, "nextCursor": String(repeating: "🐋", count: 257)],
+        ])
         return (
             body,
             HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!

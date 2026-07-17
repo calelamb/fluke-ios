@@ -29,7 +29,7 @@ public enum BrowseRequestValidator {
 
     public static func text(_ value: String, maximumCount: Int) throws {
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty, normalized.count <= maximumCount,
+        guard !normalized.isEmpty, normalized.utf16.count <= maximumCount,
               normalized.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
             throw APIError.invalidRequest
         }

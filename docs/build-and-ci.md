@@ -8,9 +8,9 @@ Local builds, simulator targets, deployment target rationale, and the GitHub Act
 
 - macOS 15+ with **Xcode 26.0.1** (`xcodebuild -version` is pinned in CI).
 - Command Line Tools (`xcode-select --install`).
-- An iOS 17+ simulator (Xcode → Settings → Platforms — iOS 26 is bundled with Xcode 16, iOS 17/18 are downloadable).
+- The iOS 26.0.1 simulator runtime installed through Xcode → Settings → Platforms.
 - For Swift package work: nothing else — `swift` ships with Xcode.
-- For the full Fluke stack (running the API alongside): pnpm 9+, Node 20+ (see [`../../fluke/README.md`](../../fluke/README.md)).
+- For the standalone API alongside the app: Node 22.17.0 and pnpm 10.33.0, matching [`../../fluke-api/package.json`](../../fluke-api/package.json).
 
 ### Day-to-day
 
@@ -22,27 +22,18 @@ open Fluke.xcworkspace
 xcodebuild build \
   -workspace Fluke.xcworkspace \
   -scheme Fluke \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.0.1' \
   -configuration Debug \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-`CODE_SIGNING_ALLOWED=NO` is required because we don't have a signing identity configured for local builds (M-iOS-7 sets up signing). For development against the simulator, no code signing is needed.
+`CODE_SIGNING_ALLOWED=NO` is required for the repository's portable simulator and unsigned-archive verification. Developer-device and App Store builds require an Apple team, signing certificate, and provisioning profile supplied outside the repository.
 
 ### Simulator destination
 
 The plans were originally written referencing `iPhone 15`. With Xcode 26 / iOS 26, the available simulators include `iPhone 16e`, `iPhone 17`, `iPhone 17 Pro`, `iPhone 17 Pro Max`, and `iPhone Air`. **Use `iPhone 17` for current builds.** CI resolves the exact simulator UDID and waits for `simctl bootstatus` before testing.
 
-If you're on an older Xcode:
-
-| Xcode | Default iPhone simulator |
-| --- | --- |
-| 26.x | iPhone 17 |
-| 16.x | iPhone 16 |
-| 15.x | iPhone 15 |
-| 14.x | iPhone 14 |
-
-The workflow pins an iPhone 17 on the iOS 26.0 runtime. It does not use `OS=latest`, so hosted-runner drift cannot silently change the test destination.
+The workflow pins an iPhone 17 on the exact iOS 26.0.1 runtime, so hosted-runner drift cannot silently change the test destination.
 
 ### Deployment target
 
@@ -90,21 +81,15 @@ We don't cache `.build/` directories yet — the package tests are fast enough t
 
 ## TestFlight and App Store
 
-M-iOS-7 brings:
+The checked-in workflow proves source, tests, coverage, Release compilation, and unsigned archive metadata. It intentionally does not claim a TestFlight upload: this repository currently has no signing credentials or upload workflow.
 
-- **fastlane** for TestFlight uploads (`fastlane beta`).
-- **GitHub Actions** workflow at `.github/workflows/testflight.yml` triggered on `git tag v*`.
-- **App Store Connect** record creation.
-
-Until then, all builds stay on the simulator. There's no point setting up signing if no one's installing on a real device yet.
-
-The fastlane lane definition + secrets list lives in [`../../fluke/docs/plans/m-ios-7-polish-app-store.md`](../../fluke/docs/plans/m-ios-7-polish-app-store.md) Tasks 8 and 9.
+`Release.xcconfig` is pinned to the certified production origin `https://fluke-api.onrender.com`. Before submission, confirm that origin remains healthy, configure the Apple developer team and distribution provisioning, create or confirm the App Store Connect record, and archive/upload the exact green SHA with signing enabled. The unsigned CI archive is verification evidence, not a distributable artifact.
 
 ## Common build issues
 
 ### "No such module FlukeKit"
 
-The App target isn't linked against the package. Open `Fluke.xcworkspace`, select `Fluke` target → General → "Frameworks, Libraries, and Embedded Content" → ensure `FlukeKit`, `FlukeUI`, `FlukeFeatures` are listed (with "Do Not Embed"). If they're missing, this is a Task 6 wiring issue — see [`m-ios-1-bootstrap.md`](../../fluke/docs/plans/m-ios-1-bootstrap.md) Task 6.
+The App target isn't linked against the package. Open `Fluke.xcworkspace`, select `Fluke` target → General → "Frameworks, Libraries, and Embedded Content" → ensure `FlukeKit`, `FlukeUI`, `FlukeFeatures` are listed (with "Do Not Embed"). If any product is missing, restore the package-product references in `App/Fluke.xcodeproj` and rerun the Release A boundary verifier.
 
 ### "Couldn't find file `icon-1024.png`"
 
@@ -114,7 +99,7 @@ The Asset Catalog references the placeholder icon at `App/Fluke/Assets.xcassets/
 swift scripts/generate-placeholder-icon.swift
 ```
 
-The final icon ships in M-iOS-7.
+Review the bundled icon at App Store sizes before submission; asset validation is part of the signed archive handoff.
 
 ### "Unable to find a device matching the destination"
 

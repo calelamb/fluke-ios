@@ -9,7 +9,7 @@ Test strategy for the iOS app. Coverage targets, what gets tested at each layer,
 | `FlukeKit` (domain) | 80%+ source lines | Swift Testing/XCTest; injected `HTTPTransport`; in-memory actor cache |
 | `FlukeUI` (design system) | Snapshot regression on visual components | `swift-snapshot-testing` PNG references in `__Snapshots__/` |
 | `FlukeFeatures` (screens) | View model logic + render-doesn't-crash | XCTest unit tests for view models; minimal smoke render tests |
-| `App` (UI tests) | Critical user flows | XCUITest — sign in (mocked), submit a sighting, browse a whale, identify-tab placeholder |
+| `App` (integration) | Release A shell and configuration boundaries | Swift Testing in `App/FlukeTests`; exact four-tab shell, fail-closed capabilities, cache injection, and API-origin policy |
 
 ## Running tests
 
@@ -145,36 +145,18 @@ XCTAssertEqual(vm.loadState, .loaded)
 
 Repositories pass an `actor` interface; the mock conforms to the same interface and stubs the responses. Don't introduce a protocol just for testing — actors are already a clean boundary.
 
-### XCUITest for critical flows
+### App integration boundary
 
-Live in `App/FlukeUITests/`. Cover the user-visible flows the app promises:
+`App/FlukeTests/` is the current Release A app gate. It asserts the exact Sightings, Whales, Learn, and Atlas tab set; fails capabilities closed; verifies one injected browse cache; and rejects missing, insecure, or local API origins outside Debug. `scripts/verify-release-a-boundaries.sh` runs only this meaningful app target with coverage and serialized simulator execution.
 
-- Tab bar smoke test (all 5 tabs reachable)
-- Submit sheet open/cancel
-- Sightings list/map toggle
-- Whales catalog search
-
-Don't try to UI-test every interaction — UI tests are slow (~30s per launch). They protect critical paths; unit tests cover logic.
-
-```swift
-final class TabBarSmokeTests: XCTestCase {
-    func test_appLaunchesAndAllFiveTabsAreReachable() {
-        let app = XCUIApplication()
-        app.launch()
-        for label in ["Sightings", "Whales", "Identify", "Learn", "You"] {
-            app.tabBars.buttons[label].tap()
-            XCTAssertTrue(app.staticTexts[label].waitForExistence(timeout: 2))
-        }
-    }
-}
-```
+`App/FlukeUITests/` still contains Xcode's generated launch smoke target, but it is not presented as coverage of authenticated or mutation flows and is not part of the Release A boundary gate.
 
 ## Test naming
 
 Pattern: `test_<methodOrFeature>_<expectedBehavior>`.
 
 - `test_get_decodesArrayOfWhales` ✓
-- `test_signInWithApple_postsTokenAndReturnsUser` ✓
+- `test_releaseATabs_exposesFourBrowseTabs` ✓
 - `test_emptyState_showsCTAWhenNoSightings` ✓
 - `test1` ✗ (anti-pattern — say what it tests)
 
@@ -202,9 +184,6 @@ CI runs `scripts/verify-swift-package-coverage.sh` against `/Sources/FlukeKit/` 
 
 ## CI
 
-Every push and PR runs:
-
-- `swift test` for each of the three packages (matrix of 3 jobs).
-- `xcodebuild test` for the full Xcode workspace.
+Every push and PR runs one pinned verification lane: all three package suites with coverage, the meaningful `FlukeTests` app target, Debug and Release builds, and unsigned archive metadata validation.
 
 Failures upload an `.xcresult` bundle as an artifact you can download and open in Xcode for diagnosis. See [`build-and-ci.md`](build-and-ci.md) for the workflow details.

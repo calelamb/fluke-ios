@@ -35,7 +35,10 @@ struct BrowseRequestSafetyTests {
         )
 
         await #expect(throws: APIError.invalidRequest) {
-            try await repository.loadExternal(source: String(repeating: "x", count: 501))
+            try await repository.loadExternal(source: String(repeating: "x", count: 101))
+        }
+        await #expect(throws: APIError.invalidRequest) {
+            try await repository.loadExternal(source: String(repeating: "🐋", count: 51))
         }
         #expect(await transport.requestedURLs.isEmpty)
     }
