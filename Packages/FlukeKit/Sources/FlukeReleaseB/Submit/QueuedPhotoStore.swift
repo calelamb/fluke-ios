@@ -8,6 +8,8 @@ public enum QueuedPhotoStoreError: Error, Equatable, Sendable {
 }
 
 public actor QueuedPhotoStore {
+  private static let maximumPhotoCount = 5
+  private static let manifestVersion = 1
   private let directory: URL
   private let failAfterWrites: Int?
   private let failAfterMoveAtIndex: Int?
@@ -84,8 +86,11 @@ public actor QueuedPhotoStore {
       includingPropertiesForKeys: nil
     ).filter { $0.lastPathComponent.hasPrefix(".pending-") && $0.pathExtension == "json" }
     for url in urls {
-      let names = try JSONDecoder().decode([String].self, from: Data(contentsOf: url))
-      try remove(names.filter { !liveFileNames.contains($0) })
+      guard let manifest = validatedManifest(at: url) else {
+        try quarantine(url)
+        continue
+      }
+      try remove(manifest.photoFileNames.filter { !liveFileNames.contains($0) })
       try FileManager.default.removeItem(at: url)
     }
   }
@@ -120,10 +125,65 @@ public actor QueuedPhotoStore {
   }
 
   private func stage(_ names: [String], submissionID: UUID) throws {
-    try JSONEncoder().encode(names).write(
+    let manifest = StagingManifest(
+      version: Self.manifestVersion,
+      submissionID: submissionID,
+      photoFileNames: names
+    )
+    try JSONEncoder().encode(manifest).write(
       to: stagingURL(submissionID: submissionID),
       options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
     )
+  }
+
+  private func validatedManifest(at url: URL) -> StagingManifest? {
+    guard let fileSubmissionID = Self.submissionID(fromManifestURL: url),
+      let data = try? Data(contentsOf: url),
+      let manifest = try? JSONDecoder().decode(StagingManifest.self, from: data),
+      manifest.version == Self.manifestVersion,
+      manifest.submissionID == fileSubmissionID,
+      (1...Self.maximumPhotoCount).contains(manifest.photoFileNames.count),
+      Self.hasValidPhotoNames(manifest.photoFileNames, submissionID: fileSubmissionID)
+    else { return nil }
+    return manifest
+  }
+
+  private func quarantine(_ url: URL) throws {
+    let quarantineURL = directory.appending(
+      path: ".quarantine-\(UUID().uuidString).json"
+    )
+    try FileManager.default.moveItem(at: url, to: quarantineURL)
+  }
+
+  private static func submissionID(fromManifestURL url: URL) -> UUID? {
+    let name = url.lastPathComponent
+    let prefix = ".pending-"
+    let suffix = ".json"
+    guard name.hasPrefix(prefix), name.hasSuffix(suffix) else { return nil }
+    let rawID = String(name.dropFirst(prefix.count).dropLast(suffix.count))
+    guard let id = UUID(uuidString: rawID), rawID == id.uuidString else { return nil }
+    return id
+  }
+
+  private static func hasValidPhotoNames(_ names: [String], submissionID: UUID) -> Bool {
+    let indices = names.compactMap { photoIndex(in: $0, submissionID: submissionID) }
+    return indices.count == names.count
+      && Set(indices).count == names.count
+      && Set(indices) == Set(0..<names.count)
+  }
+
+  private static func photoIndex(in name: String, submissionID: UUID) -> Int? {
+    guard name == URL(filePath: name).lastPathComponent, name.hasSuffix(".jpg") else { return nil }
+    let components = name.dropLast(4).split(separator: "_", omittingEmptySubsequences: false)
+    guard components.count == 3,
+      String(components[0]) == submissionID.uuidString,
+      let index = Int(components[1]),
+      String(components[1]) == String(index),
+      (0..<maximumPhotoCount).contains(index),
+      let photoID = UUID(uuidString: String(components[2])),
+      String(components[2]) == photoID.uuidString
+    else { return nil }
+    return index
   }
 
   private func stagingURL(submissionID: UUID) -> URL {
@@ -144,4 +204,10 @@ public actor QueuedPhotoStore {
       bytes[12], bytes[13], bytes[14], bytes[15]
     ))
   }
+}
+
+private struct StagingManifest: Codable {
+  let version: Int
+  let submissionID: UUID
+  let photoFileNames: [String]
 }
