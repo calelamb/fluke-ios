@@ -1,111 +1,119 @@
-import SwiftUI
 import FlukeKit
 import FlukeUI
+import SwiftUI
 
 public struct PredictSubView: View {
-
     @State private var viewModel: PredictViewModel
-    public let catalog: [Whale]
 
-    public init(repository: PredictionRepository, catalog: [Whale]) {
-        self._viewModel = State(initialValue: PredictViewModel(repository: repository))
-        self.catalog = catalog
+    public init(repository: any PredictionRepositoryProtocol) {
+        _viewModel = State(initialValue: PredictViewModel(repository: repository))
     }
 
     public var body: some View {
         ZStack(alignment: .top) {
             BasemapView()
-
-            // Confidence cone overlay if loaded
-            if case .loaded(let prediction) = viewModel.loadState {
+            if let prediction = viewModel.prediction {
                 ConfidenceCone(cells: prediction.cells, color: .ember)
                     .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
-
-            VStack(spacing: 8) {
-                subjectAndHorizonPickers
-
-                if case .loaded(let prediction) = viewModel.loadState {
-                    confidenceBlock(prediction: prediction)
+            ScrollView(.vertical) {
+                VStack(spacing: 8) {
+                    subjectPicker
+                    horizonPicker
+                    stateMessage
+                    if let prediction = viewModel.prediction {
+                        confidenceBlock(prediction)
+                    }
                 }
-                if case .empty(let reason) = viewModel.loadState {
-                    Text(reason)
-                        .font(.flukeBody)
-                        .foregroundStyle(Color.deep)
-                        .padding(20)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.bone.opacity(0.95))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .padding(.horizontal, 14)
-                }
-
-                Spacer()
+                .padding(.horizontal, 14)
             }
-            .padding(14)
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .task {
+            if viewModel.subject == nil { viewModel.subject = .pod(.j) }
+            await viewModel.loadIfNeeded()
         }
     }
 
-    @ViewBuilder
-    private var subjectAndHorizonPickers: some View {
-        VStack(spacing: 8) {
+    private var subjectPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(Pod.allCases, id: \.self) { pod in
-                    let isActive: Bool = {
-                        if case .pod(let p) = viewModel.subject, p == pod { return true } else { return false }
-                    }()
-                    Button {
+                    let selected = viewModel.subject == .pod(pod)
+                    Button(pod.displayName) {
                         viewModel.subject = .pod(pod)
-                    } label: {
-                        Text(pod.displayName)
-                            .font(.flukeLabel.weight(.semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .foregroundStyle(isActive ? Color.bone : Color.deep)
-                            .background(Capsule().fill(isActive ? Color.abyss : Color.bone))
-                            .overlay(Capsule().stroke(Color.mist.opacity(0.5), lineWidth: 0.5))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            HStack(spacing: 6) {
-                ForEach(PredictionHorizon.allCases, id: \.self) { h in
-                    Button {
-                        viewModel.horizon = h
                         Task { await viewModel.loadIfNeeded() }
-                    } label: {
-                        Text(h.displayName)
-                            .font(.flukeLabel)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .foregroundStyle(viewModel.horizon == h ? Color.abyss : Color.deep)
-                            .background(Capsule().fill(viewModel.horizon == h ? Color.bone : Color.fog))
                     }
+                    .font(.flukeLabel)
+                    .foregroundStyle(selected ? Color.bone : Color.abyss)
+                    .padding(.horizontal, 12)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .background(selected ? Color.abyss : Color.bone, in: Capsule())
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
         }
+        .accessibilityLabel("Prediction subject")
+    }
+
+    private var horizonPicker: some View {
+        HStack(spacing: 8) {
+            ForEach(PredictionHorizon.allCases, id: \.self) { horizon in
+                let selected = viewModel.horizon == horizon
+                Button(horizon.displayName) {
+                    viewModel.horizon = horizon
+                    Task { await viewModel.loadIfNeeded() }
+                }
+                .font(.flukeLabel)
+                .foregroundStyle(selected ? Color.bone : Color.abyss)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(selected ? Color.tide : Color.bone, in: Capsule())
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .accessibilityLabel("Prediction horizon")
     }
 
     @ViewBuilder
-    private func confidenceBlock(prediction: Prediction) -> some View {
+    private var stateMessage: some View {
+        if let notice = viewModel.state.notice {
+            switch notice {
+            case .offline: BrowseStatusView(kind: .offline) { Task { await viewModel.retry() } }
+            case .stale(let failure):
+                BrowseStatusView(kind: .stale(failure)) { Task { await viewModel.retry() } }
+            }
+        } else if let failure = viewModel.state.failure {
+            BrowseStatusView(kind: .failure(failure)) { Task { await viewModel.retry() } }
+        } else if viewModel.state.isLoading {
+            ProgressView("Loading prediction").padding(12).background(Color.bone, in: Capsule())
+        } else if viewModel.isEmpty {
+            Text("Not enough data to show a prediction for this subject and horizon.")
+                .font(.flukeBody)
+                .padding(12)
+                .background(Color.bone.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private func confidenceBlock(_ prediction: Prediction) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Roughly where this subject has tended to be in the current month, based on \(prediction.cells.count) historical cells.")
+            Text("A data summary of where this subject has tended to be in the current month, based on \(prediction.cells.count) historical cells.")
                 .font(.flukeBody)
                 .foregroundStyle(Color.abyss)
-                .fixedSize(horizontal: false, vertical: true)
             Text("Confidence: \(confidenceLabel(prediction.confidence)) · model: \(prediction.modelVersion)")
                 .font(.flukeLabel)
                 .foregroundStyle(Color.deep)
         }
         .padding(14)
-        .background(Color.bone.opacity(0.95))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(Color.bone.opacity(0.95), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .combine)
     }
 
-    private func confidenceLabel(_ c: Double) -> String {
-        if c >= 0.7 { return "high" }
-        if c >= 0.4 { return "medium" }
+    private func confidenceLabel(_ value: Double) -> String {
+        if value >= 0.7 { return "high" }
+        if value >= 0.4 { return "medium" }
         return "low"
     }
 }

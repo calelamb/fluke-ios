@@ -36,6 +36,7 @@ public struct BasemapView: View {
             }
         }
         .background(Color.fog)
+        .accessibilityHidden(true)
     }
 
     private let projection = SalishSeaProjection.salishSea

@@ -1,77 +1,109 @@
-import SwiftUI
 import FlukeKit
 import FlukeUI
+import SwiftUI
 
 public struct AtlasView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var viewModel: AtlasViewModel
 
-    @State private var viewModel = AtlasViewModel()
-    @Environment(\.dismiss) private var dismiss
-
-    public let historicalRepo: HistoricalSightingsRepository
-    public let predictionRepo: PredictionRepository
-    public let whalesRepo: WhalesRepository
-    public let catalog: [Whale]
+    private let historicalRepository: any HistoricalSightingsRepositoryProtocol
+    private let predictionRepository: any PredictionRepositoryProtocol
+    private let whalesRepository: any WhalesRepositoryProtocol
+    private let requestedTraceWhaleID: String?
 
     public init(
-        historicalRepo: HistoricalSightingsRepository,
-        predictionRepo: PredictionRepository,
-        whalesRepo: WhalesRepository,
-        catalog: [Whale]
+        historicalRepository: any HistoricalSightingsRepositoryProtocol,
+        predictionRepository: any PredictionRepositoryProtocol,
+        whalesRepository: any WhalesRepositoryProtocol,
+        requestedTraceWhaleID: String? = nil
     ) {
-        self.historicalRepo = historicalRepo
-        self.predictionRepo = predictionRepo
-        self.whalesRepo = whalesRepo
-        self.catalog = catalog
+        self.historicalRepository = historicalRepository
+        self.predictionRepository = predictionRepository
+        self.whalesRepository = whalesRepository
+        self.requestedTraceWhaleID = requestedTraceWhaleID
+        _viewModel = State(initialValue: AtlasViewModel(
+            repository: whalesRepository,
+            activeSubView: requestedTraceWhaleID == nil ? .timeline : .trace
+        ))
     }
 
     public var body: some View {
-        ZStack(alignment: .top) {
-            // Active sub-view fills the screen
-            Group {
-                switch viewModel.activeSubView {
-                case .timeline:
-                    TimelineSubView(repository: historicalRepo, catalog: catalog)
-                case .range:
-                    RangeSubView(repository: historicalRepo)
-                case .trace:
-                    TraceSubView(repository: whalesRepo, catalog: catalog)
-                case .predict:
-                    PredictSubView(repository: predictionRepo, catalog: catalog)
-                }
+        VStack(spacing: 0) {
+            header
+            activeMode
+        }
+        .background(Color.fog)
+        .task { await viewModel.loadCatalog() }
+    }
+
+    private var header: some View {
+        VStack(spacing: 8) {
+            Text("Atlas")
+                .font(.flukeDisplaySmall)
+                .foregroundStyle(Color.abyss)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            modePicker
+                .accessibilityHint("Changes the public movement visualization")
+
+            catalogStatus
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.fog)
+    }
+
+    @ViewBuilder
+    private var modePicker: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            Picker("Atlas mode", selection: $viewModel.activeSubView) {
+                modeOptions
             }
-            .ignoresSafeArea()
-
-            // Top chrome — close button + title + segmented control
-            VStack(spacing: 8) {
-                HStack {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(Color.abyss)
-                            .padding(8)
-                            .background(Color.bone)
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-
-                    Text("Atlas")
-                        .font(.flukeDisplaySmall)
-                        .foregroundStyle(Color.abyss)
-
-                    Spacer()
-                }
-
-                Picker("Sub-view", selection: $viewModel.activeSubView) {
-                    ForEach(AtlasViewModel.SubView.allCases) { sv in
-                        Text(sv.rawValue).tag(sv)
-                    }
-                }
-                .pickerStyle(.segmented)
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Picker("Atlas mode", selection: $viewModel.activeSubView) {
+                modeOptions
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 14)
+            .pickerStyle(.segmented)
+        }
+    }
+
+    private var modeOptions: some View {
+        ForEach(AtlasViewModel.SubView.allCases) { mode in
+            Text(mode.rawValue).tag(mode)
+        }
+    }
+
+    @ViewBuilder
+    private var activeMode: some View {
+        switch viewModel.activeSubView {
+        case .timeline:
+            TimelineSubView(repository: historicalRepository, catalog: viewModel.catalog)
+        case .range:
+            RangeSubView(repository: historicalRepository)
+        case .trace:
+            TraceSubView(
+                repository: whalesRepository,
+                catalog: viewModel.catalog,
+                initialWhaleID: requestedTraceWhaleID
+            )
+        case .predict:
+            PredictSubView(repository: predictionRepository)
+        }
+    }
+
+    @ViewBuilder
+    private var catalogStatus: some View {
+        if let notice = viewModel.catalogState.notice {
+            switch notice {
+            case .offline:
+                BrowseStatusView(kind: .offline) { Task { await viewModel.loadCatalog() } }
+            case .stale(let failure):
+                BrowseStatusView(kind: .stale(failure)) { Task { await viewModel.loadCatalog() } }
+            }
+        } else if let failure = viewModel.catalogState.failure {
+            BrowseStatusView(kind: .failure(failure)) { Task { await viewModel.loadCatalog() } }
         }
     }
 }

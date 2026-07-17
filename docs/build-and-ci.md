@@ -81,9 +81,9 @@ We don't cache `.build/` directories yet — the package tests are fast enough t
 
 ## TestFlight and App Store
 
-The checked-in workflow proves source, tests, coverage, Release compilation, and unsigned archive metadata. It intentionally does not claim a TestFlight upload: this repository currently has no signing credentials or upload workflow.
+The checked-in workflow proves source, tests, coverage, real Release A feature wiring, Release compilation, and unsigned archive metadata. It intentionally does not claim a TestFlight upload: this repository currently has no signing credentials or upload workflow.
 
-`Release.xcconfig` is pinned to the certified production origin `https://fluke-api.onrender.com`. Before submission, confirm that origin remains healthy, configure the Apple developer team and distribution provisioning, create or confirm the App Store Connect record, and archive/upload the exact green SHA with signing enabled. The unsigned CI archive is verification evidence, not a distributable artifact.
+`Release.xcconfig` is pinned to the certified production origin `https://fluke-api.onrender.com`. Before submission, confirm that origin remains healthy, review the bundled opaque app icon at App Store sizes, configure the Apple developer team and distribution provisioning, create or confirm the App Store Connect record and metadata, and archive/upload the exact green SHA with signing enabled. The unsigned CI archive is verification evidence, not a distributable artifact.
 
 ## Common build issues
 
@@ -93,10 +93,10 @@ The App target isn't linked against the package. Open `Fluke.xcworkspace`, selec
 
 ### "Couldn't find file `icon-1024.png`"
 
-The Asset Catalog references the placeholder icon at `App/Fluke/Assets.xcassets/AppIcon.appiconset/icon-1024.png`. If it's missing, regenerate:
+The Asset Catalog references the opaque brand icon at `App/Fluke/Assets.xcassets/AppIcon.appiconset/icon-1024.png`. If it's missing, regenerate:
 
 ```bash
-swift scripts/generate-placeholder-icon.swift
+swift scripts/generate-app-icon.swift
 ```
 
 Review the bundled icon at App Store sizes before submission; asset validation is part of the signed archive handoff.

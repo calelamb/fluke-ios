@@ -92,7 +92,7 @@ fluke-ios/
 │   │   ├── Sources/FlukeUI/
 │   │   │   ├── Tokens/                 # Color, Font, Animation
 │   │   │   ├── Shapes/                 # DorsalFinShape
-│   │   │   ├── Components/             # PlaceholderScreen, …
+│   │   │   ├── Components/             # Atlas visualization components
 │   │   │   └── Resources/Fonts/        # Fraunces-Variable.ttf
 │   │   └── Tests/FlukeUITests/
 │   │       └── __Snapshots__/          # snapshot-testing PNG references
@@ -103,10 +103,10 @@ fluke-ios/
 │           ├── Learn/
 │           └── Atlas/
 ├── docs/                               # ← engineering docs
-├── scripts/                            # generators, e.g. placeholder app icon
+├── scripts/                            # verification and asset generators
 └── .github/workflows/ci.yml            # GitHub Actions test workflow
 ```
 
 ## Status
 
-Release A currently ships the four-tab public browsing boundary, deterministic API fixtures, resilient read-only persistence, and fail-closed environment configuration. See [`docs/build-and-ci.md`](docs/build-and-ci.md) for the exact verification and submission-readiness state.
+Release A ships four real public browsing surfaces: a merged sightings list/map, searchable whale catalog and profiles, a locally authored Learn reader, and the public movement Atlas. Every network-backed surface distinguishes fresh, stale, offline, empty, loading, and failed states while retaining last-known-good data. Deterministic API fixtures, resilient read-only persistence, and fail-closed environment configuration protect that boundary. See [`docs/build-and-ci.md`](docs/build-and-ci.md) for the exact verification and submission-readiness state.

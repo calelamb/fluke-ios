@@ -32,33 +32,40 @@ struct RootScene: View {
 
   @State private var capabilities = ReleaseACapabilityState.disabled
   @State private var selectedTab = RootTab.sightings
+  @State private var requestedTraceWhaleID: String?
+  @State private var atlasRouteRevision = 0
 
   var body: some View {
     TabView(selection: $selectedTab) {
       NavigationStack {
-        SightingsPlaceholder()
+        SightingsView(repository: environment.sightingsRepository)
       }
       .tabItem { tabLabel(for: .sightings) }
       .tag(RootTab.sightings)
 
       NavigationStack {
-        WhalesPlaceholder()
+        WhalesView(repository: environment.whalesRepository) { whale in
+          requestedTraceWhaleID = whale.id
+          atlasRouteRevision += 1
+          selectedTab = .atlas
+        }
       }
       .tabItem { tabLabel(for: .whales) }
       .tag(RootTab.whales)
 
       NavigationStack {
-        LearnPlaceholder()
+        LearnView()
       }
       .tabItem { tabLabel(for: .learn) }
       .tag(RootTab.learn)
 
       AtlasView(
-        historicalRepo: environment.historicalSightingsRepository,
-        predictionRepo: environment.predictionRepository,
-        whalesRepo: environment.whalesRepository,
-        catalog: []
+        historicalRepository: environment.historicalSightingsRepository,
+        predictionRepository: environment.predictionRepository,
+        whalesRepository: environment.whalesRepository,
+        requestedTraceWhaleID: requestedTraceWhaleID
       )
+      .id(atlasRouteRevision)
       .tabItem { tabLabel(for: .atlas) }
       .tag(RootTab.atlas)
     }

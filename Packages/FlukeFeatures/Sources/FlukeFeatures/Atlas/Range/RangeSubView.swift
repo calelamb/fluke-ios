@@ -1,29 +1,25 @@
-import SwiftUI
 import FlukeKit
 import FlukeUI
+import SwiftUI
 
 public struct RangeSubView: View {
-
     @State private var viewModel: RangeViewModel
 
-    public init(repository: HistoricalSightingsRepository) {
-        self._viewModel = State(initialValue: RangeViewModel(repository: repository))
+    public init(repository: any HistoricalSightingsRepositoryProtocol) {
+        _viewModel = State(initialValue: RangeViewModel(repository: repository))
     }
 
     public var body: some View {
         ZStack(alignment: .top) {
             BasemapView()
-
-            // Heatmap overlay
             heatmapLayer
-
-            // Filter chrome on top
             VStack(spacing: 8) {
                 podPicker
                 monthChips
+                stateMessage
                 Spacer()
             }
-            .padding(14)
+            .padding(.horizontal, 14)
         }
         .task { await viewModel.load() }
         .onChange(of: viewModel.selectedPod) { _, _ in
@@ -31,62 +27,86 @@ public struct RangeSubView: View {
         }
     }
 
-    @ViewBuilder
     private var heatmapLayer: some View {
-        ForEach(viewModel.heatmap, id: \.x) { cell in
-            HeatCell(
-                x: CGFloat(cell.x) * 0.018 + 0.009,
-                y: CGFloat(cell.y) * 0.018 + 0.009,
-                color: AtlasPodColor.color(for: viewModel.selectedPod),
-                intensity: Double(cell.count) / Double(viewModel.maxCount)
-            )
-        }
-        .allowsHitTesting(false)
-    }
-
-    @ViewBuilder
-    private var podPicker: some View {
-        HStack(spacing: 6) {
-            ForEach(Pod.allCases, id: \.self) { pod in
-                Button {
-                    viewModel.selectedPod = pod
-                } label: {
-                    Text(pod.displayName)
-                        .font(.flukeLabel.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .foregroundStyle(viewModel.selectedPod == pod ? Color.bone : Color.deep)
-                        .background(Capsule().fill(viewModel.selectedPod == pod ? AtlasPodColor.color(for: pod) : Color.bone))
-                        .overlay(Capsule().stroke(Color.mist.opacity(0.5), lineWidth: 0.5))
-                }
-                .buttonStyle(.plain)
+        ZStack {
+            ForEach(Array(viewModel.heatmap.enumerated()), id: \.offset) { _, cell in
+                let point = RangeGridProjection.normalizedCenter(x: cell.x, y: cell.y)
+                HeatCell(
+                    x: CGFloat(point.x),
+                    y: CGFloat(point.y),
+                    color: AtlasPodColor.color(for: viewModel.selectedPod),
+                    intensity: Double(cell.count) / Double(viewModel.maxCount)
+                )
             }
         }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
-    @ViewBuilder
+    private var podPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Pod.allCases, id: \.self) { pod in
+                    let selected = viewModel.selectedPod == pod
+                    Button(pod.displayName) { viewModel.selectedPod = pod }
+                        .font(.flukeLabel)
+                        .foregroundStyle(selected ? Color.bone : Color.abyss)
+                        .padding(.horizontal, 12)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(selected ? AtlasPodColor.color(for: pod) : Color.bone, in: Capsule())
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+        }
+        .accessibilityLabel("Range pod")
+    }
+
     private var monthChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(1...12, id: \.self) { month in
-                    Button {
-                        viewModel.toggleMonth(month)
-                    } label: {
-                        Text(monthShort(month))
-                            .font(.flukeLabel)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .foregroundStyle(viewModel.activeMonths.contains(month) ? Color.abyss : Color.mist)
-                            .background(Capsule().fill(viewModel.activeMonths.contains(month) ? Color.bone : Color.fog))
-                    }
-                    .buttonStyle(.plain)
+                    let selected = viewModel.activeMonths.contains(month)
+                    Button(monthShort(month)) { viewModel.toggleMonth(month) }
+                        .font(.flukeLabel)
+                        .foregroundStyle(selected ? Color.abyss : Color.deep)
+                        .padding(.horizontal, 10)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(selected ? Color.bone : Color.fog, in: Capsule())
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(monthName(month))
+                        .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
         }
+        .accessibilityLabel("Visible months")
     }
 
-    private func monthShort(_ m: Int) -> String {
-        let f = DateFormatter()
-        return f.shortMonthSymbols[m - 1]
+    @ViewBuilder
+    private var stateMessage: some View {
+        if let notice = viewModel.state.notice {
+            switch notice {
+            case .offline: BrowseStatusView(kind: .offline) { Task { await viewModel.retry() } }
+            case .stale(let failure):
+                BrowseStatusView(kind: .stale(failure)) { Task { await viewModel.retry() } }
+            }
+        } else if let failure = viewModel.state.failure {
+            BrowseStatusView(kind: .failure(failure)) { Task { await viewModel.retry() } }
+        } else if viewModel.state.isLoading {
+            ProgressView("Loading range").padding(12).background(Color.bone, in: Capsule())
+        } else if viewModel.sightings.isEmpty {
+            Text("No range data for this pod and window.")
+                .font(.flukeBody)
+                .padding(12)
+                .background(Color.bone.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private func monthShort(_ month: Int) -> String {
+        Calendar.current.shortMonthSymbols[month - 1]
+    }
+
+    private func monthName(_ month: Int) -> String {
+        Calendar.current.monthSymbols[month - 1]
     }
 }

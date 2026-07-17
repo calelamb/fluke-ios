@@ -215,6 +215,16 @@ expect_success "boundary verifier accepts result and coverage options" env \
   FLUKE_RESULT_BUNDLE_PATH="$test_root/AppTests.xcresult" \
   FLUKE_ENABLE_COVERAGE=YES \
   "$boundary_verifier"
+
+invalid_icon="$test_root/invalid-icon.png"
+printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL6WQAAAABJRU5ErkJggg==' \
+  | base64 -D >"$invalid_icon"
+expect_failure "boundary verifier rejects an invalid App Store icon" \
+  "App Store icon must be an opaque 1024x1024 PNG" env \
+  PATH="$fake_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+  FLUKE_XCODEBUILD_CAPTURE="$capture" \
+  FLUKE_APP_ICON_PATH="$invalid_icon" \
+  "$boundary_verifier"
 if ! grep -Fxq -- '-resultBundlePath' "$capture" \
   || ! grep -Fxq -- "$test_root/AppTests.xcresult" "$capture" \
   || ! grep -Fxq -- '-enableCodeCoverage' "$capture" \
@@ -229,14 +239,24 @@ boundary_sources="$test_root/boundary-sources"
 feature_sources="$test_root/feature-sources"
 mkdir -p "$boundary_sources"
 mkdir -p "$feature_sources"
-printf 'struct Item {}\n' >"$boundary_sources/AllowedPersistence.swift"
-printf 'struct IdentifyPlaceholder {}\n' >"$feature_sources/AllowedPlaceholder.swift"
+printf 'let shippingViews = [SightingsView.self, WhalesView.self, LearnView.self, AtlasView.self]\n' \
+  >"$boundary_sources/AllowedPersistence.swift"
+printf 'struct AtlasFeatureItem {}\n' >"$feature_sources/AllowedFeature.swift"
 expect_success "boundary verifier allows ordinary persistence names" env \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
   FLUKE_FEATURE_SOURCE_ROOT="$feature_sources" \
   "$boundary_verifier"
+sed -i '' 's/AtlasView/AtlasMissing/' "$boundary_sources/AllowedPersistence.swift"
+expect_failure "boundary verifier requires every real shipping view" \
+  "Missing Release A shipping view: AtlasView" env \
+  PATH="$fake_bin:$PATH" \
+  FLUKE_XCODEBUILD_CAPTURE="$capture" \
+  FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
+  FLUKE_FEATURE_SOURCE_ROOT="$feature_sources" \
+  "$boundary_verifier"
+sed -i '' 's/AtlasMissing/AtlasView/' "$boundary_sources/AllowedPersistence.swift"
 printf 'struct SubmitView {}\n' >"$boundary_sources/ReleaseB.swift"
 expect_failure "boundary verifier rejects Release B presentation" \
   "Release A boundary violation" env \
@@ -255,6 +275,15 @@ expect_failure "boundary verifier rejects Release B feature imports" \
   FLUKE_FEATURE_SOURCE_ROOT="$feature_sources" \
   "$boundary_verifier"
 rm "$feature_sources/ReleaseBImport.swift"
+printf 'struct SightingsPlaceholder {}\n' >"$feature_sources/SightingsPlaceholder.swift"
+expect_failure "boundary verifier rejects shipping placeholder surfaces" \
+  "Release A placeholder boundary violation" env \
+  PATH="$fake_bin:$PATH" \
+  FLUKE_XCODEBUILD_CAPTURE="$capture" \
+  FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
+  FLUKE_FEATURE_SOURCE_ROOT="$feature_sources" \
+  "$boundary_verifier"
+rm "$feature_sources/SightingsPlaceholder.swift"
 
 configuration_root="$test_root/configuration"
 mkdir -p "$configuration_root"

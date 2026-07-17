@@ -5,50 +5,55 @@ import FlukeKit
 @MainActor
 @Observable
 public final class TraceViewModel {
-
-    public enum LoadState: Equatable {
-        case idle
-        case loading
-        case loaded
-        case sparse(reason: String)
-        case error(String)
-    }
-
-    public private(set) var loadState: LoadState = .idle
-    public private(set) var points: [MovementTrackPoint] = []
+    public private(set) var state: BrowseViewState<[MovementTrackPoint]> = .idle
     public var selectedWhaleId: String? {
-        didSet { Task { await loadIfNeeded() } }
+        didSet {
+            guard selectedWhaleId != oldValue else { return }
+            invalidateQueryState()
+        }
     }
     public var scrubberDate: Date = Date()
 
-    private let whales: WhalesRepository
+    private let whales: any WhalesRepositoryProtocol
+    private let now: () -> Date
+    private var loadGeneration = 0
 
-    public init(repository: WhalesRepository) {
+    public init(
+        repository: any WhalesRepositoryProtocol,
+        selectedWhaleID: String? = nil,
+        now: @escaping () -> Date = Date.init
+    ) {
         self.whales = repository
+        self.selectedWhaleId = selectedWhaleID
+        self.now = now
     }
 
     public func loadIfNeeded() async {
         guard let id = selectedWhaleId else {
-            loadState = .idle
-            points = []
+            state = .idle
             return
         }
-        loadState = .loading
+        loadGeneration += 1
+        let generation = loadGeneration
+        state = state.beginRefresh()
+        let result: BrowseResult<[MovementTrackPoint]>
         do {
-            let to = Date()
+            let to = now()
             let from = to.addingTimeInterval(-BrowseRequestValidator.maximumWindow)
-            let fetched = try await whales.fetchTrack(whaleId: id, from: from, to: to)
-            points = fetched.sorted { $0.observedAt < $1.observedAt }
-            if points.count < 3 {
-                loadState = .sparse(reason: "Not enough sightings yet to trace movement.")
-            } else {
-                loadState = .loaded
-                if let last = points.last { scrubberDate = last.observedAt }
-            }
+            result = try await whales.loadTrack(whaleId: id, from: from, to: to)
         } catch {
-            loadState = .error((error as? APIError)?.errorDescription ?? error.localizedDescription)
+            result = .failed(.unexpectedFeatureFailure)
         }
+        guard generation == loadGeneration else { return }
+        state = .resolve(Self.sorted(result))
+        if let last = points.last { scrubberDate = last.observedAt }
     }
+
+    public func retry() async { await loadIfNeeded() }
+
+    public var points: [MovementTrackPoint] { state.value ?? [] }
+
+    public var isSparse: Bool { !points.isEmpty && points.count < 3 }
 
     public var dateRange: ClosedRange<Date>? {
         guard let first = points.first?.observedAt, let last = points.last?.observedAt else { return nil }
@@ -57,5 +62,40 @@ public final class TraceViewModel {
 
     public var visiblePoints: [MovementTrackPoint] {
         points.filter { $0.observedAt <= scrubberDate }
+    }
+
+    private static func sorted(
+        _ result: BrowseResult<[MovementTrackPoint]>
+    ) -> BrowseResult<[MovementTrackPoint]> {
+        func values(_ points: [MovementTrackPoint]) -> [MovementTrackPoint] {
+            points.sorted { $0.observedAt < $1.observedAt }
+        }
+        return switch result {
+        case .fresh(let points, let metadata):
+            .fresh(value: values(points), metadata: metadata)
+        case .empty(let metadata):
+            .empty(metadata: metadata)
+        case .stale(let payload, let metadata, let failure):
+            .stale(payload: map(payload, transform: values), metadata: metadata, failure: failure)
+        case .cachedOffline(let payload, let metadata):
+            .cachedOffline(payload: map(payload, transform: values), metadata: metadata)
+        case .failed(let failure):
+            .failed(failure)
+        }
+    }
+
+    private static func map(
+        _ payload: BrowsePayload<[MovementTrackPoint]>,
+        transform: ([MovementTrackPoint]) -> [MovementTrackPoint]
+    ) -> BrowsePayload<[MovementTrackPoint]> {
+        switch payload {
+        case .value(let points): .value(transform(points))
+        case .empty: .empty
+        }
+    }
+
+    private func invalidateQueryState() {
+        loadGeneration += 1
+        state = .idle
     }
 }

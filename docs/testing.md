@@ -8,7 +8,7 @@ Test strategy for the iOS app. Coverage targets, what gets tested at each layer,
 | --- | --- | --- |
 | `FlukeKit` (domain) | 80%+ source lines | Swift Testing/XCTest; injected `HTTPTransport`; in-memory actor cache |
 | `FlukeUI` (design system) | Snapshot regression on visual components | `swift-snapshot-testing` PNG references in `__Snapshots__/` |
-| `FlukeFeatures` (screens) | View model logic + render-doesn't-crash | XCTest unit tests for view models; minimal smoke render tests |
+| `FlukeFeatures` (screens) | View model logic + render-doesn't-crash | Swift Testing state/repository suites plus XCTest smoke render tests for all four shipping surfaces |
 | `App` (integration) | Release A shell and configuration boundaries | Swift Testing in `App/FlukeTests`; exact four-tab shell, fail-closed capabilities, cache injection, and API-origin policy |
 
 ## Running tests
@@ -143,13 +143,11 @@ XCTAssertEqual(vm.allWhales.count, 1)
 XCTAssertEqual(vm.loadState, .loaded)
 ```
 
-Repositories pass an `actor` interface; the mock conforms to the same interface and stubs the responses. Don't introduce a protocol just for testing — actors are already a clean boundary.
+Feature models depend on the public repository protocols defined by `FlukeKit`; actor fakes conform to those same production boundaries and return `BrowseResult` values. Tests exercise fresh, stale, offline, empty, failure, retry, sorting/filtering, and latest-load-wins behavior without replacing the production API contract.
 
 ### App integration boundary
 
-`App/FlukeTests/` is the current Release A app gate. It asserts the exact Sightings, Whales, Learn, and Atlas tab set; fails capabilities closed; verifies one injected browse cache; and rejects missing, insecure, or local API origins outside Debug. `scripts/verify-release-a-boundaries.sh` runs only this meaningful app target with coverage and serialized simulator execution.
-
-`App/FlukeUITests/` still contains Xcode's generated launch smoke target, but it is not presented as coverage of authenticated or mutation flows and is not part of the Release A boundary gate.
+`App/FlukeTests/` asserts the exact Sightings, Whales, Learn, and Atlas tab set; fails capabilities closed; verifies one injected browse cache; and rejects missing, insecure, or local API origins outside Debug. `App/FlukeUITests/testPublicBrowseTabsAreReachable` launches the shipping app, proves exactly four tab buttons exist, opens the three navigation-root surfaces, and verifies Atlas exposes its mode control. `scripts/verify-release-a-boundaries.sh` runs both targets with coverage and serialized simulator execution.
 
 ## Test naming
 

@@ -5,8 +5,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 project="$repo_root/App/Fluke.xcodeproj"
 app_source_root="${FLUKE_APP_SOURCE_ROOT:-$repo_root/App/Fluke}"
 feature_source_root="${FLUKE_FEATURE_SOURCE_ROOT:-$repo_root/Packages/FlukeFeatures/Sources}"
+ui_source_root="${FLUKE_UI_SOURCE_ROOT:-$repo_root/Packages/FlukeUI/Sources}"
 documentation_root="${FLUKE_DOCUMENTATION_ROOT:-$repo_root}"
 configuration_root="${FLUKE_CONFIGURATION_ROOT:-$repo_root/App/Configuration}"
+app_icon_path="${FLUKE_APP_ICON_PATH:-$repo_root/App/Fluke/Assets.xcassets/AppIcon.appiconset/icon-1024.png}"
 destination="${FLUKE_TEST_DESTINATION:-platform=iOS Simulator,name=iPhone 17,OS=26.0.1}"
 result_bundle_path="${FLUKE_RESULT_BUNDLE_PATH:-}"
 enable_coverage="${FLUKE_ENABLE_COVERAGE:-NO}"
@@ -27,7 +29,7 @@ contains_pattern() {
   if command -v rg >/dev/null 2>&1; then
     rg -q -- "$pattern" "$path"
   else
-    grep -Eq -- "$pattern" "$path"
+    grep -ERq -- "$pattern" "$path"
   fi
 }
 
@@ -36,11 +38,30 @@ if [[ "$enable_coverage" != "YES" && "$enable_coverage" != "NO" ]]; then
   exit 2
 fi
 
+test -f "$app_icon_path" || {
+  echo "Missing 1024-point app icon" >&2
+  exit 1
+}
+icon_width="$(sips -g pixelWidth "$app_icon_path" | awk '/pixelWidth/{print $2}')"
+icon_height="$(sips -g pixelHeight "$app_icon_path" | awk '/pixelHeight/{print $2}')"
+icon_has_alpha="$(sips -g hasAlpha "$app_icon_path" | awk '/hasAlpha/{print $2}')"
+if [[ "$icon_width" != "1024" || "$icon_height" != "1024" || "$icon_has_alpha" != "no" ]]; then
+  echo "App Store icon must be an opaque 1024x1024 PNG" >&2
+  exit 1
+fi
+
 if search_lines '(^|[^[:alnum:]_])(IdentifyPlaceholder|IdentifyService|IdentifyView|YouPlaceholder|AuthService|AuthSession|SubmissionReplayer|SubmissionsRepository|SubmitView|SubmitSheet)([^[:alnum:]_]|$)|/api/v1/(auth|identify|sightings/me)' \
   "$app_source_root"; then
   echo "Release A boundary violation in the app target" >&2
   exit 1
 fi
+
+for shipping_view in SightingsView WhalesView LearnView AtlasView; do
+  if ! contains_pattern "(^|[^[:alnum:]_])${shipping_view}([^[:alnum:]_]|$)" "$app_source_root"; then
+    echo "Missing Release A shipping view: $shipping_view" >&2
+    exit 1
+  fi
+done
 
 if search_lines 'import[[:space:]]+FlukeReleaseB|(^|[^[:alnum:]_])(IdentifyResponse|ReleaseBEndpoint|ReleaseBAPIClient|AuthService|SubmissionsRepository)([^[:alnum:]_]|$)|/api/v1/(auth|identify|sightings/me)' \
   "$feature_source_root"; then
@@ -50,6 +71,13 @@ fi
 
 if contains_pattern 'FlukeReleaseB' "$repo_root/Packages/FlukeFeatures/Package.swift"; then
   echo "Release B compile boundary violation in FlukeFeatures manifest" >&2
+  exit 1
+fi
+
+if search_lines 'PlaceholderScreen|(^|[^[:alnum:]_])[[:alnum:]_]+Placeholder([^[:alnum:]_]|$)' \
+  "$feature_source_root" \
+  || search_lines 'PlaceholderScreen' "$ui_source_root"; then
+  echo "Release A placeholder boundary violation" >&2
   exit 1
 fi
 
@@ -102,6 +130,7 @@ xcodebuild_arguments=(
   -scheme Fluke
   -destination "$destination"
   -only-testing:FlukeTests
+  -only-testing:FlukeUITests/FlukeUITests/testPublicBrowseTabsAreReachable
   -parallel-testing-enabled NO
   -maximum-concurrent-test-simulator-destinations 1
   -enableCodeCoverage "$enable_coverage"

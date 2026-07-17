@@ -104,7 +104,7 @@ struct ResilientAPIClientTests {
         await #expect(throws: APIError.timeout) {
             let _: HealthResponse = try await client.get("/api/v1/health")
         }
-        #expect(await transport.wasCancelled)
+        #expect(await transport.waitForCancellation(within: .seconds(1)))
     }
 
     @Test("Request deadline returns even when an injected transport ignores cancellation")
@@ -184,6 +184,15 @@ private actor ScriptedTransport: HTTPTransport {
 
     init(_ script: Script) {
         self.script = script
+    }
+
+    func waitForCancellation(within timeout: Duration) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while !wasCancelled, clock.now < deadline {
+            await Task.yield()
+        }
+        return wasCancelled
     }
 
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {

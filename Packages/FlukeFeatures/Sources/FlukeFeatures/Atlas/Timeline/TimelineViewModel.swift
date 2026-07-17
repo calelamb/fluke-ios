@@ -6,40 +6,52 @@ import FlukeKit
 @MainActor
 @Observable
 public final class TimelineViewModel {
-
-    public enum LoadState: Equatable { case loading, loaded, error(String) }
-
-    public private(set) var loadState: LoadState = .loading
-    public private(set) var historicalSightings: [HistoricalSighting] = []
+    public private(set) var state: BrowseViewState<[HistoricalSighting]> = .idle
     public var scrubberDate: Date = Date()
     public var activePods: Set<Pod> = Set(Pod.allCases)
 
-    private let repository: HistoricalSightingsRepository
+    private let repository: any HistoricalSightingsRepositoryProtocol
+    private let now: () -> Date
+    private var loadGeneration = 0
 
-    public init(repository: HistoricalSightingsRepository) {
+    public init(
+        repository: any HistoricalSightingsRepositoryProtocol,
+        now: @escaping () -> Date = Date.init
+    ) {
         self.repository = repository
+        self.now = now
     }
 
     public func load() async {
-        loadState = .loading
+        loadGeneration += 1
+        let generation = loadGeneration
+        state = state.beginRefresh()
+        let result: BrowseResult<[HistoricalSighting]>
         do {
-            let to = Date()
+            let to = now()
             let from = to.addingTimeInterval(-BrowseRequestValidator.maximumWindow)
-            historicalSightings = try await repository.fetch(from: from, to: to, pod: nil, whaleId: nil)
-            loadState = .loaded
-            if let last = historicalSightings.last?.observedAt { scrubberDate = last }
+            result = try await repository.load(from: from, to: to, pod: nil)
         } catch {
-            loadState = .error((error as? APIError)?.errorDescription ?? error.localizedDescription)
+            result = .failed(.unexpectedFeatureFailure)
+        }
+        guard generation == loadGeneration else { return }
+        state = .resolve(result)
+        if let last = historicalSightings.max(by: { $0.observedAt < $1.observedAt }) {
+            scrubberDate = last.observedAt
         }
     }
+
+    public func retry() async { await load() }
+
+    public var historicalSightings: [HistoricalSighting] { state.value ?? [] }
 
     public func togglePod(_ pod: Pod) {
         if activePods.contains(pod) { activePods.remove(pod) } else { activePods.insert(pod) }
     }
 
     public var dateRange: ClosedRange<Date>? {
-        guard let first = historicalSightings.first?.observedAt,
-              let last = historicalSightings.last?.observedAt else { return nil }
+        let dates = historicalSightings.map(\.observedAt)
+        guard let first = dates.min(), let last = dates.max() else { return nil }
         return first...last
     }
 
@@ -48,20 +60,15 @@ public final class TimelineViewModel {
         let upTo = historicalSightings.filter { $0.observedAt <= scrubberDate }
         var byPod: [Pod: [(lat: Double, lng: Double, observedAt: Date)]] = [:]
 
-        let podByWhale = Dictionary(uniqueKeysWithValues: catalog.compactMap { w -> (String, Pod)? in
-            switch w.pod {
-            case "J": return (w.id, .j)
-            case "K": return (w.id, .k)
-            case "L": return (w.id, .l)
-            default:
-                if w.ecotype == .biggs { return (w.id, .biggs) }
-                return nil
-            }
-        })
+        let podByWhale = catalog.reduce(into: [String: Pod]()) { result, whale in
+            guard let pod = pod(for: whale) else { return }
+            result[whale.id] = pod
+            result[whale.catalogId] = pod
+        }
 
         for sighting in upTo {
-            for whaleId in sighting.whaleIds {
-                guard let pod = podByWhale[whaleId], activePods.contains(pod) else { continue }
+            let sightingPods = Set(sighting.whaleIds.compactMap { podByWhale[$0] })
+            for pod in sightingPods where activePods.contains(pod) {
                 byPod[pod, default: []].append((sighting.latitude, sighting.longitude, sighting.observedAt))
             }
         }
@@ -71,6 +78,15 @@ public final class TimelineViewModel {
         }
 
         return byPod
+    }
+
+    private func pod(for whale: Whale) -> Pod? {
+        switch whale.pod {
+        case "J": .j
+        case "K": .k
+        case "L": .l
+        default: whale.ecotype == .biggs ? .biggs : nil
+        }
     }
 }
 

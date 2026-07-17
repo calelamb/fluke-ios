@@ -64,10 +64,24 @@ public struct AnimatedPolylineLayer: View {
             }
         }
         .onAppear {
-            if reduceMotion {
+            updateAnimation(reduceMotion: reduceMotion)
+        }
+        .onChange(of: reduceMotion) { _, isEnabled in
+            updateAnimation(reduceMotion: isEnabled)
+        }
+    }
+
+    private func updateAnimation(reduceMotion: Bool) {
+        if reduceMotion {
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
                 drawProgress = 1
-                return
+                dashOffset = 0
             }
+        } else {
+            drawProgress = 0
+            dashOffset = 0
             withAnimation(.easeOut(duration: drawDuration)) {
                 drawProgress = 1
             }
@@ -99,7 +113,20 @@ private struct PulsingEndpoint: View {
                 .frame(width: 8, height: 8)
         }
         .onAppear {
-            guard !reduceMotion else { return }
+            updateAnimation(reduceMotion: reduceMotion)
+        }
+        .onChange(of: reduceMotion) { _, isEnabled in
+            updateAnimation(reduceMotion: isEnabled)
+        }
+    }
+
+    private func updateAnimation(reduceMotion: Bool) {
+        if reduceMotion {
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { scale = 1 }
+        } else {
+            scale = 1
             withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) {
                 scale = 2.4
             }

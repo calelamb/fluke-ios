@@ -136,9 +136,11 @@ In `FlukeUI/Shapes/`:
 
 In `FlukeUI/Components/`:
 
-- `PlaceholderScreen` — empty-state scaffold used by the browse shell.
-- `EcotypeBadge`, `MapMarker`, `SearchField`, `FilterChip`, `PrimaryButton`, `SecondaryButton`, `FormField`, `QueueBadge`, `DisclaimerRibbon`, `ConfidenceBar` — reusable design-system components.
-- `Haptics` — sparing helper for `.impact(.soft)`/`.notification(.success)`.
+- `DateScrubberAtlas` — accessible timeline control shared by Atlas modes.
+- `HeatCell` and `ConfidenceCone` — local visualization primitives for public historical and prediction data.
+- `PodLegend` — the reusable Atlas pod key.
+
+Feature-specific browse status, cards, markers, search, and reader components stay inside `FlukeFeatures` until a second shipping feature needs them.
 
 ## App target
 
@@ -156,7 +158,7 @@ Top-level dependency container. Holds process-lifetime dependencies such as `API
 
 ## Out-of-scope (deferred)
 
-- **On-device ML**: Photo identification runs server-side via Modal. This isn't an architectural lock-in — swapping to Core ML is contained to `FlukeKit/Services/IdentifyService.swift`. It's just not a v1 priority. See spec § Decisions for the reasoning.
+- **Photo identification and on-device ML**: identification is a Release B concern and is not linked into the Release A app product. Any future server or Core ML implementation must land behind the dormant Release B boundary rather than expanding the read-only shipping surface.
 - **Push notifications**: Phase 2 of the spec.
 - **iPad-tuned layout**: Phone-first.
 - **Apple Watch / widgets**: Out of scope.
