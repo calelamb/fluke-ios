@@ -118,11 +118,11 @@ if [[ "$1 $2" == "simctl bootstatus" && "${FLUKE_SIMULATOR_BOOTSTATUS_MODE:-}" =
   count="$(cat "${FLUKE_SIMULATOR_BOOTSTATUS_COUNT}" 2>/dev/null || printf 0)"
   printf '%s' "$((count + 1))" >"$FLUKE_SIMULATOR_BOOTSTATUS_COUNT"
   if [[ "$count" == "0" ]]; then
-    sleep 1
+    exit 124
   fi
 fi
 if [[ "$1 $2" == "simctl bootstatus" && "${FLUKE_SIMULATOR_BOOTSTATUS_MODE:-}" == "always-timeout" ]]; then
-  sleep 1
+  sleep 2
 fi
 SH
 chmod +x "$simulator_bin/xcrun"
@@ -159,7 +159,7 @@ expect_success "simulator preparer bounds boot and performs one recovery" env \
   FLUKE_SIMULATOR_COMMAND_CAPTURE="$recovery_capture" \
   FLUKE_SIMULATOR_BOOTSTATUS_MODE="recover-once" \
   FLUKE_SIMULATOR_BOOTSTATUS_COUNT="$test_root/recovery-count" \
-  FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS="0.05" \
+  FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS="1" \
   "$simulator_preparer"
 grep -Fxq 'simctl shutdown 11111111-2222-3333-4444-555555555555' "$recovery_capture" \
   || failures=$((failures + 1))
@@ -174,7 +174,7 @@ expect_failure "simulator preparer fails after one bounded recovery" \
   FLUKE_SIMULATOR_LIST_JSON="$test_root/simulators.json" \
   FLUKE_SIMULATOR_COMMAND_CAPTURE="$test_root/simulator-timeout-commands" \
   FLUKE_SIMULATOR_BOOTSTATUS_MODE="always-timeout" \
-  FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS="0.05" \
+  FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS="0.5" \
   "$simulator_preparer"
 
 cat >"$test_root/swift-coverage.json" <<'JSON'
@@ -467,7 +467,7 @@ if [[ "$1 $2" == "simctl bootstatus" && "${FLUKE_SIMULATOR_BOOTSTATUS_MODE:-}" =
   count="$(cat "${FLUKE_SIMULATOR_BOOTSTATUS_COUNT}" 2>/dev/null || printf 0)"
   printf '%s' "$((count + 1))" >"$FLUKE_SIMULATOR_BOOTSTATUS_COUNT"
   if [[ "$count" == "0" ]]; then
-    sleep 1
+    exit 124
   fi
   exit 0
 fi
@@ -511,7 +511,7 @@ expect_success "screenshot capture resolves a pinned simulator and exports named
   FLUKE_CAPTURE_SIMCTL_CAPTURE="$test_root/capture-simctl-arguments" \
   FLUKE_SIMULATOR_BOOTSTATUS_MODE="recover-once" \
   FLUKE_SIMULATOR_BOOTSTATUS_COUNT="$test_root/capture-recovery-count" \
-  FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS="0.05" \
+  FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS="1" \
   "$screenshot_capture" "$capture_output"
 if [[ "$(find "$capture_output" -type f -name '*.png' | wc -l | tr -d ' ')" != "4" ]]; then
   echo "FAIL: screenshot capture did not export four named images" >&2
