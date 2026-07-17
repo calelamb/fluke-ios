@@ -12,7 +12,7 @@ public actor WhalesRepository: WhalesRepositoryProtocol {
     }
 
     public func loadCatalog() async throws -> BrowseResult<[Whale]> {
-        try await loader.load(
+        return try await loader.load(
             [Whale].self,
             key: BrowseCacheKey(resource: "whales", identity: "catalog"),
             fetch: { [api] in
@@ -31,26 +31,30 @@ public actor WhalesRepository: WhalesRepositoryProtocol {
     }
 
     public func loadProfile(id: String) async throws -> BrowseResult<WhaleProfile?> {
-        try await loader.load(
+        try BrowseRequestValidator.identifier(id, pathSegment: true)
+        return try await loader.load(
             WhaleProfile?.self,
             key: BrowseCacheKey(resource: "whale-profile", identity: id),
             fetch: { [api] in
                 do {
-                    return try await api.get(Endpoint.whale(id: id))
+                    return try await api.get(try Endpoint.whale(id: id))
                 } catch APIError.remote(status: 404, code: _, message: _, retryable: _, requestId: _) {
                     return nil
                 }
             },
             isEmpty: { $0 == nil },
             validate: { profile in
-                if let profile { try PublicBrowseValidator.whaleProfile(profile) }
+                if let profile {
+                    try PublicBrowseValidator.whaleProfile(profile, requestedID: id)
+                }
             }
         )
     }
 
     public func find(byId id: String) async throws -> WhaleProfile? {
-        let profile: WhaleProfile = try await api.get(Endpoint.whale(id: id))
-        try PublicBrowseValidator.whaleProfile(profile)
+        try BrowseRequestValidator.identifier(id, pathSegment: true)
+        let profile: WhaleProfile = try await api.get(try Endpoint.whale(id: id))
+        try PublicBrowseValidator.whaleProfile(profile, requestedID: id)
         return profile
     }
 
@@ -59,15 +63,18 @@ public actor WhalesRepository: WhalesRepositoryProtocol {
         from: Date,
         to: Date
     ) async throws -> BrowseResult<[MovementTrackPoint]> {
+        try BrowseRequestValidator.identifier(whaleId, pathSegment: true)
+        try BrowseRequestValidator.dateWindow(from: from, to: to)
         let query = trackQuery(from: from, to: to)
         return try await loader.load(
             [MovementTrackPoint].self,
             key: BrowseCacheKey(resource: "whale-track", identity: "\(whaleId)|\(query.identity)"),
             fetch: { [api] in
                 let response: WhaleTrack = try await api.get(APIRequest(
-                    path: Endpoint.whaleTrack(id: whaleId),
+                    path: try Endpoint.whaleTrack(id: whaleId),
                     queryItems: query.items
                 ))
+                try PublicBrowseValidator.whaleTrack(response, requestedID: whaleId)
                 return response.points
             },
             isEmpty: { $0.isEmpty },
@@ -76,9 +83,15 @@ public actor WhalesRepository: WhalesRepositoryProtocol {
     }
 
     /// Fetch the per-whale movement track (used by Atlas Trace sub-view).
-    public func fetchTrack(whaleId: String) async throws -> [MovementTrackPoint] {
-        let response: WhaleTrack = try await api.get(Endpoint.whaleTrack(id: whaleId))
-        try PublicBrowseValidator.track(response.points)
+    public func fetchTrack(whaleId: String, from: Date, to: Date) async throws -> [MovementTrackPoint] {
+        try BrowseRequestValidator.identifier(whaleId, pathSegment: true)
+        try BrowseRequestValidator.dateWindow(from: from, to: to)
+        let query = trackQuery(from: from, to: to)
+        let response: WhaleTrack = try await api.get(APIRequest(
+            path: try Endpoint.whaleTrack(id: whaleId),
+            queryItems: query.items
+        ))
+        try PublicBrowseValidator.whaleTrack(response, requestedID: whaleId)
         return response.points
     }
 

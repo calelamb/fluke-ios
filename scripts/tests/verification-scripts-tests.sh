@@ -8,6 +8,7 @@ coverage_verifier="$repo_root/scripts/verify-coverage.sh"
 swift_coverage_verifier="$repo_root/scripts/verify-swift-package-coverage.sh"
 archive_verifier="$repo_root/scripts/verify-archive-metadata.sh"
 boundary_verifier="$repo_root/scripts/verify-release-a-boundaries.sh"
+simulator_preparer="$repo_root/scripts/prepare-ios-simulator.sh"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/fluke-verifier-tests.XXXXXX")"
 trap 'rm -rf "$test_root"' EXIT
 
@@ -99,6 +100,43 @@ PY
 expect_failure "coverage rejects inconsistent counts" "coverage report is inconsistent" \
   "$coverage_verifier" "$test_root/coverage.json" Fluke.app 80
 
+simulator_bin="$test_root/simulator-bin"
+mkdir -p "$simulator_bin"
+cat >"$simulator_bin/xcrun" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == "simctl list devices available --json" ]]; then
+  cat "$FLUKE_SIMULATOR_LIST_JSON"
+  exit 0
+fi
+printf '%s\n' "$*" >>"$FLUKE_SIMULATOR_COMMAND_CAPTURE"
+SH
+chmod +x "$simulator_bin/xcrun"
+cat >"$test_root/simulators.json" <<'JSON'
+{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-0":[
+  {"name":"iPhone 17","udid":"11111111-2222-3333-4444-555555555555","state":"Shutdown","isAvailable":true}
+]}}
+JSON
+simulator_env="$test_root/simulator.env"
+expect_success "simulator preparer resolves and boots one UDID" env \
+  PATH="$simulator_bin:$PATH" \
+  GITHUB_ENV="$simulator_env" \
+  FLUKE_SIMULATOR_LIST_JSON="$test_root/simulators.json" \
+  FLUKE_SIMULATOR_COMMAND_CAPTURE="$test_root/simulator-commands" \
+  "$simulator_preparer"
+grep -Fxq 'SIMULATOR_UDID=11111111-2222-3333-4444-555555555555' "$simulator_env" || failures=$((failures + 1))
+grep -Fxq 'SIMULATOR_DESTINATION=platform=iOS Simulator,id=11111111-2222-3333-4444-555555555555' "$simulator_env" || failures=$((failures + 1))
+grep -Fxq 'FLUKE_TEST_DESTINATION=platform=iOS Simulator,id=11111111-2222-3333-4444-555555555555' "$simulator_env" || failures=$((failures + 1))
+grep -Fxq 'simctl boot 11111111-2222-3333-4444-555555555555' "$test_root/simulator-commands" || failures=$((failures + 1))
+grep -Fxq 'simctl bootstatus 11111111-2222-3333-4444-555555555555 -b' "$test_root/simulator-commands" || failures=$((failures + 1))
+expect_failure "simulator preparer fails when device is unavailable" "available simulator not found" env \
+  PATH="$simulator_bin:$PATH" \
+  GITHUB_ENV="$test_root/missing-simulator.env" \
+  FLUKE_SIMULATOR_NAME="iPhone Missing" \
+  FLUKE_SIMULATOR_LIST_JSON="$test_root/simulators.json" \
+  FLUKE_SIMULATOR_COMMAND_CAPTURE="$test_root/simulator-commands" \
+  "$simulator_preparer"
+
 cat >"$test_root/swift-coverage.json" <<'JSON'
 {"data":[{"files":[
   {"filename":"/checkout/Packages/FlukeKit/Sources/FlukeKit/API/APIClient.swift","summary":{"lines":{"count":100,"covered":80}}},
@@ -180,18 +218,24 @@ expect_success "boundary verifier accepts result and coverage options" env \
 if ! grep -Fxq -- '-resultBundlePath' "$capture" \
   || ! grep -Fxq -- "$test_root/AppTests.xcresult" "$capture" \
   || ! grep -Fxq -- '-enableCodeCoverage' "$capture" \
+  || ! grep -Fxq -- '-parallel-testing-enabled' "$capture" \
+  || ! grep -Fxq -- '-maximum-concurrent-test-simulator-destinations' "$capture" \
   || ! grep -Fxq -- 'YES' "$capture"; then
   printf 'FAIL: boundary verifier did not forward result/coverage arguments\n' >&2
   failures=$((failures + 1))
 fi
 
 boundary_sources="$test_root/boundary-sources"
+feature_sources="$test_root/feature-sources"
 mkdir -p "$boundary_sources"
+mkdir -p "$feature_sources"
 printf 'struct Item {}\n' >"$boundary_sources/AllowedPersistence.swift"
+printf 'struct IdentifyPlaceholder {}\n' >"$feature_sources/AllowedPlaceholder.swift"
 expect_success "boundary verifier allows ordinary persistence names" env \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
+  FLUKE_FEATURE_SOURCE_ROOT="$feature_sources" \
   "$boundary_verifier"
 printf 'struct SubmitView {}\n' >"$boundary_sources/ReleaseB.swift"
 expect_failure "boundary verifier rejects Release B presentation" \
@@ -199,6 +243,16 @@ expect_failure "boundary verifier rejects Release B presentation" \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
+  FLUKE_FEATURE_SOURCE_ROOT="$feature_sources" \
+  "$boundary_verifier"
+rm "$boundary_sources/ReleaseB.swift"
+printf 'import FlukeReleaseB\nlet response: IdentifyResponse?\n' >"$feature_sources/ReleaseBImport.swift"
+expect_failure "boundary verifier rejects Release B feature imports" \
+  "Release B compile boundary violation" env \
+  PATH="$fake_bin:$PATH" \
+  FLUKE_XCODEBUILD_CAPTURE="$capture" \
+  FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
+  FLUKE_FEATURE_SOURCE_ROOT="$feature_sources" \
   "$boundary_verifier"
 
 default_capture="$test_root/xcodebuild-default-arguments"

@@ -6,7 +6,7 @@ Local builds, simulator targets, deployment target rationale, and the GitHub Act
 
 ### Prerequisites
 
-- macOS 14+ with **Xcode 16+** (`xcodebuild -version` should show Xcode 16.x).
+- macOS 15+ with **Xcode 26.0.1** (`xcodebuild -version` is pinned in CI).
 - Command Line Tools (`xcode-select --install`).
 - An iOS 17+ simulator (Xcode → Settings → Platforms — iOS 26 is bundled with Xcode 16, iOS 17/18 are downloadable).
 - For Swift package work: nothing else — `swift` ships with Xcode.
@@ -31,36 +31,32 @@ xcodebuild build \
 
 ### Simulator destination
 
-The plans were originally written referencing `iPhone 15`. With Xcode 16 / iOS 26 (current as of 2026-04), the available simulators are `iPhone 16e`, `iPhone 17`, `iPhone 17 Pro`, `iPhone 17 Pro Max`, `iPhone Air`, plus iPad models. **Use `iPhone 17` for current builds.**
+The plans were originally written referencing `iPhone 15`. With Xcode 26 / iOS 26, the available simulators include `iPhone 16e`, `iPhone 17`, `iPhone 17 Pro`, `iPhone 17 Pro Max`, and `iPhone Air`. **Use `iPhone 17` for current builds.** CI resolves the exact simulator UDID and waits for `simctl bootstatus` before testing.
 
 If you're on an older Xcode:
 
 | Xcode | Default iPhone simulator |
 | --- | --- |
-| 16+ | iPhone 17 |
+| 26.x | iPhone 17 |
+| 16.x | iPhone 16 |
 | 15.x | iPhone 15 |
 | 14.x | iPhone 14 |
 
-The workflow file uses `name=iPhone 16,OS=latest` — broadest compatibility across GitHub Actions hosted runners and local machines.
+The workflow pins an iPhone 17 on the iOS 26.0 runtime. It does not use `OS=latest`, so hosted-runner drift cannot silently change the test destination.
 
 ### Deployment target
 
-The Xcode project's deployment target is currently **iOS 26.0** (Xcode 16 default). The original plan called for **iOS 17.0** to support a wider range of devices. Lowering the deployment target to iOS 17 is non-trivial today because:
-
-- M-iOS-1 already uses `Color.resolve(in:)` (iOS 17+) — fine.
-- iOS 26 introduces `@Observable` improvements we may rely on later.
-- The newer Foundation Models framework on iOS 26+ will be relevant for the Identify feature long-term.
-
-**Decision (deferred):** keep iOS 26 deployment target through M-iOS-1 through M-iOS-6. Re-evaluate at M-iOS-7 polish — if shipping to older devices is important for App Store reach, lower the target there. The Swift packages target iOS 17+ so they remain reusable on older devices regardless.
+The Xcode project and all Swift packages target **iOS 17.0**. The iOS 26 simulator is the verified build environment, not the minimum customer OS.
 
 ### Build configurations
 
-The Xcode project ships two configurations: `Debug` and `Release`. Differences:
+The Xcode project ships three configurations: `Debug`, `Staging`, and `Release`. Differences:
 
 - `Debug` — assertions on, no optimization, faster builds.
+- `Staging` — release-like behavior pointed at the staging HTTPS API.
 - `Release` — assertions off, full optimization, used by App Store builds.
 
-The `FlukeAPIBaseURL` value in `Info.plist` defaults to `http://localhost:4000`. To override for staging/production builds, edit `Info.plist` for the target build configuration. M-iOS-7 sets up multi-environment plist variants; for now, swap the value as needed and revert before committing.
+Each configuration inherits an xcconfig in `App/Configuration/`. Debug may use localhost; Staging and Release require a non-local HTTPS API origin and fail closed on missing or unsafe values.
 
 ## CI workflow
 
@@ -84,7 +80,7 @@ The workflow uploads the app `.xcresult`, the machine-readable app coverage repo
 
 ### Runner choice
 
-We use `macos-15` and explicitly select Xcode 26.0.1. The workflow requires the iOS 26.0.1 runtime and an iPhone 17 simulator before running any tests, so runner-image drift fails at the toolchain gate instead of changing render or build behavior silently.
+We use `macos-15` and explicitly select Xcode 26.0.1. The workflow requires the iOS 26.0.1 runtime and an iPhone 17 simulator before running any tests, resolves its UDID deterministically, waits for boot completion, and disables parallel simulator testing. The app-test step has a 10-minute timeout; simulator diagnostics and the `.xcresult` upload run even after failure.
 
 `macos-14` was the previous default but lacks iOS 18+ simulators by default. `macos-26` (when GitHub adds it) will be the natural target once it's GA.
 

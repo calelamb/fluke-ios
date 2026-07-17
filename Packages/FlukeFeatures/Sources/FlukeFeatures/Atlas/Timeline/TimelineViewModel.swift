@@ -23,7 +23,9 @@ public final class TimelineViewModel {
     public func load() async {
         loadState = .loading
         do {
-            historicalSightings = try await repository.fetch(from: nil, to: nil, pod: nil, whaleId: nil)
+            let to = Date()
+            let from = to.addingTimeInterval(-BrowseRequestValidator.maximumWindow)
+            historicalSightings = try await repository.fetch(from: from, to: to, pod: nil, whaleId: nil)
             loadState = .loaded
             if let last = historicalSightings.last?.observedAt { scrubberDate = last }
         } catch {

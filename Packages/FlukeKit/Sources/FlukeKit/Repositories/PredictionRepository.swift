@@ -6,10 +6,17 @@ public actor PredictionRepository: PredictionRepositoryProtocol {
         case whale(id: String)
         case pod(_ pod: Pod)
 
-        var queryParam: String {
+        var queryItem: URLQueryItem {
             switch self {
-            case .whale(let id): return "whaleId=\(id)"
-            case .pod(let pod): return "pod=\(pod.rawValue)"
+            case .whale(let id): URLQueryItem(name: "whaleId", value: id)
+            case .pod(let pod): URLQueryItem(name: "pod", value: pod.rawValue)
+            }
+        }
+
+        var identity: String {
+            switch self {
+            case .whale(let id): "whaleId=\(id)"
+            case .pod(let pod): "pod=\(pod.rawValue)"
             }
         }
     }
@@ -26,7 +33,8 @@ public actor PredictionRepository: PredictionRepositoryProtocol {
         subject: Subject,
         horizon: PredictionHorizon
     ) async throws -> BrowseResult<Prediction?> {
-        let key = "\(subject.queryParam)|\(horizon.rawValue)"
+        if case .whale(let id) = subject { try BrowseRequestValidator.identifier(id) }
+        let key = "\(subject.identity)|\(horizon.rawValue)"
         return try await loader.load(
             Prediction?.self,
             key: BrowseCacheKey(resource: "prediction", identity: key),
@@ -39,6 +47,7 @@ public actor PredictionRepository: PredictionRepositoryProtocol {
     }
 
     public func fetch(subject: Subject, horizon: PredictionHorizon) async throws -> Prediction? {
+        if case .whale(let id) = subject { try BrowseRequestValidator.identifier(id) }
         let prediction = try await Self.request(api: api, subject: subject, horizon: horizon)
         if let prediction { try PublicBrowseValidator.prediction(prediction) }
         return prediction
@@ -50,8 +59,13 @@ public actor PredictionRepository: PredictionRepositoryProtocol {
         horizon: PredictionHorizon
     ) async throws -> Prediction? {
         do {
-            let path = "\(Endpoint.predict)?\(subject.queryParam)&horizon=\(horizon.rawValue)"
-            return try await api.get(path)
+            return try await api.get(APIRequest(
+                path: Endpoint.predict,
+                queryItems: [
+                    subject.queryItem,
+                    URLQueryItem(name: "horizon", value: horizon.rawValue),
+                ]
+            ))
         } catch APIError.remote(status: 404, code: _, message: _, retryable: _, requestId: _) {
             return nil
         }

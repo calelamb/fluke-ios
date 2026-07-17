@@ -15,13 +15,14 @@ concurrency:
 
 env:
   XCODE_VERSION: 26.0.1
-  SIMULATOR_DESTINATION: platform=iOS Simulator,name=iPhone 17,OS=26.0.1
+  FLUKE_SIMULATOR_NAME: iPhone 17
+  FLUKE_SIMULATOR_RUNTIME_IDENTIFIER: com.apple.CoreSimulator.SimRuntime.iOS-26-0
 
 jobs:
   release-a-verification:
     name: Release A iOS verification
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
 
@@ -32,6 +33,7 @@ jobs:
           test "$(xcodebuild -version | sed -n '1p')" = "Xcode ${XCODE_VERSION}"
           xcrun simctl list runtimes available | grep -F 'iOS 26.0 (26.0.1'
           xcrun simctl list devices available | grep -F 'iPhone 17 ('
+          scripts/prepare-ios-simulator.sh
 
       - name: Prepare verification artifacts
         run: mkdir -p build/verification/package-coverage build/verification/snapshot-artifacts
@@ -62,11 +64,20 @@ jobs:
           80
 
       - name: Run meaningful app tests with coverage
+        timeout-minutes: 10
         env:
-          FLUKE_TEST_DESTINATION: ${{ env.SIMULATOR_DESTINATION }}
           FLUKE_RESULT_BUNDLE_PATH: build/verification/AppTests.xcresult
           FLUKE_ENABLE_COVERAGE: YES
         run: scripts/verify-release-a-boundaries.sh
+
+      - name: Collect simulator diagnostics
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        run: >-
+          xcrun simctl diagnose -b --timeout=120
+          --output=build/verification/simulator-diagnostics
+          --udid="$SIMULATOR_UDID"
 
       - name: Enforce app line coverage
         run: |
@@ -116,3 +127,4 @@ jobs:
             build/verification/package-coverage
             build/verification/snapshot-artifacts
             build/verification/archive-metadata.plist
+            build/verification/simulator-diagnostics

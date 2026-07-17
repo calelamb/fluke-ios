@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [
         .library(name: "FlukeKit", targets: ["FlukeKit"]),
+        .library(name: "FlukeReleaseB", targets: ["FlukeReleaseB"]),
     ],
     dependencies: [],
     targets: [
@@ -13,9 +14,13 @@ let package = Package(
             name: "FlukeKit",
             path: "Sources/FlukeKit"
         ),
+        .target(
+            name: "FlukeReleaseB",
+            path: "Sources/FlukeReleaseB"
+        ),
         .testTarget(
             name: "FlukeKitTests",
-            dependencies: ["FlukeKit"],
+            dependencies: ["FlukeKit", "FlukeReleaseB"],
             path: "Tests/FlukeKitTests",
             resources: [.process("Fixtures")]
         ),

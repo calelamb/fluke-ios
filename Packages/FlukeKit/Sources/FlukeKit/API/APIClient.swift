@@ -60,18 +60,6 @@ public struct APIClient: Sendable {
         try await send(method: "GET", request: apiRequest, body: nil)
     }
 
-    public func post<T: Decodable, B: Encodable>(
-        _ path: String,
-        body: B
-    ) async throws -> T {
-        let data = try JSONEncoder().encode(body)
-        return try await send(method: "POST", request: APIRequest(path: path), body: data)
-    }
-
-    public func postEmpty<T: Decodable>(_ path: String) async throws -> T {
-        try await send(method: "POST", request: APIRequest(path: path), body: nil)
-    }
-
     private func send<T: Decodable>(
         method: String,
         request apiRequest: APIRequest,
@@ -119,20 +107,8 @@ public struct APIClient: Sendable {
     }
 
     private func transportData(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        try await withThrowingTaskGroup(of: TransportResult.self) { group in
-            group.addTask {
-                let (data, response) = try await transport.data(for: request)
-                return TransportResult(data: data, response: response)
-            }
-            group.addTask {
-                try await Task.sleep(for: requestTimeout)
-                throw APIError.timeout
-            }
-            defer { group.cancelAll() }
-            guard let result = try await group.next() else {
-                throw APIError.transport
-            }
-            return (result.data, result.response)
+        try await withTaskDeadline(timeout: requestTimeout) { [transport] in
+            try await transport.data(for: request)
         }
     }
 
@@ -145,7 +121,10 @@ public struct APIClient: Sendable {
     }
 
     private func decodeRemoteError(status: Int, data: Data) -> APIError {
-        if let safe = try? JSONDecoder().decode(SafeError.self, from: data) {
+        if let safe = try? JSONDecoder().decode(SafeError.self, from: data),
+           isBounded(safe.code, maximum: 100),
+           isBounded(safe.message, maximum: 1_000),
+           isBounded(safe.requestId, maximum: 200) {
             return .remote(
                 status: status,
                 code: safe.code,
@@ -162,11 +141,15 @@ public struct APIClient: Sendable {
             requestId: nil
         )
     }
-}
 
-private struct TransportResult: Sendable {
-    let data: Data
-    let response: HTTPURLResponse
+    private func isBounded(_ value: String, maximum: Int) -> Bool {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !normalized.isEmpty
+            && normalized.count <= maximum
+            && normalized.unicodeScalars.allSatisfy {
+                !CharacterSet.controlCharacters.contains($0)
+            }
+    }
 }
 
 private extension Duration {

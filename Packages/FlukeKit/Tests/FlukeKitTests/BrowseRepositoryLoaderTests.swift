@@ -138,6 +138,86 @@ struct BrowseRepositoryLoaderTests {
         #expect(try await cache.load([String].self, for: key)?.payload == .value(["old"]))
     }
 
+    @Test("A cache write failure is diagnosed without hiding valid network data")
+    func diagnosesWriteFailure() async throws {
+        let diagnostics = DiagnosticRecorder()
+        let loader = BrowseRepositoryLoader(
+            cache: FailingBrowseCacheStore(failure: .write),
+            diagnostics: diagnostics,
+            now: { now }
+        )
+
+        let result = try await loader.load(
+            [String].self,
+            key: BrowseCacheKey(resource: "whales", identity: "catalog"),
+            fetch: { ["fresh"] },
+            isEmpty: { $0.isEmpty },
+            validate: { _ in }
+        )
+
+        guard case .fresh(let values, _) = result else {
+            Issue.record("Expected valid network data")
+            return
+        }
+        #expect(values == ["fresh"])
+        #expect(await diagnostics.events == [
+            BrowseCacheDiagnostic(operation: .write, resource: "whales", errorCode: "ioFailure"),
+        ])
+    }
+
+    @Test("A cache read failure is diagnosed before returning failed")
+    func diagnosesReadFailure() async throws {
+        let diagnostics = DiagnosticRecorder()
+        let loader = BrowseRepositoryLoader(
+            cache: FailingBrowseCacheStore(failure: .read),
+            diagnostics: diagnostics,
+            now: { now }
+        )
+
+        let result = try await loader.load(
+            [String].self,
+            key: BrowseCacheKey(resource: "sightings", identity: "approved"),
+            fetch: { throw APIError.offline },
+            isEmpty: { $0.isEmpty },
+            validate: { _ in }
+        )
+
+        guard case .failed = result else {
+            Issue.record("Expected failure without a readable cache")
+            return
+        }
+        #expect(await diagnostics.events == [
+            BrowseCacheDiagnostic(operation: .read, resource: "sightings", errorCode: "ioFailure"),
+        ])
+    }
+
+    @Test("Cache cancellation is propagated rather than converted to a result")
+    func propagatesCacheCancellation() async {
+        let key = BrowseCacheKey(resource: "whales", identity: "catalog")
+        await #expect(throws: CancellationError.self) {
+            try await BrowseRepositoryLoader(
+                cache: FailingBrowseCacheStore(failure: .writeCancellation)
+            ).load(
+                [String].self,
+                key: key,
+                fetch: { ["fresh"] },
+                isEmpty: { $0.isEmpty },
+                validate: { _ in }
+            )
+        }
+        await #expect(throws: CancellationError.self) {
+            try await BrowseRepositoryLoader(
+                cache: FailingBrowseCacheStore(failure: .readCancellation)
+            ).load(
+                [String].self,
+                key: key,
+                fetch: { throw APIError.offline },
+                isEmpty: { $0.isEmpty },
+                validate: { _ in }
+            )
+        }
+    }
+
     private func seed(
         _ value: [String],
         in cache: MemoryBrowseCacheStore,
@@ -151,5 +231,47 @@ struct BrowseRepositoryLoaderTests {
             ),
             for: key
         )
+    }
+}
+
+private enum InjectedCacheFailure: Error, Equatable {
+    case read
+    case write
+    case readCancellation
+    case writeCancellation
+}
+
+private actor FailingBrowseCacheStore: BrowseCacheStore {
+    let failure: InjectedCacheFailure
+
+    init(failure: InjectedCacheFailure) {
+        self.failure = failure
+    }
+
+    func load<Value: Codable & Sendable>(
+        _ type: Value.Type,
+        for key: BrowseCacheKey
+    ) throws -> BrowseCacheDocument<Value>? {
+        if failure == .read { throw InjectedCacheFailure.read }
+        if failure == .readCancellation { throw CancellationError() }
+        return nil
+    }
+
+    func replace<Value: Codable & Sendable>(
+        _ document: BrowseCacheDocument<Value>,
+        for key: BrowseCacheKey
+    ) throws {
+        if failure == .write { throw InjectedCacheFailure.write }
+        if failure == .writeCancellation { throw CancellationError() }
+    }
+
+    func remove(_ key: BrowseCacheKey) {}
+}
+
+private actor DiagnosticRecorder: BrowseCacheDiagnostics {
+    private(set) var events: [BrowseCacheDiagnostic] = []
+
+    func record(_ diagnostic: BrowseCacheDiagnostic) {
+        events = events + [diagnostic]
     }
 }

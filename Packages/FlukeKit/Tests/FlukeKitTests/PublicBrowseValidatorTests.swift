@@ -56,6 +56,20 @@ struct PublicBrowseValidatorTests {
         }
     }
 
+    @Test("Decoded identifiers and text reject control characters")
+    func rejectsControlCharacters() {
+        let whale = Whale(
+            id: "whale-\u{0000}1", catalogId: "J35", name: "Tahlequah\u{0007}",
+            ecotype: .resident, pod: "J", sex: .female, birthYear: 1998,
+            deathYear: nil, status: .alive, biography: nil, distinguishingMarks: nil,
+            heroImageUrl: nil, notableEvents: [], sourceCitations: []
+        )
+
+        #expect(throws: APIError.malformedResponse) {
+            try PublicBrowseValidator.whales([whale])
+        }
+    }
+
     @Test("Predictions reject probabilities outside zero through one")
     func rejectsPredictionProbability() {
         let prediction = Prediction(
@@ -67,6 +81,35 @@ struct PublicBrowseValidatorTests {
 
         #expect(throws: APIError.malformedResponse) {
             try PublicBrowseValidator.prediction(prediction)
+        }
+    }
+
+    @Test("Sightings reject impossible groups and unbounded nested arrays")
+    func rejectsLogicalAndArrayBounds() {
+        let sighting = Sighting(
+            id: "sighting-1", observedAt: Date(), latitude: 48, longitude: -123,
+            locationName: "Salish Sea", ecotypeGuess: nil, groupSize: 0,
+            behaviorNotes: nil, status: .approved,
+            photoUrls: Array(repeating: "https://images.fluke.app/one.jpg", count: 101),
+            photos: [], identifiedWhales: []
+        )
+
+        #expect(throws: APIError.malformedResponse) {
+            try PublicBrowseValidator.sightings([sighting])
+        }
+    }
+
+    @Test("Whales reject contradictory lifespan fields and oversized text")
+    func rejectsWhaleLogicalFields() {
+        let whale = Whale(
+            id: "whale-1", catalogId: "J35", name: String(repeating: "n", count: 501),
+            ecotype: .resident, pod: "J", sex: .female, birthYear: 2000,
+            deathYear: 1999, status: .alive, biography: nil, distinguishingMarks: nil,
+            heroImageUrl: nil, notableEvents: [], sourceCitations: []
+        )
+
+        #expect(throws: APIError.malformedResponse) {
+            try PublicBrowseValidator.whales([whale])
         }
     }
 

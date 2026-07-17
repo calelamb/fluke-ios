@@ -2,13 +2,16 @@ import Foundation
 
 public struct BrowseRepositoryLoader: Sendable {
     private let cache: any BrowseCacheStore
+    private let diagnostics: any BrowseCacheDiagnostics
     private let now: @Sendable () -> Date
 
     public init(
         cache: any BrowseCacheStore,
+        diagnostics: any BrowseCacheDiagnostics = NoopBrowseCacheDiagnostics(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.cache = cache
+        self.diagnostics = diagnostics
         self.now = now
     }
 
@@ -29,7 +32,19 @@ public struct BrowseRepositoryLoader: Sendable {
                 fetchedAt: now(),
                 payload: payload
             )
-            try? await cache.replace(document, for: key)
+            try Task.checkCancellation()
+            do {
+                try await cache.replace(document, for: key)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                await diagnostics.record(BrowseCacheDiagnostic(
+                    operation: .write,
+                    resource: key.resource,
+                    errorCode: cacheErrorCode(error)
+                ))
+            }
+            try Task.checkCancellation()
             let metadata = BrowseMetadata(
                 fetchedAt: document.fetchedAt,
                 schemaVersion: document.schemaVersion
@@ -38,7 +53,7 @@ public struct BrowseRepositoryLoader: Sendable {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            return await fallback(type, key: key, error: error, validate: validate)
+            return try await fallback(type, key: key, error: error, validate: validate)
         }
     }
 
@@ -47,9 +62,24 @@ public struct BrowseRepositoryLoader: Sendable {
         key: BrowseCacheKey,
         error: Error,
         validate: @Sendable (Value) throws -> Void
-    ) async -> BrowseResult<Value> {
+    ) async throws -> BrowseResult<Value> {
         let failure = BrowseFailure(error: error)
-        guard let document = try? await cache.load(type, for: key) else {
+        try Task.checkCancellation()
+        let document: BrowseCacheDocument<Value>?
+        do {
+            document = try await cache.load(type, for: key)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            await diagnostics.record(BrowseCacheDiagnostic(
+                operation: .read,
+                resource: key.resource,
+                errorCode: cacheErrorCode(error)
+            ))
+            return .failed(failure)
+        }
+        try Task.checkCancellation()
+        guard let document else {
             return .failed(failure)
         }
         if case .value(let value) = document.payload {

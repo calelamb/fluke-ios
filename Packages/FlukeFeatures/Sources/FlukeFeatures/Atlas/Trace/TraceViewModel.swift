@@ -35,7 +35,9 @@ public final class TraceViewModel {
         }
         loadState = .loading
         do {
-            let fetched = try await whales.fetchTrack(whaleId: id)
+            let to = Date()
+            let from = to.addingTimeInterval(-BrowseRequestValidator.maximumWindow)
+            let fetched = try await whales.fetchTrack(whaleId: id, from: from, to: to)
             points = fetched.sorted { $0.observedAt < $1.observedAt }
             if points.count < 3 {
                 loadState = .sparse(reason: "Not enough sightings yet to trace movement.")

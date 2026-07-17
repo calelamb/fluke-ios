@@ -41,6 +41,7 @@ The full design rationale lives in [`../../fluke/docs/specs/ios-app.md`](../../f
 2. **`FlukeUI` imports `SwiftUI` but no domain.** No `Whale`, `Sighting`, `APIClient` references. The design system doesn't know what an orca is.
 3. **`FlukeFeatures` depends on Kit + UI; never on itself.** A feature module (say `Sightings/`) imports `FlukeKit` and `FlukeUI` but never imports another feature folder. If two features need to share something, it goes in Kit or UI.
 4. **`App/` depends on FlukeFeatures (and transitively on Kit + UI).** The App target is small — entry point, root scene, environment plumbing. All real screens live in feature modules.
+5. **Release B is a separate, dormant product.** `FlukeReleaseB` lives beside `FlukeKit` in the same package but is not a dependency of the App or `FlukeFeatures`. Its authenticated DTOs and endpoint definitions therefore cannot leak into the Release A binary. `scripts/verify-release-a-boundaries.sh` enforces both the manifest and source-import boundary.
 
 When this falls down: if you find yourself wanting to import one feature from another, the shared piece probably belongs in `FlukeKit` (if domain) or `FlukeUI` (if presentation). Refactor before adding the cross-feature import.
 
@@ -85,8 +86,9 @@ Each package is small enough that an agent (or human) can hold its full surface 
 - Reads/writes cookies via `URLSession.configuration.httpCookieStorage` automatically — matches the cookie-based auth the web's API already uses for admin (and observer, once M-iOS-3 lands).
 - Decodes responses with `JSONDecoder.fluke` (handles Prisma's milliseconds-precision ISO-8601 dates and string-encoded `Decimal` lat/lng).
 - Enforces a request deadline while preserving caller cancellation as `CancellationError`.
+- Applies one absolute deadline across every page, caps paginated results at 10,000 items, and checks cancellation before requests, after responses, and before returning.
 - Surfaces typed, display-safe `APIError` values. Remote failures retain only the canonical safe error envelope; raw response bodies never enter an error value or user-facing description.
-- Builds query strings through `APIRequest`, with deterministic RFC 3986 encoding.
+- Builds query strings through `URLQueryItem` and paths through `APIRequest`, with deterministic RFC 3986 encoding and traversal rejection.
 
 Tests live at `FlukeKitTests/APIClientTests.swift` and use `MockURLProtocol` (a URLProtocol subclass that hijacks requests).
 
@@ -101,11 +103,13 @@ Release A repositories include:
 - `HistoricalSightingsRepository` — explicit-date atlas history.
 - `PredictionRepository` — public prediction results by whale or pod.
 
-Signed-in sightings, submissions, identify, and auth remain behind the Release B boundary.
+Signed-in sightings, submissions, identify, and auth remain behind the compile-time `FlukeReleaseB` target boundary. Release A exposes no generic mutation methods on `APIClient`.
 
 ### Persistence (versioned Codable JSON)
 
-Release A browse data uses actor-isolated `BrowseCacheStore` implementations. `FileBrowseCacheStore` writes bounded, versioned Codable JSON documents atomically under Application Support, applies file protection, excludes cache data from backup, and rejects corrupt, mismatched, oversized, or incompatible documents. `MemoryBrowseCacheStore` provides the same contract for deterministic tests.
+Release A browse data uses actor-isolated `BrowseCacheStore` implementations. `FileBrowseCacheStore` writes versioned Codable JSON documents atomically under Application Support, excludes cache data from backup, and caps active-schema storage at 64 entries and 100 MiB total (20 MiB per document). Optional identity data is evicted before core browse snapshots, then oldest first. Corrupt, obsolete, future-dated, mismatched, and oversized documents are removed; unknown newer-schema bytes are preserved outside the active quota for forward compatibility. Read, write, and prune failures emit structured diagnostics. `MemoryBrowseCacheStore` provides the same validation contract for deterministic tests.
+
+Historical and track requests always carry finite ordered date bounds no wider than 366 days. All decoded public responses are checked for bounded arrays and text, finite coordinates/dates/probabilities, safe URLs, logical field combinations, and requested whale identity before cache replacement.
 
 `AppEnvironment` constructs one shared file store and injects it into every public browse repository. Release B mutation and photo-queue persistence will be designed separately so browse cache semantics stay read-only and fail closed.
 

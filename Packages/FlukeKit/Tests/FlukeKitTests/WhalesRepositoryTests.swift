@@ -161,7 +161,11 @@ final class WhalesRepositoryTests: XCTestCase {
                 body
             )
         }
-        let track = try await repo.fetchTrack(whaleId: "wh_a")
+        let track = try await repo.fetchTrack(
+            whaleId: "wh_a",
+            from: Date(timeIntervalSince1970: 1_700_000_000),
+            to: Date(timeIntervalSince1970: 1_700_086_400)
+        )
         XCTAssertEqual(track.count, 1)
         XCTAssertEqual(track.first?.locationName, "Lime Kiln")
     }

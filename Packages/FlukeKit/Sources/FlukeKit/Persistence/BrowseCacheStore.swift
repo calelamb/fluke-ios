@@ -3,7 +3,9 @@ import Foundation
 public enum BrowseCacheError: Error, Equatable, Sendable {
     case corruptDocument
     case documentTooLarge
-    case incompatibleSchema
+    case obsoleteSchema
+    case newerSchema
+    case invalidFetchedAt
     case resourceMismatch
 }
 
@@ -36,13 +38,24 @@ struct FoundationAtomicDataWriter: AtomicDataWriting {
 
 func validatedDocument<Value: Codable & Sendable>(
     _ document: BrowseCacheDocument<Value>,
-    key: BrowseCacheKey
+    key: BrowseCacheKey,
+    now: Date = Date(),
+    maximumFutureSkew: TimeInterval = 300
 ) throws -> BrowseCacheDocument<Value> {
-    guard document.schemaVersion == BrowseCacheDocument<Value>.currentSchemaVersion else {
-        throw BrowseCacheError.incompatibleSchema
+    let current = BrowseCacheDocument<Value>.currentSchemaVersion
+    guard document.schemaVersion >= current else {
+        throw BrowseCacheError.obsoleteSchema
+    }
+    guard document.schemaVersion <= current else {
+        throw BrowseCacheError.newerSchema
     }
     guard document.resource == key.resource else {
         throw BrowseCacheError.resourceMismatch
+    }
+    let timestamp = document.fetchedAt.timeIntervalSinceReferenceDate
+    guard timestamp.isFinite,
+          document.fetchedAt <= now.addingTimeInterval(maximumFutureSkew) else {
+        throw BrowseCacheError.invalidFetchedAt
     }
     return document
 }

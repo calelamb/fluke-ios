@@ -18,7 +18,9 @@ public final class RangeViewModel {
 
     public func load() async {
         do {
-            sightings = try await repository.fetch(from: nil, to: nil, pod: selectedPod, whaleId: nil)
+            let to = Date()
+            let from = to.addingTimeInterval(-BrowseRequestValidator.maximumWindow)
+            sightings = try await repository.fetch(from: from, to: to, pod: selectedPod, whaleId: nil)
         } catch {
             sightings = []
         }

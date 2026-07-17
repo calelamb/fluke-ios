@@ -55,6 +55,28 @@ struct ResilientAPIClientTests {
         }
     }
 
+    @Test("Structurally valid but unsafe error strings fall back to generic copy")
+    func boundedSafeError() async throws {
+        let transport = ScriptedTransport(.response(
+            status: 500,
+            body: Data(#"{"code":"","message":"   ","retryable":true,"requestId":"req-1"}"#.utf8)
+        ))
+        let client = APIClient(
+            baseURL: URL(string: "https://api.fluke.test")!,
+            transport: transport
+        )
+
+        await #expect(throws: APIError.remote(
+            status: 500,
+            code: "REMOTE_ERROR",
+            message: "The service could not complete the request.",
+            retryable: true,
+            requestId: nil
+        )) {
+            let _: HealthResponse = try await client.get("/api/v1/health")
+        }
+    }
+
     @Test("Query items have deterministic encoding")
     func deterministicQuery() throws {
         let request = APIRequest(
@@ -85,6 +107,29 @@ struct ResilientAPIClientTests {
         #expect(await transport.wasCancelled)
     }
 
+    @Test("Request deadline returns even when an injected transport ignores cancellation")
+    func hardRequestDeadline() async throws {
+        let transport = IgnoringCancellationTransport()
+        let client = APIClient(
+            baseURL: URL(string: "https://api.fluke.test")!,
+            transport: transport,
+            requestTimeout: .milliseconds(10)
+        )
+        Task {
+            try await Task.sleep(for: .milliseconds(500))
+            await transport.release()
+        }
+        let clock = ContinuousClock()
+        let startedAt = clock.now
+
+        await #expect(throws: APIError.timeout) {
+            let _: HealthResponse = try await client.get("/api/v1/health")
+        }
+
+        #expect(startedAt.duration(to: clock.now) < .milliseconds(100))
+        await transport.release()
+    }
+
     @Test("Caller cancellation remains CancellationError")
     func callerCancellation() async throws {
         let transport = ScriptedTransport(.delayed(seconds: 5))
@@ -102,6 +147,29 @@ struct ResilientAPIClientTests {
         await #expect(throws: CancellationError.self) {
             try await task.value
         }
+    }
+}
+
+private actor IgnoringCancellationTransport: HTTPTransport {
+    private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Never>?
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func release() {
+        continuation?.resume(returning: (
+            Data(#"{"status":"ok","timestamp":"2026-07-16T00:00:00.000Z"}"#.utf8),
+            HTTPURLResponse(
+                url: URL(string: "https://api.fluke.test/api/v1/health")!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+        ))
+        continuation = nil
     }
 }
 

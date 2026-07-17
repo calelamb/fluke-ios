@@ -36,8 +36,8 @@ struct BrowseRepositoriesTests {
     func whales() async throws {
         let transport = try FixtureRoutingTransport(fixtures: [
             Endpoint.whales: "whales",
-            Endpoint.whale(id: "fixture-whale-alpha"): "whale-detail",
-            Endpoint.whaleTrack(id: "fixture-whale-alpha"): "whale-track",
+            try Endpoint.whale(id: "fixture-whale-alpha"): "whale-detail",
+            try Endpoint.whaleTrack(id: "fixture-whale-alpha"): "whale-track",
         ])
         let repository = WhalesRepository(api: api(transport))
 

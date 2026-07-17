@@ -10,6 +10,7 @@ public enum APIError: LocalizedError, Equatable, Sendable {
         requestId: String?
     )
     case decoding(String)
+    case invalidRequest
     case invalidPagination
     case malformedResponse
     case timeout
@@ -24,6 +25,8 @@ public enum APIError: LocalizedError, Equatable, Sendable {
             return message
         case .decoding:
             return "Fluke couldn't read the service response."
+        case .invalidRequest:
+            return "The request contains an invalid value."
         case .invalidPagination, .malformedResponse:
             return "Fluke received an invalid service response."
         case .timeout:

@@ -7,61 +7,60 @@ struct PaginationQueryItem: Sendable {
 
 enum PaginatedRepository {
     static let maximumPageCount = 100
+    static let maximumItemCount = 10_000
+    static let defaultOperationTimeout: Duration = .seconds(30)
 
     static func fetchAll<Item: Codable & Hashable & Sendable>(
         api: APIClient,
         endpoint: String,
-        queryItems: [PaginationQueryItem] = []
+        queryItems: [PaginationQueryItem] = [],
+        operationTimeout: Duration = defaultOperationTimeout
     ) async throws -> [Item] {
-        try await fetchAll(
-            api: api,
-            endpoint: endpoint,
-            queryItems: queryItems,
-            cursor: nil,
-            seenCursors: [],
-            fetchedPageCount: 0,
-            accumulatedItems: []
-        )
+        try await withTaskDeadline(timeout: operationTimeout) {
+            try await fetchPages(api: api, endpoint: endpoint, queryItems: queryItems)
+        }
     }
 
-    private static func fetchAll<Item: Codable & Hashable & Sendable>(
+    private static func fetchPages<Item: Codable & Hashable & Sendable>(
         api: APIClient,
         endpoint: String,
-        queryItems: [PaginationQueryItem],
-        cursor: String?,
-        seenCursors: Set<String>,
-        fetchedPageCount: Int,
-        accumulatedItems: [Item]
+        queryItems: [PaginationQueryItem]
     ) async throws -> [Item] {
-        try Task.checkCancellation()
-        guard fetchedPageCount < maximumPageCount else {
-            throw APIError.invalidPagination
-        }
+        var cursor: String?
+        var seenCursors: Set<String> = []
+        var fetchedPageCount = 0
+        var accumulatedItems: [Item] = []
 
-        let path = try requestPath(endpoint: endpoint, queryItems: queryItems, cursor: cursor)
-        let response: PaginatedResponse<Item> = try await api.get(path)
-        if !response.page.hasMore {
-            guard response.page.nextCursor == nil else {
+        while true {
+            try Task.checkCancellation()
+            guard fetchedPageCount < maximumPageCount else {
                 throw APIError.invalidPagination
             }
-            return accumulatedItems + response.items
-        }
-        guard let nextCursor = response.page.nextCursor,
-              !nextCursor.isEmpty,
-              !seenCursors.contains(nextCursor) else {
-            throw APIError.invalidPagination
-        }
-        let allItems = accumulatedItems + response.items
+            let path = try requestPath(endpoint: endpoint, queryItems: queryItems, cursor: cursor)
+            let response: PaginatedResponse<Item> = try await api.get(path)
+            try Task.checkCancellation()
+            guard response.items.count <= maximumItemCount - accumulatedItems.count else {
+                throw APIError.invalidPagination
+            }
+            accumulatedItems.append(contentsOf: response.items)
+            try Task.checkCancellation()
 
-        return try await fetchAll(
-            api: api,
-            endpoint: endpoint,
-            queryItems: queryItems,
-            cursor: nextCursor,
-            seenCursors: seenCursors.union([nextCursor]),
-            fetchedPageCount: fetchedPageCount + 1,
-            accumulatedItems: allItems
-        )
+            if !response.page.hasMore {
+                guard response.page.nextCursor == nil else {
+                    throw APIError.invalidPagination
+                }
+                try Task.checkCancellation()
+                return accumulatedItems
+            }
+            guard let nextCursor = response.page.nextCursor,
+                  !nextCursor.isEmpty,
+                  !seenCursors.contains(nextCursor) else {
+                throw APIError.invalidPagination
+            }
+            seenCursors.insert(nextCursor)
+            cursor = nextCursor
+            fetchedPageCount += 1
+        }
     }
 
     private static func requestPath(
@@ -71,9 +70,7 @@ enum PaginatedRepository {
     ) throws -> String {
         let cursorItems = cursor.map { [PaginationQueryItem(name: "cursor", value: $0)] } ?? []
         let allQueryItems = queryItems + cursorItems
-        guard !allQueryItems.isEmpty else {
-            return endpoint
-        }
+        guard !allQueryItems.isEmpty else { return endpoint }
 
         let encodedItems = try allQueryItems.map { item in
             guard let name = encodeQueryComponent(item.name),

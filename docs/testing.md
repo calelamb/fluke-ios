@@ -39,12 +39,14 @@ Each package runs in <1s for cached builds, ~30s on first build (resolving depen
 xcodebuild test \
   -workspace Fluke.xcworkspace \
   -scheme Fluke \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest'
+  -destination 'platform=iOS Simulator,id=<resolved-udid>' \
+  -parallel-testing-enabled NO \
+  -maximum-concurrent-test-simulator-destinations 1
 ```
 
 Or `⌘U` in Xcode with the `Fluke` scheme selected.
 
-Note: `iPhone 17` reflects the local Xcode 16 / iOS 26 toolchain. Older Xcode installs may need `iPhone 15` or `iPhone 16`. CI uses `OS=latest` and `iPhone 16` on `macos-15` runners — see [`build-and-ci.md`](build-and-ci.md).
+Run `scripts/prepare-ios-simulator.sh` to resolve and boot the same iPhone 17 / iOS 26.0 destination used by CI. CI serializes app tests to avoid CoreSimulator startup races and always collects simulator diagnostics — see [`build-and-ci.md`](build-and-ci.md).
 
 ## Patterns
 
@@ -99,7 +101,7 @@ let fetched = try await cache.load([Whale].self, for: key)
 #expect(fetched?.payload == .value([whale]))
 ```
 
-The actor store has no disk writes and starts empty for each test. File-store tests inject a writer and temporary directory to verify atomic last-known-good behavior and document bounds.
+The actor store has no disk writes and starts empty for each test. File-store tests inject a writer, clock, diagnostics sink, and temporary directory to verify atomic last-known-good behavior, schema handling, active-cache quotas, and optional-first eviction.
 
 ### Snapshot tests for UI components
 
@@ -182,6 +184,7 @@ Pattern: `test_<methodOrFeature>_<expectedBehavior>`.
 - **Don't mock what you don't own** *too* aggressively. Inject `HTTPTransport` and `BrowseCacheStore`, which are boundaries we own.
 - **Don't test private state.** Test through the public API. If you can't reach the behavior through the public interface, the API is wrong, not the test.
 - **Don't share state between tests.** `setUp`/`tearDown` reset everything. The order of test execution should not matter.
+- **Exercise hostile boundaries.** Repository tests cover invalid date windows and identifiers, path/query encoding, array and item caps, absolute timeouts (including transports that ignore cancellation), cross-identity responses, and malformed cache schemas.
 
 ## Coverage commands
 

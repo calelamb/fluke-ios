@@ -13,7 +13,21 @@ public struct APIRequest: Hashable, Sendable {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw APIError.malformedResponse
         }
-        components.path = path
+        guard path.hasPrefix("/"), !path.contains("?"), !path.contains("#") else {
+            throw APIError.invalidRequest
+        }
+        components.percentEncodedPath = try path
+            .split(separator: "/", omittingEmptySubsequences: false)
+            .map { segment in
+                guard segment != ".", segment != ".." else {
+                    throw APIError.invalidRequest
+                }
+                guard let encoded = Self.encode(String(segment)) else {
+                    throw APIError.invalidRequest
+                }
+                return encoded
+            }
+            .joined(separator: "/")
         components.percentEncodedQuery = queryItems.isEmpty ? nil : try queryItems
             .map { item in
                 guard let name = Self.encode(item.name),

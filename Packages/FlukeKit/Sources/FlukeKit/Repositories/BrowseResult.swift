@@ -44,7 +44,7 @@ public struct BrowseFailure: Error, Equatable, Sendable {
             self.init(code: "TRANSPORT", message: api.localizedDescription, retryable: true, requestId: nil)
         case .unauthorized:
             self.init(code: "UNAUTHORIZED", message: api.localizedDescription, retryable: false, requestId: nil)
-        case .decoding, .invalidPagination, .malformedResponse:
+        case .decoding, .invalidRequest, .invalidPagination, .malformedResponse:
             self.init(code: "INVALID_RESPONSE", message: api.localizedDescription, retryable: false, requestId: nil)
         }
     }

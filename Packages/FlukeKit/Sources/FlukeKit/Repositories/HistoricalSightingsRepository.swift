@@ -15,6 +15,7 @@ public actor HistoricalSightingsRepository: HistoricalSightingsRepositoryProtoco
         to: Date,
         pod: Pod? = nil
     ) async throws -> BrowseResult<[HistoricalSighting]> {
+        try BrowseRequestValidator.dateWindow(from: from, to: to)
         let queryItems = makeQueryItems(from: from, to: to, pod: pod, whaleId: nil)
         let identity = queryItems.map { "\($0.name)=\($0.value)" }.joined(separator: "&")
         return try await loader.load(
@@ -33,11 +34,13 @@ public actor HistoricalSightingsRepository: HistoricalSightingsRepositoryProtoco
     }
 
     public func fetch(
-        from: Date? = nil,
-        to: Date? = nil,
+        from: Date,
+        to: Date,
         pod: Pod? = nil,
         whaleId: String? = nil
     ) async throws -> [HistoricalSighting] {
+        try BrowseRequestValidator.dateWindow(from: from, to: to)
+        if let whaleId { try BrowseRequestValidator.identifier(whaleId) }
         let queryItems = makeQueryItems(from: from, to: to, pod: pod, whaleId: whaleId)
 
         let values: [HistoricalSighting] = try await PaginatedRepository.fetchAll(

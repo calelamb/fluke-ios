@@ -25,6 +25,7 @@ public actor SightingsRepository: SightingsRepositoryProtocol {
         source: String? = nil,
         sinceDays: Int = 7
     ) async throws -> BrowseResult<[ExternalSighting]> {
+        if let source { try BrowseRequestValidator.text(source, maximumCount: 500) }
         let boundedDays = min(max(sinceDays, 1), 31)
         let queryItems = [
             PaginationQueryItem(name: "sinceDays", value: String(boundedDays)),
