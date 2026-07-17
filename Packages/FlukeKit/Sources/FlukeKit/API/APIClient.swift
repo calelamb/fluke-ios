@@ -57,29 +57,69 @@ public struct APIClient: Sendable {
     }
 
     public func get<T: Decodable>(_ apiRequest: APIRequest) async throws -> T {
-        try await send(method: "GET", request: apiRequest, body: nil)
+        try await send(method: "GET", request: apiRequest, mutation: nil)
+    }
+
+    public func post<Request: Encodable & Sendable, Response: Decodable>(
+        _ request: APIRequest,
+        body: Request
+    ) async throws -> Response {
+        let encodedBody: Data
+        do {
+            encodedBody = try JSONEncoder().encode(body)
+        } catch {
+            throw APIError.invalidRequest
+        }
+        let mutation = try MutationRequest(
+            body: encodedBody,
+            contentType: "application/json"
+        )
+        return try await send(
+            method: "POST",
+            request: request,
+            mutation: mutation,
+            retriesTransientFailure: true
+        )
+    }
+
+    public func postMultipart<Response: Decodable>(
+        _ request: APIRequest,
+        parts: [MultipartPart],
+        headers: [String: String] = [:]
+    ) async throws -> Response {
+        let form = try MultipartForm(parts: parts)
+        let mutation = try MutationRequest(
+            body: form.body,
+            contentType: form.contentType,
+            headers: headers
+        )
+        return try await send(
+            method: "POST",
+            request: request,
+            mutation: mutation,
+            retriesTransientFailure: true
+        )
     }
 
     private func send<T: Decodable>(
         method: String,
         request apiRequest: APIRequest,
-        body: Data?
+        mutation: MutationRequest?,
+        retriesTransientFailure: Bool = false
     ) async throws -> T {
-        let url = try apiRequest.url(relativeTo: baseURL)
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.timeoutInterval = requestTimeout.timeInterval
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = body
-        }
-        applyCookies(to: &request)
+        let request = try makeURLRequest(
+            method: method,
+            apiRequest: apiRequest,
+            mutation: mutation
+        )
 
         let data: Data
         let response: HTTPURLResponse
         do {
-            (data, response) = try await transportData(for: request)
+            (data, response) = try await transportData(
+                for: request,
+                retriesTransientFailure: retriesTransientFailure
+            )
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as APIError {
@@ -106,10 +146,58 @@ public struct APIClient: Sendable {
         }
     }
 
-    private func transportData(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    private func makeURLRequest(
+        method: String,
+        apiRequest: APIRequest,
+        mutation: MutationRequest?
+    ) throws -> URLRequest {
+        let url = try apiRequest.url(relativeTo: baseURL)
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = requestTimeout.timeInterval
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let mutation {
+            request.setValue(mutation.contentType, forHTTPHeaderField: "Content-Type")
+            mutation.headers.forEach { key, value in
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            request.httpBody = mutation.body
+        }
+        applyCookies(to: &request)
+        return request
+    }
+
+    private func transportData(
+        for request: URLRequest,
+        retriesTransientFailure: Bool
+    ) async throws -> (Data, HTTPURLResponse) {
+        do {
+            return try await transportDataOnce(for: request)
+        } catch {
+            guard retriesTransientFailure, isTransientTransportFailure(error) else {
+                throw error
+            }
+            return try await transportDataOnce(for: request)
+        }
+    }
+
+    private func transportDataOnce(
+        for request: URLRequest
+    ) async throws -> (Data, HTTPURLResponse) {
         try await withTaskDeadline(timeout: requestTimeout) { [transport] in
             try await transport.data(for: request)
         }
+    }
+
+    private func isTransientTransportFailure(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        return [
+            .cannotConnectToHost,
+            .cannotFindHost,
+            .dnsLookupFailed,
+            .networkConnectionLost,
+            .notConnectedToInternet,
+        ].contains(urlError.code)
     }
 
     private func applyCookies(to request: inout URLRequest) {

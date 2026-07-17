@@ -1,0 +1,248 @@
+import Foundation
+import Testing
+
+@testable import FlukeKit
+
+@Suite("Mutation API client")
+struct MutationAPIClientTests {
+    @Test("JSON POST uses the canonical content type and encoded body")
+    func jsonPost() async throws {
+        let transport = MutationTransport([
+            .response(status: 201, body: Data(#"{"id":"created"}"#.utf8))
+        ])
+        let client = makeClient(transport: transport)
+
+        let response: MutationResponse = try await client.post(
+            APIRequest(path: "/api/v1/sightings"),
+            body: MutationBody(note: "Transient orca")
+        )
+        let request = try #require(await transport.requests.first)
+
+        #expect(response.id == "created")
+        #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+        #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
+        #expect(request.httpBody == Data(#"{"note":"Transient orca"}"#.utf8))
+    }
+
+    @Test("Multipart POST uses its generated boundary and custom safe headers")
+    func multipartPost() async throws {
+        let transport = MutationTransport([
+            .response(status: 200, body: Data(#"{"id":"photo"}"#.utf8))
+        ])
+        let client = makeClient(transport: transport)
+        let part = try MultipartPart.data(
+            name: "photo",
+            fileName: "fin.jpg",
+            mimeType: "image/jpeg",
+            bytes: Data([0x01, 0x02])
+        )
+
+        let _: MutationResponse = try await client.postMultipart(
+            APIRequest(path: "/api/v1/sightings/one/photos"),
+            parts: [part],
+            headers: ["X-Upload-Token": "safe-token"]
+        )
+        let request = try #require(await transport.requests.first)
+        let contentType = try #require(request.value(forHTTPHeaderField: "Content-Type"))
+
+        #expect(contentType.hasPrefix("multipart/form-data; boundary="))
+        #expect(request.value(forHTTPHeaderField: "X-Upload-Token") == "safe-token")
+        #expect(!(request.httpBody ?? Data()).isEmpty)
+    }
+
+    @Test("Mutation retries one transient transport failure before any response")
+    func transientRetry() async throws {
+        let transport = MutationTransport([
+            .failure(URLError(.networkConnectionLost)),
+            .response(status: 200, body: Data(#"{"id":"retried"}"#.utf8)),
+        ])
+        let client = makeClient(transport: transport)
+
+        let response: MutationResponse = try await client.post(
+            APIRequest(path: "/api/v1/sightings"),
+            body: MutationBody(note: "Retry once")
+        )
+
+        #expect(response.id == "retried")
+        #expect(await transport.requests.count == 2)
+    }
+
+    @Test("HTTP 4xx is returned safely and never retried")
+    func clientFailureDoesNotRetry() async {
+        let transport = MutationTransport([
+            .response(status: 422, body: Data("internal database detail".utf8))
+        ])
+        let client = makeClient(transport: transport)
+
+        await #expect(throws: APIError.remote(
+            status: 422,
+            code: "REMOTE_ERROR",
+            message: "The service could not complete the request.",
+            retryable: false,
+            requestId: nil
+        )) {
+            let _: MutationResponse = try await client.post(
+                APIRequest(path: "/api/v1/sightings"),
+                body: MutationBody(note: "Do not retry")
+            )
+        }
+        #expect(await transport.requests.count == 1)
+    }
+
+    @Test("Caller cancellation remains CancellationError")
+    func cancellation() async throws {
+        let transport = MutationTransport([.delayed])
+        let client = makeClient(transport: transport)
+        let task = Task<MutationResponse, Error> {
+            try await client.post(
+                APIRequest(path: "/api/v1/sightings"),
+                body: MutationBody(note: "Cancel")
+            )
+        }
+        await Task.yield()
+        task.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            try await task.value
+        }
+        #expect(await transport.requests.count == 1)
+    }
+
+    @Test("Oversized JSON and injected custom headers fail before transport")
+    func requestValidation() async throws {
+        let transport = MutationTransport([])
+        let client = makeClient(transport: transport)
+
+        await #expect(throws: APIError.invalidRequest) {
+            let _: MutationResponse = try await client.post(
+                APIRequest(path: "/api/v1/sightings"),
+                body: MutationBody(note: String(repeating: "a", count: 10_000_001))
+            )
+        }
+
+        let part = try MultipartPart.data(
+            name: "photo",
+            fileName: "fin.jpg",
+            mimeType: "image/jpeg",
+            bytes: Data([0x01])
+        )
+        await #expect(throws: APIError.invalidRequest) {
+            let _: MutationResponse = try await client.postMultipart(
+                APIRequest(path: "/api/v1/sightings/one/photos"),
+                parts: [part],
+                headers: ["X-Upload-Token": "safe\r\nX-Evil: yes"]
+            )
+        }
+
+        #expect(throws: APIError.invalidRequest) {
+            try MutationRequest(
+                body: Data([0x01]),
+                contentType: "application/json",
+                headers: ["X-Upload-Token": "safe\n"]
+            )
+        }
+
+        #expect(await transport.requests.isEmpty)
+    }
+
+    private func makeClient(transport: MutationTransport) -> APIClient {
+        APIClient(
+            baseURL: URL(string: "https://api.fluke.test")!,
+            transport: transport,
+            requestTimeout: .seconds(2)
+        )
+    }
+}
+
+@Suite("Mutation cookies", .serialized)
+struct MutationCookieTests {
+    @Test("Mutation requests apply URLSession cookies")
+    func mutationCookies() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let client = APIClient(
+            baseURL: URL(string: "https://api.fluke.test")!,
+            session: URLSession(configuration: configuration)
+        )
+        let cookie = try #require(HTTPCookie(properties: [
+            .domain: "api.fluke.test",
+            .path: "/",
+            .name: "fluke_session",
+            .value: "cookie-value",
+            .secure: "TRUE",
+        ]))
+        client.cookieStorage.setCookie(cookie)
+        defer { MockURLProtocol.handler = nil }
+
+        MockURLProtocol.handler = { request in
+            #expect(
+                request.value(forHTTPHeaderField: "Cookie")?
+                    .contains("fluke_session=cookie-value") == true
+            )
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data(#"{"id":"cookie"}"#.utf8)
+            )
+        }
+
+        let response: MutationResponse = try await client.post(
+            APIRequest(path: "/api/v1/sightings"),
+            body: MutationBody(note: "Cookie")
+        )
+
+        #expect(response.id == "cookie")
+    }
+}
+
+private struct MutationBody: Codable, Sendable {
+    let note: String
+}
+
+private struct MutationResponse: Codable, Sendable {
+    let id: String
+}
+
+private actor MutationTransport: HTTPTransport {
+    enum Step: @unchecked Sendable {
+        case delayed
+        case failure(Error)
+        case response(status: Int, body: Data)
+    }
+
+    private var steps: [Step]
+    private(set) var requests: [URLRequest] = []
+
+    init(_ steps: [Step]) {
+        self.steps = steps
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        guard !steps.isEmpty else { throw URLError(.badServerResponse) }
+        let step = steps.removeFirst()
+
+        switch step {
+        case .delayed:
+            try await Task.sleep(for: .seconds(30))
+            throw URLError(.timedOut)
+        case .failure(let error):
+            throw error
+        case .response(let status, let body):
+            return (
+                body,
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: status,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+            )
+        }
+    }
+}
