@@ -48,6 +48,7 @@
       #expect(signIn.isDisabled(.signIn))
 
       let deletion = YouAccountControlState(deletionAuthorizationPending: true)
+      #expect(deletion.isDisabled(.signOut))
       #expect(deletion.isDisabled(.deleteAccount))
       #expect(deletion.isDisabled(.reauthenticateDeletion))
     }

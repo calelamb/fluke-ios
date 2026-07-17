@@ -35,7 +35,7 @@ struct YouAccountControlState: Equatable {
     case .signIn:
       accountMutationInFlight || signInAuthorizationPending
     case .signOut:
-      accountMutationInFlight
+      accountMutationInFlight || deletionAuthorizationPending
     case .deleteAccount, .reauthenticateDeletion:
       accountMutationInFlight || deletionAuthorizationPending
     case .retry, .about, .privacy, .support, .attribution:
