@@ -88,11 +88,14 @@ Production submission routes were not called. HTTP behavior is contract-tested w
   - Exit 1: forged manifests deleted `SubmissionQueue.store` sidecars, malformed sibling files, cross-submission photos, and invalid index sets; traversal threw instead of quarantining; the legitimate manifest was an unbound array.
 - Security GREEN: same command after the bound manifest and quarantine implementation.
   - Exit 0; 6 tests passed, including legitimate orphan recovery and canonical UUID/index enforcement.
+- Test-validity RED: the focused manifest suite failed to compile on the intentionally missing `assertBoundManifestIsQuarantined` helper.
+- Test-validity GREEN: every malicious case now serializes the versioned bound manifest and isolates a validator branch.
+  - Exit 0; 12 tests passed for database sidecars, traversal, malformed names, invalid photo UUID, cross-submission names, duplicate/noncontiguous/oversized indices, wrong version, mismatched payload UUID, noncanonical index text, and legitimate orphan recovery.
 
 ## Final Verification
 
 - `swift test --package-path Packages/FlukeKit --enable-code-coverage`
-  - Fresh final exit 0: 112 tests in 20 suites passed.
+  - Fresh final exit 0: 118 tests in 20 suites passed.
   - An earlier attempt terminated with the existing intermittent Swift Testing signal 11 during unrelated concurrent contract/cache execution; it reported no assertion failure. Subsequent complete runs, including this final run, passed.
 - `swift test --package-path Packages/FlukeFeatures --enable-code-coverage`
   - Exit 0: 56 tests in 11 suites passed.
@@ -122,6 +125,7 @@ The earlier full UI attempt remains recorded as 5/6 passing: `testCaptureAppStor
 - `6418083` — `fix: reconcile submission queue and form state`
 - `eb66b98` — `fix: bind submission storage to model executor`
 - `68cdd20` — `fix: validate queued photo manifests`
+- `bb5c9ff` — `test: exercise bound photo manifest validation`
 
 ## Remaining Concerns
 
