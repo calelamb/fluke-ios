@@ -30,6 +30,7 @@ Production submission routes were not called. HTTP behavior is contract-tested w
 - Validation maps every core error to a concrete form row. Invalid rows receive visible styling, keyboard-capable fields receive focus, and the form scrolls to the mapped target.
 - Text bounds now use UTF-16 code units to match JavaScript/Zod. Notes remain capped at 2,000, location at 200, and email at 200.
 - Signed-in presentation shows editable email input whenever the authenticated email is absent. Camera JPEG conversion failure uses the same bounded photo-error channel as load/processing failures.
+- Replaced raw staging filename arrays with a versioned manifest bound to its canonical submission UUID. Reconciliation validates 1–5 canonical generated photo names, contiguous unique indices, and per-photo UUIDs before deletion; malformed, traversal, cross-submission, database-sidecar, or legacy manifests are quarantined without deleting referenced files.
 
 ## Recorded RED / GREEN Evidence
 
@@ -83,12 +84,16 @@ Production submission routes were not called. HTTP behavior is contract-tested w
   - Exit 0; 15 tests passed.
 - Integration RED: the first app unit log emitted SwiftData's cross-queue `ModelContext` warning.
 - Integration GREEN: after adopting `ModelActor`, the app unit command passed 21 tests and an explicit log search found no main-queue/unbinding warning.
+- Security RED: `swift test --package-path Packages/FlukeKit --filter QueuedPhotoStoreReconciliationTests`
+  - Exit 1: forged manifests deleted `SubmissionQueue.store` sidecars, malformed sibling files, cross-submission photos, and invalid index sets; traversal threw instead of quarantining; the legitimate manifest was an unbound array.
+- Security GREEN: same command after the bound manifest and quarantine implementation.
+  - Exit 0; 6 tests passed, including legitimate orphan recovery and canonical UUID/index enforcement.
 
 ## Final Verification
 
 - `swift test --package-path Packages/FlukeKit --enable-code-coverage`
-  - Fresh rerun exit 0: 106 tests in 19 suites passed.
-  - The immediately preceding attempt terminated with the existing intermittent Swift Testing signal 11 during unrelated concurrent contract/cache execution; it reported no assertion failure. The complete fresh rerun passed.
+  - Fresh final exit 0: 112 tests in 20 suites passed.
+  - An earlier attempt terminated with the existing intermittent Swift Testing signal 11 during unrelated concurrent contract/cache execution; it reported no assertion failure. Subsequent complete runs, including this final run, passed.
 - `swift test --package-path Packages/FlukeFeatures --enable-code-coverage`
   - Exit 0: 56 tests in 11 suites passed.
 - Exact CI Feature testable-logic coverage command from `.github/workflows/ci.yml`:
@@ -116,6 +121,7 @@ The earlier full UI attempt remains recorded as 5/6 passing: `testCaptureAppStor
 - `b6b39ae` — `fix: align submission wire contract`
 - `6418083` — `fix: reconcile submission queue and form state`
 - `eb66b98` — `fix: bind submission storage to model executor`
+- `68cdd20` — `fix: validate queued photo manifests`
 
 ## Remaining Concerns
 
