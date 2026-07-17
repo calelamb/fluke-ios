@@ -17,6 +17,6 @@ final class SalishSeaShapeSnapshotTests: XCTestCase {
 
         let image = try renderedSnapshot(view, size: CGSize(width: 336, height: 216))
 
-        assertSnapshot(of: image, as: .image)
+        assertSnapshot(of: image, as: releaseImageSnapshot)
     }
 }

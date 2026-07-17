@@ -17,7 +17,7 @@ final class DorsalFinShapeSnapshotTests: XCTestCase {
         
         let image = try renderedSnapshot(view, size: CGSize(width: 80, height: 80))
 
-        assertSnapshot(of: image, as: .image)
+        assertSnapshot(of: image, as: releaseImageSnapshot)
     }
 
     func test_dorsalFinShape_atSmallSize() throws {
@@ -29,6 +29,6 @@ final class DorsalFinShapeSnapshotTests: XCTestCase {
         
         let image = try renderedSnapshot(view, size: CGSize(width: 16, height: 16))
 
-        assertSnapshot(of: image, as: .image)
+        assertSnapshot(of: image, as: releaseImageSnapshot)
     }
 }
