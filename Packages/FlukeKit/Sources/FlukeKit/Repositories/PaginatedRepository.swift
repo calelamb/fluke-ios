@@ -39,15 +39,18 @@ enum PaginatedRepository {
 
         let path = try requestPath(endpoint: endpoint, queryItems: queryItems, cursor: cursor)
         let response: PaginatedResponse<Item> = try await api.get(path)
-        let allItems = accumulatedItems + response.items
-        guard response.page.hasMore else {
-            return allItems
+        if !response.page.hasMore {
+            guard response.page.nextCursor == nil else {
+                throw APIError.invalidPagination
+            }
+            return accumulatedItems + response.items
         }
         guard let nextCursor = response.page.nextCursor,
               !nextCursor.isEmpty,
               !seenCursors.contains(nextCursor) else {
             throw APIError.invalidPagination
         }
+        let allItems = accumulatedItems + response.items
 
         return try await fetchAll(
             api: api,

@@ -70,6 +70,31 @@ final class WhalesRepositoryTests: XCTestCase {
         }
     }
 
+    func test_fetchAll_rejectsTerminalPageWithCursorInsteadOfReturningItems() async {
+        MockURLProtocol.handler = { req in
+            let body = """
+            {
+              "items":[{
+                "id":"wh_a","catalogId":"A1","name":"Alpha",
+                "ecotype":"UNKNOWN","pod":null,"sex":"UNKNOWN",
+                "birthYear":null,"deathYear":null,"status":"UNKNOWN",
+                "biography":null,"distinguishingMarks":null,"heroImageUrl":null,
+                "notableEvents":[],"sourceCitations":[]
+              }],
+              "page":{"hasMore":false,"nextCursor":"unexpected"}
+            }
+            """.data(using: .utf8)!
+            return (
+                HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                body
+            )
+        }
+
+        await XCTAssertThrowsErrorAsync(try await repo.fetchAll()) { error in
+            XCTAssertEqual(error as? APIError, .invalidPagination)
+        }
+    }
+
     func test_fetchAll_rejectsRepeatedCursor() async {
         MockURLProtocol.handler = { req in
             let body = #"{"items":[],"page":{"hasMore":true,"nextCursor":"same"}}"#.data(using: .utf8)!
