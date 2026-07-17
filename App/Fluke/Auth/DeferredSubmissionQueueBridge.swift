@@ -1,17 +1,24 @@
 import FlukeFeatures
+import FlukeReleaseB
+import Foundation
 
-enum SubmissionQueueBridgeError: Error, Equatable {
-  case notIntegrated
-}
-
-/// Compile-safe boundary for Task 2 only. Task 3 must replace this value at
-/// the RootScene injection point with its durable SubmissionQueue adapter.
 nonisolated struct DeferredSubmissionQueueBridge: QueuedLogbookProviding,
   AccountAssociationClearing
 {
-  func queuedEntries() async -> [QueuedLogbookEntry] { [] }
+  let queue: SubmissionQueue
+
+  func queuedEntries() async -> [QueuedLogbookEntry] {
+    guard let values = try? await queue.list() else { return [] }
+    return values.map {
+      QueuedLogbookEntry(
+        id: $0.id.uuidString,
+        observedAt: $0.payload.observedAt,
+        locationName: $0.payload.locationName
+      )
+    }
+  }
 
   func clearAccountAssociation() async throws {
-    throw SubmissionQueueBridgeError.notIntegrated
+    try await queue.clearAccountAssociation()
   }
 }

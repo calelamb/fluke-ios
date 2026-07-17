@@ -26,6 +26,8 @@
 	<string>$(FLUKE_BUILD_CONFIGURATION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Fluke uses the camera only when you choose to attach an orca photo to a sighting.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UILaunchScreen</key>

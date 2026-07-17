@@ -148,14 +148,25 @@ struct AuthSessionTests {
     #expect(await associations.clearCallCount == 1)
   }
 
-  @Test("The Task 3 submission queue bridge cannot silently clear associations")
-  func deferredSubmissionQueueBridge() async {
-    let bridge = DeferredSubmissionQueueBridge()
+  @Test("The durable submission queue bridge exposes queued sightings and clears account email")
+  func durableSubmissionQueueBridge() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let queue = try SubmissionQueue(directory: directory, inMemory: true)
+    let payload = SubmissionPayload(
+      latitude: 48.5, longitude: -123.1,
+      observedAt: Date(timeIntervalSince1970: 1_700_000_000), groupSize: 2,
+      notes: nil, locationName: "Lime Kiln", observerEmail: "observer@example.com", photoCount: 1
+    )
+    _ = try await queue.enqueue(
+      payload: payload,
+      photos: [ProcessedPhoto(bytes: Data(repeating: 1, count: 8), fileName: "photo.jpg")]
+    )
+    let bridge = DeferredSubmissionQueueBridge(queue: queue)
 
-    #expect(await bridge.queuedEntries().isEmpty)
-    await #expect(throws: SubmissionQueueBridgeError.notIntegrated) {
-      try await bridge.clearAccountAssociation()
-    }
+    #expect(await bridge.queuedEntries().map(\.locationName) == ["Lime Kiln"])
+    try await bridge.clearAccountAssociation()
+    #expect(try await queue.list().first?.payload.observerEmail == nil)
   }
 }
 

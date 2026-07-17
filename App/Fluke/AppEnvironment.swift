@@ -56,6 +56,8 @@ struct AppEnvironment {
   let predictionRepository: PredictionRepository
   let sightingsRepository: SightingsRepository
   let sessionHintStore: any SessionHintStore
+  let submissionQueue: SubmissionQueue
+  let submissionService: any SubmissionServiceProtocol
   let whalesRepository: WhalesRepository
 
   static func live(bundle: Bundle = .main) throws -> AppEnvironment {
@@ -68,11 +70,16 @@ struct AppEnvironment {
       throw AppConfigurationError.unknownBuildConfiguration
     }
 
+    let replayConfiguration = URLSessionConfiguration.background(
+      withIdentifier: "app.fluke.Fluke.submissions"
+    )
+    replayConfiguration.waitsForConnectivity = true
     return try make(
       apiBaseURLString: bundle.object(
         forInfoDictionaryKey: "FLUKE_API_BASE_URL"
       ) as? String,
       configuration: configuration,
+      submissionSession: URLSession(configuration: replayConfiguration),
       cacheStore: FileBrowseCacheStore(
         directory: FileBrowseCacheStore.liveDirectory()
       )
@@ -83,6 +90,7 @@ struct AppEnvironment {
     apiBaseURLString: String?,
     configuration: AppBuildConfiguration,
     session: URLSession = .shared,
+    submissionSession: URLSession? = nil,
     capabilitiesFetch: CapabilitiesFetch? = nil,
     cacheStore: any BrowseCacheStore = MemoryBrowseCacheStore()
   ) throws -> AppEnvironment {
@@ -91,6 +99,7 @@ struct AppEnvironment {
       configuration: configuration
     )
     let client = APIClient(baseURL: apiBaseURL, session: session)
+    let submissionQueue = try SubmissionQueue()
 
     return AppEnvironment(
       apiBaseURL: apiBaseURL,
@@ -105,6 +114,10 @@ struct AppEnvironment {
       predictionRepository: PredictionRepository(api: client, cache: cacheStore),
       sightingsRepository: SightingsRepository(api: client, cache: cacheStore),
       sessionHintStore: KeychainSessionHintStore(),
+      submissionQueue: submissionQueue,
+      submissionService: SubmissionService(
+        api: APIClient(baseURL: apiBaseURL, session: submissionSession ?? session)
+      ),
       whalesRepository: WhalesRepository(api: client, cache: cacheStore)
     )
   }

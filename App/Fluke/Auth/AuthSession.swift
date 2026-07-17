@@ -140,6 +140,8 @@ final class AuthSession {
     return user
   }
 
+  var isAuthenticated: Bool { signedInUser != nil }
+
   private func presentationError(for error: Error) -> AuthPresentationError {
     if error as? AuthServiceError == .invalidAppleCredential {
       return .invalidAppleCredential

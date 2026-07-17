@@ -5,6 +5,7 @@ import FlukeReleaseB
 import FlukeUI
 import Foundation
 import SwiftUI
+import Network
 
 enum RootTab: CaseIterable, Hashable {
   case sightings
@@ -37,6 +38,10 @@ enum RootTab: CaseIterable, Hashable {
 struct RootScene: View {
   let environment: AppEnvironment
   private let submissionQueue: DeferredSubmissionQueueBridge
+  private let submissionReplay: SubmissionReplayActor
+  private let networkMonitor = NWPathMonitor()
+
+  @Environment(\.scenePhase) private var scenePhase
 
   @State private var authSession: AuthSession
   @State private var capabilities = LaunchCapabilityState.loading
@@ -44,11 +49,16 @@ struct RootScene: View {
   @State private var requestedTraceWhaleID: String?
   @State private var atlasRouteRevision = 0
   @State private var isAtlasPresented = false
+  @State private var isSubmitPresented = false
 
   init(environment: AppEnvironment) {
-    let submissionQueue = DeferredSubmissionQueueBridge()
+    let submissionQueue = DeferredSubmissionQueueBridge(queue: environment.submissionQueue)
     self.environment = environment
     self.submissionQueue = submissionQueue
+    self.submissionReplay = SubmissionReplayActor(
+      queue: environment.submissionQueue,
+      service: environment.submissionService
+    )
     _authSession = State(
       initialValue: AuthSession(
         service: environment.authService,
@@ -66,6 +76,13 @@ struct RootScene: View {
         NavigationStack {
           SightingsView(repository: environment.sightingsRepository)
             .toolbar {
+              ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                  isSubmitPresented = true
+                } label: {
+                  Label("Add Sighting", systemImage: "plus")
+                }
+              }
               ToolbarItem(placement: .topBarTrailing) {
                 Button {
                   presentAtlas()
@@ -122,6 +139,12 @@ struct RootScene: View {
     }
     .flukeSystemContrast()
     .task {
+      await submissionReplay.flush()
+      networkMonitor.pathUpdateHandler = { path in
+        guard path.status == .satisfied else { return }
+        Task { await submissionReplay.flush() }
+      }
+      networkMonitor.start(queue: DispatchQueue(label: "app.fluke.Fluke.submission-network"))
       capabilities = await LaunchCapabilityState.load(
         using: environment.fetchCapabilities
       )
@@ -131,11 +154,24 @@ struct RootScene: View {
         authSession.expire()
       }
     }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .active { Task { await submissionReplay.flush() } }
+    }
+    .onDisappear { networkMonitor.cancel() }
     .environment(\.launchCapabilities, capabilities)
     .environment(\.openAtlas) { whaleID in
       presentAtlas(for: whaleID)
     }
-    .environment(\.openSubmit) {}
+    .environment(\.openSubmit) { isSubmitPresented = true }
+    .sheet(isPresented: $isSubmitPresented) {
+      SubmitView(model: SubmitViewModel(
+        service: environment.submissionService,
+        queue: environment.submissionQueue,
+        isSignedIn: authSession.isAuthenticated,
+        submissionsEnabled: submissionsAvailable
+      ))
+      .presentationDetents([.large])
+    }
     .fullScreenCover(isPresented: $isAtlasPresented) {
       AtlasView(
         historicalRepository: environment.historicalSightingsRepository,
@@ -171,6 +207,11 @@ struct RootScene: View {
     case .available(let value): value.accounts ? .enabled : .disabled
     case .unavailable: .disabled
     }
+  }
+
+  private var submissionsAvailable: Bool {
+    guard case .available(let value) = capabilities else { return false }
+    return value.submissions
   }
 
   private var youAuthState: YouAuthState {
