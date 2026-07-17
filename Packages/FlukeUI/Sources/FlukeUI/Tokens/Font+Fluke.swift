@@ -1,5 +1,5 @@
-import SwiftUI
 import CoreText
+import SwiftUI
 
 #if canImport(UIKit)
 import UIKit
@@ -31,15 +31,38 @@ public enum FlukeUIFontRegistration {
     }
 }
 
+public struct FlukeFontDescriptor: Sendable {
+    public let size: CGFloat
+    public let relativeStyle: Font.TextStyle
+
+    public static let displayLarge = FlukeFontDescriptor(
+        size: 44,
+        relativeStyle: .largeTitle
+    )
+    public static let displayMedium = FlukeFontDescriptor(
+        size: 28,
+        relativeStyle: .title
+    )
+    public static let displaySmall = FlukeFontDescriptor(
+        size: 20,
+        relativeStyle: .title3
+    )
+
+    public var font: Font {
+        Font.custom("Fraunces", size: size, relativeTo: relativeStyle)
+            .weight(.medium)
+    }
+}
+
 public extension Font {
     /// Hero / display headings. ~48pt regular weight.
-    static let flukeDisplayLarge = Font.custom("Fraunces", size: 44).weight(.medium)
+    static let flukeDisplayLarge = FlukeFontDescriptor.displayLarge.font
 
     /// Section headings inside cards / detail views. ~28pt.
-    static let flukeDisplayMedium = Font.custom("Fraunces", size: 28).weight(.medium)
+    static let flukeDisplayMedium = FlukeFontDescriptor.displayMedium.font
 
     /// Card titles, sheet titles. ~20pt.
-    static let flukeDisplaySmall = Font.custom("Fraunces", size: 20).weight(.medium)
+    static let flukeDisplaySmall = FlukeFontDescriptor.displaySmall.font
 
     /// Body copy — uses SF Pro Text (system) so iOS Dynamic Type works for free.
     static let flukeBody = Font.system(.body)

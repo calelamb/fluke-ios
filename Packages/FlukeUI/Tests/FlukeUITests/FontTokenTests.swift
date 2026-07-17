@@ -26,4 +26,10 @@ final class FontTokenTests: XCTestCase {
         // The visual is locked by the snapshot test on the placeholder screen.
         _ = font
     }
+
+    func test_everyFrauncesTokenScalesRelativeToATextStyle() {
+        XCTAssertEqual(FlukeFontDescriptor.displayLarge.relativeStyle, .largeTitle)
+        XCTAssertEqual(FlukeFontDescriptor.displayMedium.relativeStyle, .title)
+        XCTAssertEqual(FlukeFontDescriptor.displaySmall.relativeStyle, .title3)
+    }
 }

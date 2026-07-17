@@ -4,36 +4,44 @@ import XCTest
 
 final class ColorTokenTests: XCTestCase {
 
+    func test_fog_matchesWebHexValue() {
+        assertColor(.fog, equals: 0xE8EEF1)
+    }
+
     func test_bone_matchesWebHexValue() {
-        // Web token: #FAFBFC → R=250 G=251 B=252 → 0.980 / 0.984 / 0.988
+        // Web token: #F4F0E8
         let components = Color.bone.rgbComponents()
-        XCTAssertEqual(components.r, 0xFA / 255.0, accuracy: 0.005)
-        XCTAssertEqual(components.g, 0xFB / 255.0, accuracy: 0.005)
-        XCTAssertEqual(components.b, 0xFC / 255.0, accuracy: 0.005)
+        XCTAssertEqual(components.r, 0xF4 / 255.0, accuracy: 0.005)
+        XCTAssertEqual(components.g, 0xF0 / 255.0, accuracy: 0.005)
+        XCTAssertEqual(components.b, 0xE8 / 255.0, accuracy: 0.005)
     }
 
     func test_abyss_matchesWebHexValue() {
-        // Web token: #0A1F2E
-        let components = Color.abyss.rgbComponents()
-        XCTAssertEqual(components.r, 0x0A / 255.0, accuracy: 0.005)
-        XCTAssertEqual(components.g, 0x1F / 255.0, accuracy: 0.005)
-        XCTAssertEqual(components.b, 0x2E / 255.0, accuracy: 0.005)
+        assertColor(.abyss, equals: 0x0A1F2E)
+    }
+
+    func test_mist_matchesWebHexValue() {
+        assertColor(.mist, equals: 0xA8C5D1)
+    }
+
+    func test_deep_matchesWebHexValue() {
+        assertColor(.deep, equals: 0x143B52)
     }
 
     func test_ember_matchesWebHexValue() {
-        // Web token: #C65A3F
+        // Web token: #D97742
         let components = Color.ember.rgbComponents()
-        XCTAssertEqual(components.r, 0xC6 / 255.0, accuracy: 0.005)
-        XCTAssertEqual(components.g, 0x5A / 255.0, accuracy: 0.005)
-        XCTAssertEqual(components.b, 0x3F / 255.0, accuracy: 0.005)
+        XCTAssertEqual(components.r, 0xD9 / 255.0, accuracy: 0.005)
+        XCTAssertEqual(components.g, 0x77 / 255.0, accuracy: 0.005)
+        XCTAssertEqual(components.b, 0x42 / 255.0, accuracy: 0.005)
     }
 
     func test_tide_matchesWebHexValue() {
-        // Web token: #2E5972
+        // Web token: #2C6E8F
         let components = Color.tide.rgbComponents()
-        XCTAssertEqual(components.r, 0x2E / 255.0, accuracy: 0.005)
-        XCTAssertEqual(components.g, 0x59 / 255.0, accuracy: 0.005)
-        XCTAssertEqual(components.b, 0x72 / 255.0, accuracy: 0.005)
+        XCTAssertEqual(components.r, 0x2C / 255.0, accuracy: 0.005)
+        XCTAssertEqual(components.g, 0x6E / 255.0, accuracy: 0.005)
+        XCTAssertEqual(components.b, 0x8F / 255.0, accuracy: 0.005)
     }
 
     func test_swell_matchesWebHexValue() {
@@ -42,6 +50,21 @@ final class ColorTokenTests: XCTestCase {
         XCTAssertEqual(components.r, 0x3B / 255.0, accuracy: 0.005)
         XCTAssertEqual(components.g, 0x5F / 255.0, accuracy: 0.005)
         XCTAssertEqual(components.b, 0x75 / 255.0, accuracy: 0.005)
+    }
+
+    private func assertColor(
+        _ color: Color,
+        equals hex: UInt32,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let components = color.rgbComponents()
+        let red = Double((hex >> 16) & 0xFF) / 255.0
+        let green = Double((hex >> 8) & 0xFF) / 255.0
+        let blue = Double(hex & 0xFF) / 255.0
+        XCTAssertEqual(components.r, red, accuracy: 0.005, file: file, line: line)
+        XCTAssertEqual(components.g, green, accuracy: 0.005, file: file, line: line)
+        XCTAssertEqual(components.b, blue, accuracy: 0.005, file: file, line: line)
     }
 
     func test_allSemanticTokensAreDistinct() {
