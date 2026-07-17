@@ -3,9 +3,10 @@ import XCTest
 import SnapshotTesting
 @testable import FlukeUI
 
+@MainActor
 final class SalishSeaShapeSnapshotTests: XCTestCase {
 
-    func test_salishSeaShape_atTypicalSize() {
+    func test_salishSeaShape_atTypicalSize() throws {
         let view = VStack(content: {
             SalishSeaShape()
                 .stroke(Color.tide, lineWidth: 1)
@@ -14,9 +15,8 @@ final class SalishSeaShapeSnapshotTests: XCTestCase {
         .padding(8)
         .background(Color.fog)
 
-        let hosting = NSHostingController(rootView: view)
-        hosting.view.frame.size = CGSize(width: 336, height: 232)
+        let image = try renderedSnapshot(view, size: CGSize(width: 336, height: 216))
 
-        assertSnapshot(of: hosting.view, as: .image)
+        assertSnapshot(of: image, as: .image)
     }
 }

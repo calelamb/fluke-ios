@@ -66,35 +66,27 @@ The `FlukeAPIBaseURL` value in `Info.plist` defaults to `http://localhost:4000`.
 
 Lives at [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). Triggers on every push to `main` and every PR.
 
-### Jobs
+### Verification lane
 
 ```
-package-tests (matrix)
-├── FlukeKit
-├── FlukeUI
-└── FlukeFeatures
+canonical fixture manifest + verifier self-tests
     ↓
-app-tests (after all package-tests)
+all package tests + package coverage reports
+    ↓
+meaningful app tests + 80% app line-coverage gate
+    ↓
+Debug build + Release build
+    ↓
+unsigned generic iPhone archive + metadata validation
 ```
 
-Each package job runs `swift test --enable-code-coverage` from its own directory — independent, parallel, fast.
-
-The app-tests job runs `xcodebuild test` against the full workspace using the `iPhone 16` simulator on `OS=latest`. Failures upload a `TestResults.xcresult` bundle as an artifact.
+The workflow uploads the app `.xcresult`, the machine-readable app coverage report, all package coverage reports, and validated archive metadata on every run. Production deployment and signing remain separate and require an exact green SHA.
 
 ### Runner choice
 
-We use `macos-15`. Available simulators on this runner depend on the GitHub-Actions image version — check by running the "List available simulators" step in the workflow output. If `iPhone 16` isn't available, the job will fail loudly with the available alternatives listed.
+We use `macos-15` and explicitly select Xcode 26.0.1. The workflow requires the iOS 26.0.1 runtime and an iPhone 17 simulator before running any tests, so runner-image drift fails at the toolchain gate instead of changing render or build behavior silently.
 
 `macos-14` was the previous default but lacks iOS 18+ simulators by default. `macos-26` (when GitHub adds it) will be the natural target once it's GA.
-
-### `xcbeautify`
-
-The workflow pipes `xcodebuild` through `xcbeautify` for human-readable output. It's pre-installed on `macos-15` images. If the pre-install changes, add a setup step:
-
-```yaml
-- name: Install xcbeautify
-  run: brew install xcbeautify
-```
 
 ### Caching
 

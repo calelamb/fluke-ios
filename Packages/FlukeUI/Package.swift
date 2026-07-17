@@ -29,7 +29,8 @@ let package = Package(
                 "FlukeUI",
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ],
-            path: "Tests/FlukeUITests"
+            path: "Tests/FlukeUITests",
+            exclude: ["__Snapshots__"]
         ),
     ]
 )

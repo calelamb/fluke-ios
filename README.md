@@ -47,11 +47,12 @@ cp ../fluke-api/contracts/fixtures/*.json Packages/FlukeKit/Tests/FlukeKitTests/
 for fixture in ../fluke-api/contracts/fixtures/*.json; do
   cmp "$fixture" "Packages/FlukeKit/Tests/FlukeKitTests/Fixtures/$(basename "$fixture")"
 done
+scripts/verify-contract-fixtures.sh
 swift test --package-path Packages/FlukeKit
 swift test --package-path Packages/FlukeFeatures
 ```
 
-Do not hand-edit the copied JSON or add client-only fields. Update the API contract and regenerate its artifacts first, then align the explicit Swift DTOs to the released shape.
+Do not hand-edit the copied JSON or add client-only fields. Update the API contract and regenerate its artifacts first, then align the explicit Swift DTOs and `contracts/api-fixtures.sha256` to the released shape. CI validates the packaged set against that canonical manifest without requiring private cross-repository credentials. When a sibling API checkout is available, the verifier additionally requires exact filenames and bytes; that local check is a release checkpoint until an explicit read token is configured.
 
 ## Documentation
 

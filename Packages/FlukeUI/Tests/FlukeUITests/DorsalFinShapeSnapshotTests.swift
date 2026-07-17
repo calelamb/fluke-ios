@@ -3,9 +3,10 @@ import XCTest
 import SnapshotTesting
 @testable import FlukeUI
 
+@MainActor
 final class DorsalFinShapeSnapshotTests: XCTestCase {
 
-    func test_dorsalFinShape_atDefaultSize() {
+    func test_dorsalFinShape_atDefaultSize() throws {
         let view = VStack(content: {
             DorsalFinShape()
                 .fill(Color.abyss)
@@ -14,22 +15,20 @@ final class DorsalFinShapeSnapshotTests: XCTestCase {
         })
         .background(Color.bone)
         
-        let hosting = NSHostingController(rootView: view)
-        hosting.view.frame.size = CGSize(width: 80, height: 80)
+        let image = try renderedSnapshot(view, size: CGSize(width: 80, height: 80))
 
-        assertSnapshot(of: hosting.view, as: .image)
+        assertSnapshot(of: image, as: .image)
     }
 
-    func test_dorsalFinShape_atSmallSize() {
+    func test_dorsalFinShape_atSmallSize() throws {
         let view = VStack(content: {
             DorsalFinShape()
                 .fill(Color.tide)
                 .frame(width: 16, height: 16)
         })
         
-        let hosting = NSHostingController(rootView: view)
-        hosting.view.frame.size = CGSize(width: 16, height: 16)
+        let image = try renderedSnapshot(view, size: CGSize(width: 16, height: 16))
 
-        assertSnapshot(of: hosting.view, as: .image)
+        assertSnapshot(of: image, as: .image)
     }
 }
