@@ -99,6 +99,7 @@ public struct SightingsView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .accessibilityIdentifier("sightings.loaded")
     }
 
     @ViewBuilder

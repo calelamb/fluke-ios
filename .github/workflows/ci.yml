@@ -27,6 +27,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Pin Xcode and simulator runtime
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
@@ -62,6 +63,19 @@ jobs:
           build/verification/package-coverage/FlukeKit.json
           /Sources/FlukeKit/
           80
+
+      - name: Enforce FlukeFeatures testable-logic line coverage
+        run: |
+          scripts/verify-swift-package-coverage.sh \
+            build/verification/package-coverage/FlukeFeatures.json \
+            80 \
+            --include '/Sources/FlukeFeatures/.+ViewModel\.swift$' \
+            --include '/Sources/FlukeFeatures/Browse/BrowseViewState\.swift$' \
+            --include '/Sources/FlukeFeatures/Learn/LearnContent\.swift$' \
+            --include '/Sources/FlukeFeatures/Browse/Ecotype\+Presentation\.swift$'
+
+      - name: Verify App Store release artifacts
+        run: scripts/verify-app-store-release.sh
 
       - name: Run meaningful app tests with coverage
         timeout-minutes: 10
@@ -111,6 +125,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO
           scripts/verify-archive-metadata.sh \
             build/verification/Fluke.xcarchive app.fluke.Fluke 17.0
+          scripts/verify-app-store-archive.sh build/verification/Fluke.xcarchive
           plutil -convert xml1 -o build/verification/archive-metadata.plist \
             build/verification/Fluke.xcarchive/Info.plist
 

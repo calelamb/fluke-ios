@@ -7,7 +7,11 @@ fixture_verifier="$repo_root/scripts/verify-contract-fixtures.sh"
 coverage_verifier="$repo_root/scripts/verify-coverage.sh"
 swift_coverage_verifier="$repo_root/scripts/verify-swift-package-coverage.sh"
 archive_verifier="$repo_root/scripts/verify-archive-metadata.sh"
+app_store_archive_verifier="$repo_root/scripts/verify-app-store-archive.sh"
 boundary_verifier="$repo_root/scripts/verify-release-a-boundaries.sh"
+app_store_verifier="$repo_root/scripts/verify-app-store-release.sh"
+screenshot_verifier="$repo_root/scripts/verify-app-store-screenshots.sh"
+screenshot_capture="$repo_root/scripts/capture-app-store-screenshots.sh"
 simulator_preparer="$repo_root/scripts/prepare-ios-simulator.sh"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/fluke-verifier-tests.XXXXXX")"
 trap 'rm -rf "$test_root"' EXIT
@@ -110,6 +114,16 @@ if [[ "$*" == "simctl list devices available --json" ]]; then
   exit 0
 fi
 printf '%s\n' "$*" >>"$FLUKE_SIMULATOR_COMMAND_CAPTURE"
+if [[ "$1 $2" == "simctl bootstatus" && "${FLUKE_SIMULATOR_BOOTSTATUS_MODE:-}" == "recover-once" ]]; then
+  count="$(cat "${FLUKE_SIMULATOR_BOOTSTATUS_COUNT}" 2>/dev/null || printf 0)"
+  printf '%s' "$((count + 1))" >"$FLUKE_SIMULATOR_BOOTSTATUS_COUNT"
+  if [[ "$count" == "0" ]]; then
+    sleep 1
+  fi
+fi
+if [[ "$1 $2" == "simctl bootstatus" && "${FLUKE_SIMULATOR_BOOTSTATUS_MODE:-}" == "always-timeout" ]]; then
+  sleep 1
+fi
 SH
 chmod +x "$simulator_bin/xcrun"
 cat >"$test_root/simulators.json" <<'JSON'
@@ -137,10 +151,39 @@ expect_failure "simulator preparer fails when device is unavailable" "available 
   FLUKE_SIMULATOR_COMMAND_CAPTURE="$test_root/simulator-commands" \
   "$simulator_preparer"
 
+recovery_capture="$test_root/simulator-recovery-commands"
+expect_success "simulator preparer bounds boot and performs one recovery" env \
+  PATH="$simulator_bin:$PATH" \
+  GITHUB_ENV="$test_root/recovery-simulator.env" \
+  FLUKE_SIMULATOR_LIST_JSON="$test_root/simulators.json" \
+  FLUKE_SIMULATOR_COMMAND_CAPTURE="$recovery_capture" \
+  FLUKE_SIMULATOR_BOOTSTATUS_MODE="recover-once" \
+  FLUKE_SIMULATOR_BOOTSTATUS_COUNT="$test_root/recovery-count" \
+  FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS="0.05" \
+  "$simulator_preparer"
+grep -Fxq 'simctl shutdown 11111111-2222-3333-4444-555555555555' "$recovery_capture" \
+  || failures=$((failures + 1))
+if [[ "$(grep -Fxc 'simctl boot 11111111-2222-3333-4444-555555555555' "$recovery_capture")" != "2" ]]; then
+  echo "FAIL: simulator preparer did not perform exactly one reboot" >&2
+  failures=$((failures + 1))
+fi
+expect_failure "simulator preparer fails after one bounded recovery" \
+  "simulator failed to boot after one recovery" env \
+  PATH="$simulator_bin:$PATH" \
+  GITHUB_ENV="$test_root/timeout-simulator.env" \
+  FLUKE_SIMULATOR_LIST_JSON="$test_root/simulators.json" \
+  FLUKE_SIMULATOR_COMMAND_CAPTURE="$test_root/simulator-timeout-commands" \
+  FLUKE_SIMULATOR_BOOTSTATUS_MODE="always-timeout" \
+  FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS="0.05" \
+  "$simulator_preparer"
+
 cat >"$test_root/swift-coverage.json" <<'JSON'
 {"data":[{"files":[
   {"filename":"/checkout/Packages/FlukeKit/Sources/FlukeKit/API/APIClient.swift","summary":{"lines":{"count":100,"covered":80}}},
-  {"filename":"/checkout/Packages/FlukeKit/Tests/FlukeKitTests/APIClientTests.swift","summary":{"lines":{"count":1000,"covered":1000}}}
+  {"filename":"/checkout/Packages/FlukeKit/Tests/FlukeKitTests/APIClientTests.swift","summary":{"lines":{"count":1000,"covered":1000}}},
+  {"filename":"/checkout/Packages/FlukeFeatures/Sources/FlukeFeatures/Sightings/SightingsViewModel.swift","summary":{"lines":{"count":100,"covered":80}}},
+  {"filename":"/checkout/Packages/FlukeFeatures/Sources/FlukeFeatures/Sightings/SightingsView.swift","summary":{"lines":{"count":100,"covered":0}}},
+  {"filename":"/checkout/Packages/FlukeFeatures/Sources/FlukeFeatures/Learn/LearnContent.swift","summary":{"lines":{"count":10,"covered":10}}}
 ]}]}
 JSON
 expect_success "Swift source coverage accepts exact threshold" \
@@ -149,6 +192,19 @@ expect_failure "Swift source coverage excludes tests" "below required 80.01%" \
   "$swift_coverage_verifier" "$test_root/swift-coverage.json" /Sources/FlukeKit/ 80.01
 expect_failure "Swift source coverage rejects missing sources" "coverage source path not found" \
   "$swift_coverage_verifier" "$test_root/swift-coverage.json" /Sources/Missing/ 80
+expect_success "Swift source coverage applies include and exclude selection" \
+  "$swift_coverage_verifier" "$test_root/swift-coverage.json" 80 \
+  --include '/Sources/FlukeFeatures/.*\.swift$' \
+  --exclude '/SightingsView\.swift$'
+expect_failure "Swift selected coverage enforces the aggregate threshold" \
+  "below required 81.83%" \
+  "$swift_coverage_verifier" "$test_root/swift-coverage.json" 81.83 \
+  --include '/Sources/FlukeFeatures/.*\.swift$' \
+  --exclude '/SightingsView\.swift$'
+expect_failure "Swift selected coverage rejects an empty selection" \
+  "coverage selection matched no source files" \
+  "$swift_coverage_verifier" "$test_root/swift-coverage.json" 80 \
+  --include '/Sources/FlukeFeatures/DoesNotExist\.swift$'
 
 archive_path="$test_root/Fluke.xcarchive"
 python3 - "$archive_path" <<'PY'
@@ -185,8 +241,28 @@ with open(os.path.join(app, "Info.plist"), "wb") as output:
             "DTPlatformName": "iphoneos",
             "MinimumOSVersion": "17.0",
             "UIDeviceFamily": [1],
+            "ITSAppUsesNonExemptEncryption": False,
         },
         output,
+    )
+with open(os.path.join(app, "PrivacyInfo.xcprivacy"), "wb") as output:
+    plistlib.dump(
+        {
+            "NSPrivacyTracking": False,
+            "NSPrivacyTrackingDomains": [],
+            "NSPrivacyCollectedDataTypes": [],
+            "NSPrivacyAccessedAPITypes": [],
+        },
+        output,
+    )
+resource_bundle = os.path.join(app, "FlukeFeatures_FlukeFeatures.bundle")
+os.makedirs(resource_bundle)
+with open(os.path.join(resource_bundle, "OFL.txt"), "w", encoding="utf-8") as output:
+    output.write(
+        "Copyright 2020 The Fraunces Project Authors\n"
+        "SIL OPEN FONT LICENSE Version 1.1\n"
+        "PERMISSION & CONDITIONS\n"
+        'THE FONT SOFTWARE IS PROVIDED "AS IS"\n'
     )
 binary = os.path.join(app, "Fluke")
 with open(binary, "wb") as output:
@@ -195,6 +271,27 @@ os.chmod(binary, os.stat(binary).st_mode | stat.S_IXUSR)
 PY
 expect_success "valid unsigned iPhone archive passes" \
   "$archive_verifier" "$archive_path" app.fluke.Fluke 17.0
+expect_success "valid archive bundles App Store privacy and font notices" \
+  "$app_store_archive_verifier" "$archive_path"
+rm "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy"
+expect_failure "App Store archive verifier rejects a missing privacy manifest" \
+  "archived app is missing PrivacyInfo.xcprivacy" \
+  "$app_store_archive_verifier" "$archive_path"
+python3 - "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "wb") as output:
+    plistlib.dump(
+        {
+            "NSPrivacyTracking": False,
+            "NSPrivacyTrackingDomains": [],
+            "NSPrivacyCollectedDataTypes": [],
+            "NSPrivacyAccessedAPITypes": [],
+        },
+        output,
+    )
+PY
 /usr/libexec/PlistBuddy -c 'Set :ApplicationProperties:CFBundleIdentifier app.fluke.Other' \
   "$archive_path/Info.plist"
 expect_failure "wrong archive bundle identifier fails" "bundle identifier mismatch" \
@@ -225,6 +322,216 @@ expect_failure "boundary verifier rejects an invalid App Store icon" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_ICON_PATH="$invalid_icon" \
   "$boundary_verifier"
+
+app_store_fixture="$test_root/app-store"
+mkdir -p "$app_store_fixture/metadata/en-US" "$app_store_fixture/Fonts"
+cp "$repo_root/App/Fluke/Assets.xcassets/AppIcon.appiconset/icon-1024.png" \
+  "$app_store_fixture/icon-1024.png"
+cat >"$app_store_fixture/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>ITSAppUsesNonExemptEncryption</key><false/>
+</dict></plist>
+PLIST
+cat >"$app_store_fixture/PrivacyInfo.xcprivacy" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>NSPrivacyTracking</key><false/>
+<key>NSPrivacyTrackingDomains</key><array/>
+<key>NSPrivacyCollectedDataTypes</key><array/>
+<key>NSPrivacyAccessedAPITypes</key><array/>
+</dict></plist>
+PLIST
+cat >"$app_store_fixture/Fonts/OFL.txt" <<'TEXT'
+Copyright 2020 The Fraunces Project Authors (github.com/undercasetype/Fraunces)
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+PERMISSION & CONDITIONS
+THE FONT SOFTWARE IS PROVIDED "AS IS"
+TEXT
+cat >"$app_store_fixture/metadata/en-US/metadata.json" <<'JSON'
+{
+  "version": "1.0",
+  "name": "Fluke",
+  "subtitle": "Explore PNW orcas",
+  "description": "Browse public sightings, learn about cataloged whales, read field notes, and explore an evidence-based atlas. Release A is read-only.",
+  "keywords": "orca,sightings,Salish Sea,whale catalog,wildlife,marine biology",
+  "promotionalText": "Explore public Pacific Northwest orca records with clear source context.",
+  "whatsNew": "Initial TestFlight release.",
+  "supportURL": "https://fluke-pnw.vercel.app/support",
+  "privacyURL": "https://fluke-pnw.vercel.app/privacy",
+  "marketingURL": "https://fluke-pnw.vercel.app",
+  "copyright": "2026 Cale Lamb",
+  "reviewNotes": "No account is required. Release A is read-only and has four tabs: Sightings, Whales, Learn, and Atlas."
+}
+JSON
+expect_success "App Store release verifier accepts complete launch assets" env \
+  FLUKE_INFO_PLIST="$app_store_fixture/Info.plist" \
+  FLUKE_PRIVACY_MANIFEST="$app_store_fixture/PrivacyInfo.xcprivacy" \
+  FLUKE_APP_STORE_METADATA="$app_store_fixture/metadata/en-US/metadata.json" \
+  FLUKE_APP_ICON_PATH="$app_store_fixture/icon-1024.png" \
+  FLUKE_FONT_LICENSE_PATH="$app_store_fixture/Fonts/OFL.txt" \
+  "$app_store_verifier"
+/usr/libexec/PlistBuddy -c 'Set :ITSAppUsesNonExemptEncryption true' \
+  "$app_store_fixture/Info.plist"
+expect_failure "App Store release verifier rejects incorrect export compliance" \
+  "ITSAppUsesNonExemptEncryption must be false" env \
+  FLUKE_INFO_PLIST="$app_store_fixture/Info.plist" \
+  FLUKE_PRIVACY_MANIFEST="$app_store_fixture/PrivacyInfo.xcprivacy" \
+  FLUKE_APP_STORE_METADATA="$app_store_fixture/metadata/en-US/metadata.json" \
+  FLUKE_APP_ICON_PATH="$app_store_fixture/icon-1024.png" \
+  FLUKE_FONT_LICENSE_PATH="$app_store_fixture/Fonts/OFL.txt" \
+  "$app_store_verifier"
+/usr/libexec/PlistBuddy -c 'Set :ITSAppUsesNonExemptEncryption false' \
+  "$app_store_fixture/Info.plist"
+python3 - "$app_store_fixture/metadata/en-US/metadata.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as source:
+    metadata = json.load(source)
+metadata["keywords"] = "x" * 101
+with open(path, "w", encoding="utf-8") as output:
+    json.dump(metadata, output)
+PY
+expect_failure "App Store release verifier enforces keyword byte limit" \
+  "keywords exceeds 100 UTF-8 bytes" env \
+  FLUKE_INFO_PLIST="$app_store_fixture/Info.plist" \
+  FLUKE_PRIVACY_MANIFEST="$app_store_fixture/PrivacyInfo.xcprivacy" \
+  FLUKE_APP_STORE_METADATA="$app_store_fixture/metadata/en-US/metadata.json" \
+  FLUKE_APP_ICON_PATH="$app_store_fixture/icon-1024.png" \
+  FLUKE_FONT_LICENSE_PATH="$app_store_fixture/Fonts/OFL.txt" \
+  "$app_store_verifier"
+
+screenshot_fixture="$test_root/screenshots"
+mkdir -p "$screenshot_fixture"
+sips --resampleHeightWidth 2736 1260 \
+  "$repo_root/App/Fluke/Assets.xcassets/AppIcon.appiconset/icon-1024.png" \
+  --out "$screenshot_fixture/01-sightings.png" >/dev/null
+expect_success "screenshot verifier accepts a 6.9-inch portrait set" \
+  "$screenshot_verifier" "$screenshot_fixture"
+cp "$repo_root/App/Fluke/Assets.xcassets/AppIcon.appiconset/icon-1024.png" \
+  "$screenshot_fixture/02-invalid.png"
+expect_failure "screenshot verifier rejects an unsupported size" \
+  "unsupported iPhone screenshot size" \
+  "$screenshot_verifier" "$screenshot_fixture"
+rm "$screenshot_fixture/02-invalid.png"
+python3 - "$screenshot_fixture/02-black-band.png" <<'PY'
+import sys
+import subprocess
+import tempfile
+
+with tempfile.NamedTemporaryFile(suffix=".ppm") as source:
+    source.write(b"P6\n1260 2736\n255\n")
+    source.write(b"\0" * (1260 * 2736 * 3))
+    source.flush()
+    subprocess.run(
+        ["sips", "-s", "format", "png", source.name, "--out", sys.argv[1]],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+PY
+expect_failure "screenshot verifier rejects an excessive near-black band" \
+  "screenshot contains an excessive near-black band" \
+  "$screenshot_verifier" "$screenshot_fixture"
+rm "$screenshot_fixture/02-black-band.png"
+
+capture_bin="$test_root/capture-bin"
+capture_output="$test_root/captured-screenshots"
+mkdir -p "$capture_bin"
+cat >"$capture_bin/xcodebuild" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$FLUKE_CAPTURE_XCODEBUILD_CAPTURE"
+exit 0
+SH
+cat >"$capture_bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$FLUKE_CAPTURE_CURL_CAPTURE"
+exit 0
+SH
+cat >"$capture_bin/xcrun" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$FLUKE_CAPTURE_SIMCTL_CAPTURE"
+if [[ "$*" == "simctl list devices available --json" ]]; then
+  cat <<'JSON'
+{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-0":[
+  {"name":"iPhone 17 Pro Max","udid":"AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE","isAvailable":true}
+]}}
+JSON
+  exit 0
+fi
+if [[ "$1 $2" == "simctl bootstatus" && "${FLUKE_SIMULATOR_BOOTSTATUS_MODE:-}" == "recover-once" ]]; then
+  count="$(cat "${FLUKE_SIMULATOR_BOOTSTATUS_COUNT}" 2>/dev/null || printf 0)"
+  printf '%s' "$((count + 1))" >"$FLUKE_SIMULATOR_BOOTSTATUS_COUNT"
+  if [[ "$count" == "0" ]]; then
+    sleep 1
+  fi
+  exit 0
+fi
+if [[ "$1 $2" == "simctl boot" || "$1 $2" == "simctl shutdown" ]]; then
+  exit 0
+fi
+if [[ "$1 $2" == "simctl status_bar" ]]; then
+  exit 0
+fi
+if [[ "$1 $2 $3" == "xcresulttool export attachments" ]]; then
+  while (($#)); do
+    if [[ "$1" == "--output-path" ]]; then
+      output_path="$2"
+      break
+    fi
+    shift
+  done
+  mkdir -p "$output_path"
+  for name in 01-sightings 02-whales 03-learn 04-atlas; do
+    cp "$FLUKE_SCREENSHOT_FIXTURE" "$output_path/$name.png"
+  done
+  cat >"$output_path/manifest.json" <<'JSON'
+[{"testIdentifier":"capture","attachments":[
+  {"suggestedHumanReadableName":"01-sightings_0_AAAAAAAA.png","exportedFileName":"01-sightings.png"},
+  {"suggestedHumanReadableName":"02-whales_0_BBBBBBBB.png","exportedFileName":"02-whales.png"},
+  {"suggestedHumanReadableName":"03-learn_0_CCCCCCCC.png","exportedFileName":"03-learn.png"},
+  {"suggestedHumanReadableName":"04-atlas_0_DDDDDDDD.png","exportedFileName":"04-atlas.png"}
+]}]
+JSON
+  exit 0
+fi
+printf 'unexpected xcrun command: %s\n' "$*" >&2
+exit 1
+SH
+chmod +x "$capture_bin/curl" "$capture_bin/xcodebuild" "$capture_bin/xcrun"
+expect_success "screenshot capture resolves a pinned simulator and exports named images" env \
+  PATH="$capture_bin:$PATH" \
+  FLUKE_SCREENSHOT_FIXTURE="$screenshot_fixture/01-sightings.png" \
+  FLUKE_CAPTURE_XCODEBUILD_CAPTURE="$test_root/capture-xcodebuild-arguments" \
+  FLUKE_CAPTURE_CURL_CAPTURE="$test_root/capture-curl-arguments" \
+  FLUKE_CAPTURE_SIMCTL_CAPTURE="$test_root/capture-simctl-arguments" \
+  FLUKE_SIMULATOR_BOOTSTATUS_MODE="recover-once" \
+  FLUKE_SIMULATOR_BOOTSTATUS_COUNT="$test_root/capture-recovery-count" \
+  FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS="0.05" \
+  "$screenshot_capture" "$capture_output"
+if [[ "$(find "$capture_output" -type f -name '*.png' | wc -l | tr -d ' ')" != "4" ]]; then
+  echo "FAIL: screenshot capture did not export four named images" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fxq -- 'simctl shutdown AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE' \
+  "$test_root/capture-simctl-arguments"; then
+  echo "FAIL: screenshot capture did not use bounded simulator recovery" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fxq -- 'https://fluke-api.onrender.com/api/v1/health' "$test_root/capture-curl-arguments"; then
+  echo "FAIL: screenshot capture did not warm the production API" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fxq -- '-configuration' "$test_root/capture-xcodebuild-arguments" \
+  || ! grep -Fxq -- 'Release' "$test_root/capture-xcodebuild-arguments" \
+  || ! grep -Fxq -- 'ENABLE_TESTABILITY=YES' "$test_root/capture-xcodebuild-arguments"; then
+  echo "FAIL: screenshot capture did not use the live Release configuration" >&2
+  failures=$((failures + 1))
+fi
 if ! grep -Fxq -- '-resultBundlePath' "$capture" \
   || ! grep -Fxq -- "$test_root/AppTests.xcresult" "$capture" \
   || ! grep -Fxq -- '-enableCodeCoverage' "$capture" \

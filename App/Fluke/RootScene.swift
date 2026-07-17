@@ -1,5 +1,6 @@
 import FlukeFeatures
 import FlukeKit
+import FlukeUI
 import SwiftUI
 
 enum RootTab: CaseIterable, Hashable {
@@ -36,38 +37,45 @@ struct RootScene: View {
   @State private var atlasRouteRevision = 0
 
   var body: some View {
-    TabView(selection: $selectedTab) {
-      NavigationStack {
-        SightingsView(repository: environment.sightingsRepository)
-      }
-      .tabItem { tabLabel(for: .sightings) }
-      .tag(RootTab.sightings)
+    ZStack {
+      Color.fog.ignoresSafeArea()
 
-      NavigationStack {
-        WhalesView(repository: environment.whalesRepository) { whale in
-          requestedTraceWhaleID = whale.id
-          atlasRouteRevision += 1
-          selectedTab = .atlas
+      TabView(selection: $selectedTab) {
+        NavigationStack {
+          SightingsView(repository: environment.sightingsRepository)
         }
-      }
-      .tabItem { tabLabel(for: .whales) }
-      .tag(RootTab.whales)
+        .flukeNavigationBackground()
+        .tabItem { tabLabel(for: .sightings) }
+        .tag(RootTab.sightings)
 
-      NavigationStack {
-        LearnView()
-      }
-      .tabItem { tabLabel(for: .learn) }
-      .tag(RootTab.learn)
+        NavigationStack {
+          WhalesView(repository: environment.whalesRepository) { whale in
+            requestedTraceWhaleID = whale.id
+            atlasRouteRevision += 1
+            selectedTab = .atlas
+          }
+        }
+        .flukeNavigationBackground()
+        .tabItem { tabLabel(for: .whales) }
+        .tag(RootTab.whales)
 
-      AtlasView(
-        historicalRepository: environment.historicalSightingsRepository,
-        predictionRepository: environment.predictionRepository,
-        whalesRepository: environment.whalesRepository,
-        requestedTraceWhaleID: requestedTraceWhaleID
-      )
-      .id(atlasRouteRevision)
-      .tabItem { tabLabel(for: .atlas) }
-      .tag(RootTab.atlas)
+        NavigationStack {
+          LearnView()
+        }
+        .flukeNavigationBackground()
+        .tabItem { tabLabel(for: .learn) }
+        .tag(RootTab.learn)
+
+        AtlasView(
+          historicalRepository: environment.historicalSightingsRepository,
+          predictionRepository: environment.predictionRepository,
+          whalesRepository: environment.whalesRepository,
+          requestedTraceWhaleID: requestedTraceWhaleID
+        )
+        .id(atlasRouteRevision)
+        .tabItem { tabLabel(for: .atlas) }
+        .tag(RootTab.atlas)
+      }
     }
     .task {
       capabilities = await ReleaseACapabilityState.load(
@@ -79,6 +87,13 @@ struct RootScene: View {
 
   private func tabLabel(for tab: RootTab) -> some View {
     Label(tab.title, systemImage: tab.systemImage)
+  }
+}
+
+private extension View {
+  func flukeNavigationBackground() -> some View {
+    toolbarBackground(Color.fog, for: .navigationBar)
+      .toolbarBackground(.visible, for: .navigationBar)
   }
 }
 

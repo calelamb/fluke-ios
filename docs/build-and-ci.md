@@ -33,7 +33,7 @@ xcodebuild build \
 
 The plans were originally written referencing `iPhone 15`. With Xcode 26 / iOS 26, the available simulators include `iPhone 16e`, `iPhone 17`, `iPhone 17 Pro`, `iPhone 17 Pro Max`, and `iPhone Air`. **Use `iPhone 17` for current builds.** CI resolves the exact simulator UDID and waits for `simctl bootstatus` before testing.
 
-The workflow pins an iPhone 17 on the exact iOS 26.0.1 runtime, so hosted-runner drift cannot silently change the test destination.
+The workflow pins an iPhone 17 on the exact iOS 26.0.1 runtime, so hosted-runner drift cannot silently change the test destination. Simulator boot is bounded to 180 seconds, performs at most one safe shutdown/reboot recovery, and then fails with the resolved device list instead of consuming the full CI timeout. The entire simulator-preparation step has a five-minute ceiling.
 
 ### Deployment target
 
@@ -58,7 +58,7 @@ Lives at [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). Triggers on 
 ```
 canonical fixture manifest + verifier self-tests
     ↓
-all package tests + package coverage reports
+all package tests + FlukeKit and selected FlukeFeatures logic coverage gates
     ↓
 meaningful app tests + 80% app line-coverage gate
     ↓
@@ -67,7 +67,7 @@ Debug build + Release build
 unsigned generic iPhone archive + metadata validation
 ```
 
-The workflow uploads the app `.xcresult`, the machine-readable app coverage report, all package coverage reports, and validated archive metadata on every run. Production deployment and signing remain separate and require an exact green SHA.
+The workflow uploads the app `.xcresult`, the machine-readable app coverage report, all package coverage reports, and validated archive metadata on every run. FlukeFeatures' 80% gate is limited to named testable logic files; SwiftUI view bodies are validated through render, UI, and build checks rather than included in that numeric claim. Production deployment and signing remain separate and require an exact green SHA.
 
 ### Runner choice
 

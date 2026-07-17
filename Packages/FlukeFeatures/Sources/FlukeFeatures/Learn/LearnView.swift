@@ -39,12 +39,54 @@ public struct LearnView: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityHint("Opens article")
                 }
+
+                NavigationLink {
+                    ThirdPartyNoticesView()
+                } label: {
+                    Label("Open-source acknowledgements", systemImage: "doc.text")
+                        .font(.flukeBody.weight(.semibold))
+                        .foregroundStyle(Color.abyss)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(Color.bone, in: RoundedRectangle(cornerRadius: 16))
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens license notices")
             }
             .frame(maxWidth: 680, alignment: .leading)
             .padding(20)
         }
         .background(Color.fog)
         .navigationTitle("Learn")
+    }
+}
+
+private struct ThirdPartyNoticesView: View {
+    private let notice = ThirdPartyNotices.fraunces
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(notice.name)
+                    .font(.flukeDisplaySmall)
+                    .foregroundStyle(Color.abyss)
+                    .accessibilityAddTraits(.isHeader)
+                Text(notice.copyright)
+                    .font(.flukeBody)
+                    .foregroundStyle(Color.deep)
+                Text(notice.licenseName)
+                    .font(.flukeBody.weight(.semibold))
+                    .foregroundStyle(Color.abyss)
+                Text(notice.licenseText)
+                    .font(.flukeBody)
+                    .foregroundStyle(Color.deep)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: 680, alignment: .leading)
+            .padding(20)
+        }
+        .background(Color.fog)
+        .navigationTitle("Acknowledgements")
     }
 }
 

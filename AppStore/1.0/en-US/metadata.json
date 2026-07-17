@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "name": "Fluke: PNW Orca Atlas",
+  "subtitle": "Sightings, whales, and maps",
+  "description": "Meet the killer whales of the Pacific Northwest through public records and careful context.\n\nFluke is a read-only field guide and atlas for exploring public orca information across the Salish Sea and nearby waters.\n\nSIGHTINGS\nBrowse a sourced timeline of public observations. Each record keeps its date, location, group size, ecotype, and attribution together so you can understand what was reported without mistaking a marker for a live location.\n\nWHALES\nSearch a public catalog of individual whales and open profiles with catalog identifiers, pod or ecotype context, and documented relationships when available.\n\nLEARN\nRead concise field notes about orca ecotypes, catalog evidence, responsible wildlife viewing, data freshness, and source interpretation.\n\nATLAS\nExplore historical ranges, movement traces, timelines, and model estimates. Confidence and source context stay visible so estimates are not presented as certainty.\n\nFluke supports browsing only in this release. It does not offer accounts, sighting submissions, or photo identification. Saved public responses can remain available during a weak connection, with clear offline or stale status.\n\nFluke is an independent, non-commercial reference project. It is not an emergency alert service and should not be used to approach or pursue wildlife. Always follow current official viewing regulations.",
+  "keywords": "killer whales,sightings,Salish Sea,catalog,field guide,wildlife,marine biology,Pacific Northwest",
+  "promotionalText": "Explore sourced Pacific Northwest orca sightings, catalog profiles, field notes, and an evidence-based atlas.",
+  "whatsNew": "First public beta of Fluke's read-only orca field guide and atlas.",
+  "supportURL": "https://fluke-pnw.vercel.app/support",
+  "privacyURL": "https://fluke-pnw.vercel.app/privacy",
+  "marketingURL": "https://fluke-pnw.vercel.app",
+  "copyright": "2026 Cale Lamb",
+  "primaryCategory": "Reference",
+  "secondaryCategory": "Education",
+  "contentRightsUsesThirdPartyContent": true,
+  "reviewNotes": "No account or credentials are required. Release A is read-only and has four tabs: Sightings, Whales, Learn, and Atlas. Accounts, sighting submissions, and photo identification are intentionally unavailable.\n\nThe app uses https://fluke-api.onrender.com for public browse data. Because the service is hosted on a free tier, the first request after inactivity can take up to approximately 60 seconds; loading and retry states remain visible.\n\nSuggested review path:\n1. Open Sightings and switch between list and map.\n2. Open Whales, search or filter the catalog, and open a profile.\n3. Open Learn and select any field note. Open-source acknowledgements are at the bottom of Learn.\n4. Open Atlas and switch among Range, Trace, Timeline, and Predict.\n\nThe app does not request location, camera, photos, contacts, tracking, or notification permission. It uses only Apple's operating-system HTTPS implementation. Public responses may be cached in the app sandbox for offline browsing. Source attribution is preserved in the relevant surfaces.\n\nSupport: https://fluke-pnw.vercel.app/support\nPrivacy: https://fluke-pnw.vercel.app/privacy"
+}

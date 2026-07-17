@@ -33,6 +33,7 @@ public struct TimelineSubView: View {
                     .padding(14)
                     .accessibilityLabel("Timeline date")
                     .accessibilityValue(viewModel.scrubberDate.formatted(date: .abbreviated, time: .omitted))
+                    .accessibilityIdentifier("atlas.timeline.loaded")
                 }
             }
         }

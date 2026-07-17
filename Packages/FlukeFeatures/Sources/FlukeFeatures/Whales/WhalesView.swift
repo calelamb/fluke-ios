@@ -112,6 +112,7 @@ public struct WhalesView: View {
                 }
                 .padding(16)
             }
+            .accessibilityIdentifier("whales.loaded")
         }
     }
 

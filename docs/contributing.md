@@ -44,7 +44,7 @@ If you're a human contributor:
 
 Every plan task that adds executable code starts with "Step 1: Write the failing test." This isn't aesthetic — it's a calibration check. If you write the test and it doesn't fail, your test is wrong. If you write the implementation and the test still fails, your implementation is wrong. Both surface bugs early.
 
-The minimum coverage target is 80% (per the project's [`rules/common/testing.md`](https://github.com/calelamb/.claude/rules)). Snapshot tests count toward coverage of view code; logic tests cover services and view models.
+The minimum source-line target is 80% for FlukeKit and for the explicitly selected FlukeFeatures testable logic. FlukeFeatures' gate includes view models, browse state, Learn content, and ecotype presentation; it does not claim 80% over declarative SwiftUI view bodies. Snapshot, render, UI, and Release-build checks cover those visual surfaces.
 
 Some tasks in the plan skip TDD (config-only changes, asset additions). Those are the exception, not the default.
 

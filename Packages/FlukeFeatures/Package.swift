@@ -15,7 +15,8 @@ let package = Package(
         .target(
             name: "FlukeFeatures",
             dependencies: ["FlukeKit", "FlukeUI"],
-            path: "Sources/FlukeFeatures"
+            path: "Sources/FlukeFeatures",
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "FlukeFeaturesTests",

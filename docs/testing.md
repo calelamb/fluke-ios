@@ -8,7 +8,7 @@ Test strategy for the iOS app. Coverage targets, what gets tested at each layer,
 | --- | --- | --- |
 | `FlukeKit` (domain) | 80%+ source lines | Swift Testing/XCTest; injected `HTTPTransport`; in-memory actor cache |
 | `FlukeUI` (design system) | Snapshot regression on visual components | `swift-snapshot-testing` PNG references in `__Snapshots__/` |
-| `FlukeFeatures` (screens) | View model logic + render-doesn't-crash | Swift Testing state/repository suites plus XCTest smoke render tests for all four shipping surfaces |
+| `FlukeFeatures` (screens) | 80%+ selected testable-logic source lines | Swift Testing state/repository suites; declarative SwiftUI bodies are excluded from the numeric gate and covered by render/UI checks |
 | `App` (integration) | Release A shell and configuration boundaries | Swift Testing in `App/FlukeTests`; exact four-tab shell, fail-closed capabilities, cache injection, and API-origin policy |
 
 ## Running tests
@@ -46,7 +46,7 @@ xcodebuild test \
 
 Or `⌘U` in Xcode with the `Fluke` scheme selected.
 
-Run `scripts/prepare-ios-simulator.sh` to resolve and boot the same iPhone 17 / iOS 26.0 destination used by CI. CI serializes app tests to avoid CoreSimulator startup races and always collects simulator diagnostics — see [`build-and-ci.md`](build-and-ci.md).
+Run `scripts/prepare-ios-simulator.sh` to resolve and boot the same iPhone 17 / iOS 26.0 destination used by CI. Its boot wait is bounded and permits one shutdown/reboot recovery before failing with diagnostics. CI serializes app tests to avoid CoreSimulator startup races and always collects simulator diagnostics — see [`build-and-ci.md`](build-and-ci.md).
 
 ## Patterns
 
@@ -178,7 +178,9 @@ xcrun llvm-cov report \
   --use-color
 ```
 
-CI runs `scripts/verify-swift-package-coverage.sh` against `/Sources/FlukeKit/` and requires 80%+. Test targets and generated runner files are excluded from the calculation. `FlukeUI` is dominated by view code where snapshot tests carry the regression load. `FlukeFeatures` covers view-model logic plus minimal render tests; coverage there is meaningful for view models and incidental for views.
+CI runs `scripts/verify-swift-package-coverage.sh` against `/Sources/FlukeKit/` and requires 80%+. It separately requires 80% aggregate line coverage across the explicitly selected, testable `FlukeFeatures` logic: every `*ViewModel.swift`, `BrowseViewState.swift`, `LearnContent.swift`, and `Ecotype+Presentation.swift`. The gate reports the selected file and line totals; it does **not** claim 80% coverage across all `FlukeFeatures` source.
+
+Declarative SwiftUI view bodies are explicitly outside that numeric selection. They are exercised by package render-does-not-crash tests, component snapshots, the app shell/UI flow, and Release builds. Test targets, generated runners, resource accessors, and view declarations cannot inflate or dilute the selected-logic percentage. The verifier self-tests prove both include and exclude behavior.
 
 ## CI
 
