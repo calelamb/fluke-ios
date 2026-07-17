@@ -29,6 +29,23 @@ struct SubmitViewModelTests {
     #expect(model.dismissal == .requiresConfirmation)
   }
 
+  @Test("Coordinate and observation date changes make the form dirty")
+  func coordinateAndDateDirtyDismissal() {
+    let initialDate = Date(timeIntervalSince1970: 1_700_000_000)
+    let coordinateModel = SubmitViewModel(
+      service: SubmitService(), queue: RecordingSubmissionQueue(), observedAt: initialDate
+    )
+    #expect(coordinateModel.dismissal == .allowed)
+    coordinateModel.latitude += 0.001
+    #expect(coordinateModel.dismissal == .requiresConfirmation)
+
+    let dateModel = SubmitViewModel(
+      service: SubmitService(), queue: RecordingSubmissionQueue(), observedAt: initialDate
+    )
+    dateModel.observedAt = initialDate.addingTimeInterval(60)
+    #expect(dateModel.dismissal == .requiresConfirmation)
+  }
+
   @Test("Signed-in submit uses hidden account email while anonymous validates it")
   func authEmailBehavior() async {
     let service = SubmitService()
@@ -56,7 +73,9 @@ struct SubmitViewModelTests {
     let model = SubmitViewModel(
       service: SubmitService(), queue: RecordingSubmissionQueue(), submissionsEnabled: false
     )
-    model.addPhotos(Array(repeating: .fixture, count: 6))
+    model.addPhotos((0..<6).map { index in
+      ProcessedPhoto(bytes: Data([UInt8(index)]), fileName: "\(index).jpg")
+    })
     #expect(model.photos.count == 5)
     #expect(model.disabledMessage?.contains("unavailable") == true)
   }
@@ -118,6 +137,14 @@ struct SubmitViewModelTests {
     model.latitude = 91
     await model.submit()
     #expect(model.state == .validation(.latitude))
+    #expect(model.validationField == .location)
+    #expect(SubmissionFormField.forValidationError(.longitude) == .location)
+    #expect(SubmissionFormField.forValidationError(.observedAt) == .observedAt)
+    #expect(SubmissionFormField.forValidationError(.groupSize) == .groupSize)
+    #expect(SubmissionFormField.forValidationError(.notes) == .notes)
+    #expect(SubmissionFormField.forValidationError(.locationName) == .locationName)
+    #expect(SubmissionFormField.forValidationError(.email) == .email)
+    #expect(SubmissionFormField.forValidationError(.photos) == .photos)
   }
 
   @Test("Duplicate tap while request is suspended submits once")
@@ -137,11 +164,52 @@ struct SubmitViewModelTests {
   @Test("Signed-in form hides observer email")
   func hidesSignedInEmail() {
     let signedIn = SubmitViewModel(
-      service: SubmitService(), queue: RecordingSubmissionQueue(), isSignedIn: true
+      service: SubmitService(), queue: RecordingSubmissionQueue(), isSignedIn: true,
+      signedInObserverEmail: "account@example.com"
     )
     let anonymous = SubmitViewModel(service: SubmitService(), queue: RecordingSubmissionQueue())
     #expect(!signedIn.showsObserverEmail)
     #expect(anonymous.showsObserverEmail)
+  }
+
+  @Test("Signed-in presentation without an account email fails closed to email entry")
+  func signedInMissingEmailShowsEntry() async {
+    let service = SubmitService()
+    let model = SubmitViewModel(
+      service: service, queue: RecordingSubmissionQueue(), isSignedIn: true,
+      signedInObserverEmail: nil
+    )
+    #expect(model.showsObserverEmail)
+    model.email = "fallback@example.com"
+    model.photos = [.fixture]
+
+    await model.submit()
+
+    #expect(model.state == .success)
+    #expect(await service.payloads.first?.observerEmail == "fallback@example.com")
+  }
+
+  @Test("Repeated picker interactions consume only new asset IDs and never duplicate photos")
+  func pickerSelectionDeduplication() {
+    let tracker = PhotoSelectionTracker()
+    let firstBatch = tracker.consuming(["asset-a", "asset-b"])
+    #expect(firstBatch.indices == [0, 1])
+    let secondBatch = firstBatch.tracker.consuming(["asset-a", "asset-b", "asset-c"])
+    #expect(secondBatch.indices == [2])
+    #expect(secondBatch.tracker.consuming(["asset-a", "asset-c"]).indices.isEmpty)
+
+    let first = ProcessedPhoto(
+      bytes: Data([1]), fileName: "first.jpg",
+      idempotencyID: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+    )
+    let second = ProcessedPhoto(
+      bytes: Data([1]), fileName: "duplicate-with-new-id.jpg",
+      idempotencyID: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+    )
+    let model = SubmitViewModel(service: SubmitService(), queue: RecordingSubmissionQueue())
+    model.addPhotos([first])
+    model.addPhotos([first, second])
+    #expect(model.photos.map(\.idempotencyID) == [first.idempotencyID])
   }
 
   @Test("Coordinate selection clamps latitude and wraps longitude")
@@ -158,6 +226,8 @@ struct SubmitViewModelTests {
       "Camera access is off. You can enable it in Settings or choose a photo instead."
     ))
     #expect(PhotoSelectionPresentation.cameraState(for: .restricted).isUnavailable)
+    #expect(PhotoSelectionPresentation.cameraResult(data: nil) == .failure(.processingFailed))
+    #expect(PhotoSelectionPresentation.cameraResult(data: Data([1])) == .success(Data([1])))
   }
 
   private func validModel(

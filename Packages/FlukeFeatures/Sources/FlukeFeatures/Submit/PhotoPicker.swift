@@ -8,6 +8,7 @@ import UIKit
 
 public struct PhotoPicker: View {
   @State private var selections: [PhotosPickerItem] = []
+  @State private var selectionTracker = PhotoSelectionTracker()
   #if canImport(UIKit)
   @State private var showsCamera = false
   #endif
@@ -37,17 +38,24 @@ public struct PhotoPicker: View {
       #endif
     }
     .onChange(of: selections) { _, values in
-      Task {
-        await process(values)
-      }
+      let batch = selectionTracker.consuming(values.map(\.itemIdentifier))
+      selectionTracker = batch.tracker
+      let newValues = batch.indices.map { values[$0] }
+      selections = []
+      if !newValues.isEmpty { Task { await process(newValues) } }
     }
     #if canImport(UIKit)
     .sheet(isPresented: $showsCamera) {
-      CameraPicker { data in
-        do {
-          addPhotos([try ImageProcessor.process(data)])
-        } catch {
-          reportFailure(.processingFailed)
+      CameraPicker { result in
+        switch result {
+        case .success(let data):
+          do {
+            addPhotos([try ImageProcessor.process(data)])
+          } catch {
+            reportFailure(.processingFailed)
+          }
+        case .failure(let failure):
+          reportFailure(failure)
         }
       }
     }
@@ -94,7 +102,7 @@ public struct PhotoPicker: View {
 
 #if canImport(UIKit)
 private struct CameraPicker: UIViewControllerRepresentable {
-  let completion: (Data) -> Void
+  let completion: (Result<Data, PhotoSelectionFailure>) -> Void
   func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
   func makeUIViewController(context: Context) -> UIImagePickerController {
     let controller = UIImagePickerController()
@@ -105,15 +113,19 @@ private struct CameraPicker: UIViewControllerRepresentable {
   func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
 
   final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
-    let completion: (Data) -> Void
-    init(completion: @escaping (Data) -> Void) { self.completion = completion }
+    let completion: (Result<Data, PhotoSelectionFailure>) -> Void
+    init(completion: @escaping (Result<Data, PhotoSelectionFailure>) -> Void) {
+      self.completion = completion
+    }
     func imagePickerController(
       _ picker: UIImagePickerController,
       didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
     ) {
       defer { picker.dismiss(animated: true) }
-      guard let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: 0.95) else { return }
-      completion(data)
+      let image = info[.originalImage] as? UIImage
+      completion(PhotoSelectionPresentation.cameraResult(
+        data: image?.jpegData(compressionQuality: 0.95)
+      ))
     }
     func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { picker.dismiss(animated: true) }
   }

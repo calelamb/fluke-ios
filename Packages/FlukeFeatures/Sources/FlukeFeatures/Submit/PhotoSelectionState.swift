@@ -1,6 +1,6 @@
 import Foundation
 
-public enum PhotoSelectionFailure: Equatable, Sendable {
+public enum PhotoSelectionFailure: Error, Equatable, Sendable {
   case loadFailed
   case processingFailed
 }
@@ -39,4 +39,41 @@ public enum PhotoSelectionPresentation {
       .unavailable("A camera isn't available on this device. Choose a photo instead.")
     }
   }
+
+  public static func cameraResult(data: Data?) -> Result<Data, PhotoSelectionFailure> {
+    guard let data else { return .failure(.processingFailed) }
+    return .success(data)
+  }
+}
+
+public struct PhotoSelectionTracker: Sendable {
+  private var handledIdentifiers: Set<String> = []
+
+  public init() {}
+
+  private init(handledIdentifiers: Set<String>) {
+    self.handledIdentifiers = handledIdentifiers
+  }
+
+  public func consuming(_ identifiers: [String?]) -> PhotoSelectionBatch {
+    let result = identifiers.enumerated().reduce(
+      (indices: [Int](), identifiers: handledIdentifiers)
+    ) { partial, element in
+      let (index, identifier) = element
+      guard let identifier else {
+        return (partial.indices + [index], partial.identifiers)
+      }
+      guard !partial.identifiers.contains(identifier) else { return partial }
+      return (partial.indices + [index], partial.identifiers.union([identifier]))
+    }
+    return PhotoSelectionBatch(
+      indices: result.indices,
+      tracker: PhotoSelectionTracker(handledIdentifiers: result.identifiers)
+    )
+  }
+}
+
+public struct PhotoSelectionBatch: Sendable {
+  public let indices: [Int]
+  public let tracker: PhotoSelectionTracker
 }

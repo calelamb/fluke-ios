@@ -31,6 +31,10 @@ public actor QueuedPhotoStore {
       at: directory, withIntermediateDirectories: true,
       attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
     )
+    let names = photos.enumerated().map { index, photo in
+      "\(submissionID.uuidString)_\(index)_\(photo.idempotencyID.uuidString).jpg"
+    }
+    try stage(names, submissionID: submissionID)
     var written: [String] = []
     var temporaryURL: URL?
     do {
@@ -38,7 +42,7 @@ public actor QueuedPhotoStore {
         if let failAfterWrites, completedWrites >= failAfterWrites {
           throw QueuedPhotoStoreError.injectedFailure
         }
-        let name = "\(submissionID.uuidString)_\(index)_\(photo.idempotencyID.uuidString).jpg"
+        let name = names[index]
         let finalURL = directory.appending(path: name)
         let currentTemporaryURL = directory.appending(path: ".\(name).\(UUID().uuidString).tmp")
         temporaryURL = currentTemporaryURL
@@ -56,8 +60,33 @@ public actor QueuedPhotoStore {
       return written
     } catch {
       if let temporaryURL { try? FileManager.default.removeItem(at: temporaryURL) }
-      try? remove(written)
+      do {
+        try remove(written)
+        try completeStaging(submissionID: submissionID)
+      } catch {
+        // The durable staging manifest intentionally survives for launch reconciliation.
+      }
       throw error
+    }
+  }
+
+  public func completeStaging(submissionID: UUID) throws {
+    let url = stagingURL(submissionID: submissionID)
+    if FileManager.default.fileExists(atPath: url.path()) {
+      try FileManager.default.removeItem(at: url)
+    }
+  }
+
+  public func reconcileStaging(liveFileNames: Set<String>) throws {
+    guard FileManager.default.fileExists(atPath: directory.path()) else { return }
+    let urls = try FileManager.default.contentsOfDirectory(
+      at: directory,
+      includingPropertiesForKeys: nil
+    ).filter { $0.lastPathComponent.hasPrefix(".pending-") && $0.pathExtension == "json" }
+    for url in urls {
+      let names = try JSONDecoder().decode([String].self, from: Data(contentsOf: url))
+      try remove(names.filter { !liveFileNames.contains($0) })
+      try FileManager.default.removeItem(at: url)
     }
   }
 
@@ -88,6 +117,17 @@ public actor QueuedPhotoStore {
       throw QueuedPhotoStoreError.invalidFileName
     }
     return directory.appending(path: name)
+  }
+
+  private func stage(_ names: [String], submissionID: UUID) throws {
+    try JSONEncoder().encode(names).write(
+      to: stagingURL(submissionID: submissionID),
+      options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+    )
+  }
+
+  private func stagingURL(submissionID: UUID) -> URL {
+    directory.appending(path: ".pending-\(submissionID.uuidString).json")
   }
 
   private static func idempotencyID(for name: String) -> UUID {

@@ -52,22 +52,51 @@ public enum SubmissionQueueError: Error, Equatable, Sendable {
 public actor SubmissionQueue: SubmissionQueueProtocol {
   private let context: ModelContext
   private let photoStore: QueuedPhotoStore
+  private let saveContext: (ModelContext) throws -> Void
 
   public init(
     directory: URL = SubmissionQueue.applicationSupportDirectory(),
     inMemory: Bool = false,
     photoStore: QueuedPhotoStore? = nil
   ) throws {
+    try self.init(
+      directory: directory,
+      inMemory: inMemory,
+      photoStore: photoStore,
+      saveContext: { try $0.save() }
+    )
+  }
+
+  init(
+    directory: URL,
+    inMemory: Bool = false,
+    photoStore: QueuedPhotoStore? = nil,
+    saveContext: @escaping (ModelContext) throws -> Void
+  ) throws {
     let schema = Schema([QueuedSubmissionRow.self])
-    let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: inMemory)
+    let configuration: ModelConfiguration
+    if inMemory {
+      configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+    } else {
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      configuration = ModelConfiguration(
+        "SubmissionQueue",
+        schema: schema,
+        url: directory.appending(path: "SubmissionQueue.store")
+      )
+    }
     let container = try ModelContainer(for: schema, configurations: [configuration])
     context = ModelContext(container)
     self.photoStore = photoStore ?? QueuedPhotoStore(directory: directory)
+    self.saveContext = saveContext
   }
 
   public func list() throws -> [QueuedSubmissionValue] {
     let rows = try context.fetch(FetchDescriptor<QueuedSubmissionRow>())
-    return try rows.map { try $0.value() }.sorted { $0.createdAt < $1.createdAt }
+    return try rows
+      .filter { $0.stateRawValue != QueuedSubmissionState.discarding.rawValue }
+      .map { try $0.value() }
+      .sorted { $0.createdAt < $1.createdAt }
   }
 
   public func enqueue(
@@ -82,29 +111,57 @@ public actor SubmissionQueue: SubmissionQueueProtocol {
     )
     do {
       context.insert(try QueuedSubmissionRow(value: value))
-      try context.save()
-      return value
+      try saveContext(context)
     } catch {
-      try? await photoStore.remove(names)
+      context.rollback()
+      do {
+        try await photoStore.remove(names)
+        try await photoStore.completeStaging(submissionID: id)
+      } catch {
+        // The staging manifest remains durable so reconcileStorage can retry cleanup.
+      }
       throw error
     }
+    do {
+      try await photoStore.completeStaging(submissionID: id)
+    } catch {
+      // The saved row owns the bytes; reconciliation can safely remove the stale manifest.
+    }
+    return value
+  }
+
+  public func reconcileStorage() async throws {
+    let rows = try context.fetch(FetchDescriptor<QueuedSubmissionRow>())
+    for row in rows where row.stateRawValue == QueuedSubmissionState.discarding.rawValue {
+      try await photoStore.remove(row.photoFileNames + row.cleanupFileNames)
+      context.delete(row)
+      try saveContext(context)
+    }
+    let retainedRows = try context.fetch(FetchDescriptor<QueuedSubmissionRow>())
+    for row in retainedRows where !row.cleanupFileNames.isEmpty {
+      try await photoStore.remove(row.cleanupFileNames)
+      row.cleanupFileNames = []
+      try saveContext(context)
+    }
+    let liveNames = Set(retainedRows.flatMap(\.photoFileNames))
+    try await photoStore.reconcileStaging(liveFileNames: liveNames)
   }
 
   public func retry(id: UUID) throws {
     let row = try requiredRow(id: id)
     row.stateRawValue = QueuedSubmissionState.queued.rawValue
     row.attempts = 0
-    try context.save()
+    try saveContext(context)
   }
 
   public func discard(id: UUID) async throws {
     let row = try requiredRow(id: id)
     let names = row.photoFileNames + row.cleanupFileNames
     row.stateRawValue = QueuedSubmissionState.discarding.rawValue
-    try context.save()
+    try saveContext(context)
     try await photoStore.remove(names)
     context.delete(row)
-    try context.save()
+    try saveContext(context)
   }
 
   public func photoBytes(for value: QueuedSubmissionValue) async throws -> [Data] {
@@ -119,7 +176,7 @@ public actor SubmissionQueue: SubmissionQueueProtocol {
     let row = try requiredRow(id: id)
     row.attempts += 1
     if row.attempts >= 3 { row.stateRawValue = QueuedSubmissionState.failed.rawValue }
-    try context.save()
+    try saveContext(context)
   }
 
   func retainPartial(id: UUID, receipt: SubmissionReceipt, indices: [Int]) async throws {
@@ -135,10 +192,10 @@ public actor SubmissionQueue: SubmissionQueueProtocol {
     row.cleanupFileNames = removedNames
     row.attempts = 0
     row.stateRawValue = QueuedSubmissionState.queued.rawValue
-    try context.save()
+    try saveContext(context)
     try await photoStore.remove(removedNames)
     row.cleanupFileNames = []
-    try context.save()
+    try saveContext(context)
   }
 
   public func clearAccountAssociation() throws {
@@ -147,7 +204,7 @@ public actor SubmissionQueue: SubmissionQueueProtocol {
       let value = try row.value()
       row.payloadData = try JSONEncoder().encode(value.payload.removingObserverEmail())
     }
-    try context.save()
+    try saveContext(context)
   }
 
   public static func applicationSupportDirectory() -> URL {

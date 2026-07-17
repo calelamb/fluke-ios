@@ -1,5 +1,5 @@
 import Foundation
-import FlukeReleaseB
+@testable import FlukeReleaseB
 import Testing
 
 @Suite("Durable submission queue")
@@ -69,8 +69,59 @@ struct SubmissionQueueTests {
       try await queue.discard(id: value.id)
     }
 
-    #expect(try await queue.list().map(\.id) == [value.id])
+    #expect(try await queue.list().isEmpty)
     #expect(try await queue.photoBytes(for: value).count == 1)
+  }
+
+  @Test("A discarding tombstone is hidden and finishes cleanup after relaunch")
+  func relaunchRecoversDiscardingTombstone() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let payload = try SubmissionValidator.validate(.fixture(photoCount: 1))
+    let value: QueuedSubmissionValue
+    do {
+      let queue = try SubmissionQueue(
+        directory: directory,
+        photoStore: QueuedPhotoStore(directory: directory, failRemoval: true)
+      )
+      value = try await queue.enqueue(payload: payload, photos: [.fixture(1)])
+      await #expect(throws: QueuedPhotoStoreError.injectedFailure) {
+        try await queue.discard(id: value.id)
+      }
+      #expect(try await queue.list().isEmpty)
+    }
+
+    let relaunched = try SubmissionQueue(directory: directory)
+    try await relaunched.reconcileStorage()
+
+    #expect(try await relaunched.list().isEmpty)
+    #expect(try photoFiles(in: directory).isEmpty)
+  }
+
+  @Test("Failed enqueue save rolls back and relaunch removes staged private bytes")
+  func relaunchRecoversFailedEnqueueCleanup() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let payload = try SubmissionValidator.validate(.fixture(photoCount: 1))
+    do {
+      let queue = try SubmissionQueue(
+        directory: directory,
+        photoStore: QueuedPhotoStore(directory: directory, failRemoval: true),
+        saveContext: { _ in throw InjectedSaveError() }
+      )
+
+      await #expect(throws: InjectedSaveError.self) {
+        try await queue.enqueue(payload: payload, photos: [.fixture(1)])
+      }
+      #expect(try await queue.list().isEmpty)
+      #expect(try photoFiles(in: directory).count == 1)
+    }
+
+    let relaunched = try SubmissionQueue(directory: directory)
+    try await relaunched.reconcileStorage()
+
+    #expect(try await relaunched.list().isEmpty)
+    #expect(try photoFiles(in: directory).isEmpty)
   }
 
   @Test("Legacy queued filenames derive a stable photo idempotency identity")
@@ -101,4 +152,11 @@ struct SubmissionQueueTests {
 
     #expect(try await queue.list().first?.payload.observerEmail == nil)
   }
+}
+
+private struct InjectedSaveError: Error {}
+
+private func photoFiles(in directory: URL) throws -> [String] {
+  try FileManager.default.contentsOfDirectory(atPath: directory.path())
+    .filter { $0.hasSuffix(".jpg") }
 }

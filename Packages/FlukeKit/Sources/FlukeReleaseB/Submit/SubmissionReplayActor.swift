@@ -14,6 +14,7 @@ public actor SubmissionReplayActor {
     guard !isFlushing else { return }
     isFlushing = true
     defer { isFlushing = false }
+    try? await queue.reconcileStorage()
     guard let entries = try? await queue.list() else { return }
     for entry in entries where entry.state == .queued {
       if Task.isCancelled { return }

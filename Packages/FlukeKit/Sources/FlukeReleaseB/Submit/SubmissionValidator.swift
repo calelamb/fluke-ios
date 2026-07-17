@@ -30,7 +30,7 @@ public enum SubmissionValidator {
     let email = normalized(draft.observerEmail)
     if requiresObserverEmail && email == nil { throw SubmissionValidationError.email }
     if let email {
-      guard email.count <= 254, EmailAddressValidator.isValid(email) else {
+      guard email.utf16.count <= 200, EmailAddressValidator.isValid(email) else {
         throw SubmissionValidationError.email
       }
     }
@@ -50,7 +50,7 @@ public enum SubmissionValidator {
 
   private static func bounded(_ value: String?, maximum: Int) -> Bool {
     guard let value else { return true }
-    return value.count <= maximum
+    return value.utf16.count <= maximum
   }
 
   private static func normalized(_ value: String?) -> String? {

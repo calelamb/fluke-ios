@@ -18,7 +18,7 @@ struct SubmissionValidatorTests {
   }
 
   @Test("Anonymous submission requires a valid bounded email")
-  func anonymousEmail() {
+  func anonymousEmail() throws {
     #expect(throws: SubmissionValidationError.email) {
       try SubmissionValidator.validate(.fixture(observerEmail: nil))
     }
@@ -27,6 +27,14 @@ struct SubmissionValidatorTests {
     }
     #expect(throws: SubmissionValidationError.email) {
       try SubmissionValidator.validate(.fixture(observerEmail: String(repeating: "a", count: 245) + "@x.com"))
+    }
+    let email200 = String(repeating: "a", count: 64) + "@"
+      + String(repeating: "b", count: 63) + "."
+      + String(repeating: "c", count: 63) + ".example"
+    #expect(email200.utf16.count == 200)
+    #expect(try SubmissionValidator.validate(.fixture(observerEmail: email200)).observerEmail == email200)
+    #expect(throws: SubmissionValidationError.email) {
+      try SubmissionValidator.validate(.fixture(observerEmail: email200 + "x"))
     }
   }
 
@@ -48,6 +56,22 @@ struct SubmissionValidatorTests {
     #expect(payload.groupSize == 100)
     #expect(throws: SubmissionValidationError.groupSize) {
       try SubmissionValidator.validate(.fixture(groupSize: 101))
+    }
+  }
+
+  @Test("Text limits use JavaScript UTF-16 code units")
+  func utf16TextBoundaries() throws {
+    let locationAtLimit = String(repeating: "🐋", count: 100)
+    let notesAtLimit = String(repeating: "🐋", count: 1_000)
+
+    #expect(try SubmissionValidator.validate(
+      .fixture(notes: notesAtLimit, locationName: locationAtLimit)
+    ).locationName == locationAtLimit)
+    #expect(throws: SubmissionValidationError.locationName) {
+      try SubmissionValidator.validate(.fixture(locationName: locationAtLimit + "🐋"))
+    }
+    #expect(throws: SubmissionValidationError.notes) {
+      try SubmissionValidator.validate(.fixture(notes: notesAtLimit + "🐋"))
     }
   }
 }

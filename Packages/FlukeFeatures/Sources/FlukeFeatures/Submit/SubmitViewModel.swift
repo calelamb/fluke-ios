@@ -18,9 +18,9 @@ public final class SubmitViewModel {
 
   public enum Dismissal: Equatable, Sendable { case allowed, requiresConfirmation }
 
-  public var latitude = 48.52
-  public var longitude = -123.15
-  public var observedAt = Date()
+  public var latitude: Double
+  public var longitude: Double
+  public var observedAt: Date
   public var groupSize = 1
   public var notes = ""
   public var locationName = ""
@@ -28,39 +28,57 @@ public final class SubmitViewModel {
   public var photos: [ProcessedPhoto] = []
   public private(set) var state = State.editing
   public private(set) var photoErrorMessage: String?
+  public private(set) var validationField: SubmissionFormField?
 
   private let service: any SubmissionServiceProtocol
   private let queue: any SubmissionQueueProtocol
   private let isSignedIn: Bool
   private let signedInObserverEmail: String?
   private let submissionsEnabled: Bool
+  private let initialLatitude: Double
+  private let initialLongitude: Double
+  private let initialObservedAt: Date
 
   public init(
     service: any SubmissionServiceProtocol,
     queue: any SubmissionQueueProtocol,
     isSignedIn: Bool = false,
     signedInObserverEmail: String? = nil,
-    submissionsEnabled: Bool = true
+    submissionsEnabled: Bool = true,
+    latitude: Double = 48.52,
+    longitude: Double = -123.15,
+    observedAt: Date = Date()
   ) {
     self.service = service
     self.queue = queue
     self.isSignedIn = isSignedIn
     self.signedInObserverEmail = signedInObserverEmail
     self.submissionsEnabled = submissionsEnabled
+    self.latitude = latitude
+    self.longitude = longitude
+    self.observedAt = observedAt
+    initialLatitude = latitude
+    initialLongitude = longitude
+    initialObservedAt = observedAt
   }
 
   public var dismissal: Dismissal {
     isTerminal || !isDirty ? .allowed : .requiresConfirmation
   }
 
-  public var showsObserverEmail: Bool { !isSignedIn }
+  public var showsObserverEmail: Bool { !isSignedIn || signedInObserverEmail == nil }
 
   public var disabledMessage: String? {
     submissionsEnabled ? nil : "Sighting submissions are temporarily unavailable."
   }
 
   public func addPhotos(_ additions: [ProcessedPhoto]) {
-    photos = Array((photos + additions).prefix(5))
+    photos = Array((photos + additions).reduce([ProcessedPhoto]()) { unique, photo in
+      guard !unique.contains(where: {
+        $0.idempotencyID == photo.idempotencyID || $0.bytes == photo.bytes
+      }) else { return unique }
+      return unique + [photo]
+    }.prefix(5))
     photoErrorMessage = nil
   }
 
@@ -70,15 +88,17 @@ public final class SubmitViewModel {
 
   public func submit() async {
     guard submissionsEnabled, state != .submitting, state != .queued, state != .success else { return }
+    validationField = nil
     let payload: SubmissionPayload
     do {
       payload = try SubmissionValidator.validate(SubmissionDraft(
         latitude: latitude, longitude: longitude, observedAt: observedAt,
         groupSize: groupSize, notes: notes, locationName: locationName,
-        observerEmail: isSignedIn ? signedInObserverEmail : email, photoCount: photos.count
+        observerEmail: showsObserverEmail ? email : signedInObserverEmail, photoCount: photos.count
       ))
     } catch let error as SubmissionValidationError {
       state = .validation(error)
+      validationField = SubmissionFormField.forValidationError(error)
       return
     } catch {
       state = .failed("Check the sighting details and try again.")
@@ -110,7 +130,8 @@ public final class SubmitViewModel {
   }
 
   private var isDirty: Bool {
-    !locationName.isEmpty || !notes.isEmpty || !email.isEmpty || !photos.isEmpty || groupSize != 1
+    latitude != initialLatitude || longitude != initialLongitude || observedAt != initialObservedAt
+      || !locationName.isEmpty || !notes.isEmpty || !email.isEmpty || !photos.isEmpty || groupSize != 1
   }
 
   private var isTerminal: Bool {
