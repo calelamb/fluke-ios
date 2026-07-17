@@ -16,17 +16,27 @@ struct AppEnvironmentTests {
   }
 
   @Test(
-    "Staging and Release reject localhost API URLs",
+    "Staging and Release reject normalized local API origins",
     arguments: [
-      AppBuildConfiguration.staging,
-      AppBuildConfiguration.release,
+      "https://LOCALHOST.",
+      "https://api.localhost",
+      "https://api.localhost.",
+      "https://127.0.0.2",
+      "https://127.255.255.254",
+      "https://[::1]",
+      "https://[0:0:0:0:0:0:0:1]",
+      "https://[::ffff:127.0.0.1]",
+      "https://[::ffff:127.255.255.254]",
+      "https://[0:0:0:0:0:ffff:7f00:1]",
     ])
-  func nonDebugRejectsLocalhost(configuration: AppBuildConfiguration) {
-    #expect(throws: AppConfigurationError.localAPIBaseURL) {
-      try AppEnvironment.make(
-        apiBaseURLString: "https://localhost",
-        configuration: configuration
-      )
+  func nonDebugRejectsLocalOrigins(apiBaseURLString: String) {
+    for configuration in [AppBuildConfiguration.staging, .release] {
+      #expect(throws: AppConfigurationError.localAPIBaseURL) {
+        try AppEnvironment.make(
+          apiBaseURLString: apiBaseURLString,
+          configuration: configuration
+        )
+      }
     }
   }
 
@@ -60,13 +70,20 @@ struct AppEnvironmentTests {
     }
   }
 
-  @Test("Production configuration accepts a remote HTTPS API URL")
-  func releaseAcceptsHTTPS() throws {
+  @Test(
+    "Production configuration accepts public HTTPS API URLs",
+    arguments: [
+      "https://api.fluke.test",
+      "https://8.8.8.8",
+      "https://[2001:4860:4860::8888]",
+      "https://notlocalhost.example",
+    ])
+  func releaseAcceptsHTTPS(apiBaseURLString: String) throws {
     let environment = try AppEnvironment.make(
-      apiBaseURLString: "https://api.fluke.test",
+      apiBaseURLString: apiBaseURLString,
       configuration: .release
     )
 
-    #expect(environment.apiBaseURL == URL(string: "https://api.fluke.test"))
+    #expect(environment.apiBaseURL == URL(string: apiBaseURLString))
   }
 }

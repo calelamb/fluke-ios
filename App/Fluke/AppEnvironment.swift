@@ -1,5 +1,6 @@
 import FlukeKit
 import Foundation
+import Network
 
 enum AppBuildConfiguration: String, CaseIterable {
   case debug
@@ -112,8 +113,7 @@ struct AppEnvironment {
       throw AppConfigurationError.invalidAPIBaseURL
     }
 
-    let localHosts = ["localhost", "127.0.0.1", "::1"]
-    let isLocal = localHosts.contains(host)
+    let isLocal = isLocalHost(host)
     if configuration != .debug, isLocal {
       throw AppConfigurationError.localAPIBaseURL
     }
@@ -122,5 +122,34 @@ struct AppEnvironment {
     }
 
     return url
+  }
+
+  private static func isLocalHost(_ host: String) -> Bool {
+    let normalizedHost =
+      host
+      .lowercased()
+      .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+    if normalizedHost == "localhost" || normalizedHost.hasSuffix(".localhost") {
+      return true
+    }
+
+    let addressLiteral = normalizedHost.trimmingCharacters(
+      in: CharacterSet(charactersIn: "[]")
+    )
+    if let address = IPv4Address(addressLiteral) {
+      return address.rawValue.first == 127
+    }
+    guard let address = IPv6Address(addressLiteral) else {
+      return false
+    }
+
+    let bytes = Array(address.rawValue)
+    let isIPv6Loopback = bytes.dropLast().allSatisfy { $0 == 0 } && bytes.last == 1
+    let isIPv4MappedLoopback =
+      bytes.prefix(10).allSatisfy { $0 == 0 }
+      && bytes[10] == 0xff
+      && bytes[11] == 0xff
+      && bytes[12] == 127
+    return isIPv6Loopback || isIPv4MappedLoopback
   }
 }
