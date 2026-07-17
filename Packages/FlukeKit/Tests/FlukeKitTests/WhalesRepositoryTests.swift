@@ -18,10 +18,21 @@ final class WhalesRepositoryTests: XCTestCase {
         MockURLProtocol.handler = nil
     }
 
-    func test_fetchAll_decodesArrayOfWhales() async throws {
-        let body = try FixtureLoader.data(named: "whales")
+    func test_fetchAll_unwrapsWhalesFromPaginatedResponse() async throws {
         MockURLProtocol.handler = { req in
             XCTAssertEqual(req.url?.path, "/api/v1/whales")
+            let body = """
+            {
+              "items": [{
+                "id":"wh_a","catalogId":"A1","name":"Alpha",
+                "ecotype":"UNKNOWN","pod":null,"sex":"UNKNOWN",
+                "birthYear":null,"deathYear":null,"status":"UNKNOWN",
+                "biography":null,"distinguishingMarks":null,"heroImageUrl":null,
+                "notableEvents":[],"sourceCitations":[]
+              }],
+              "page":{"hasMore":true,"nextCursor":"cursor-2"}
+            }
+            """.data(using: .utf8)!
             return (
                 HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                 body
@@ -29,7 +40,7 @@ final class WhalesRepositoryTests: XCTestCase {
         }
         let whales = try await repo.fetchAll()
         XCTAssertEqual(whales.count, 1)
-        XCTAssertEqual(whales.first?.catalogId, "FX-001")
+        XCTAssertEqual(whales.first?.catalogId, "A1")
     }
 
     func test_find_decodesWhaleProfile() async throws {
@@ -47,15 +58,18 @@ final class WhalesRepositoryTests: XCTestCase {
         XCTAssertEqual(whale?.recentSightings.first?.id, "fixture-sighting-1")
     }
 
-    func test_fetchTrack_decodesArrayOfTrackPoints() async throws {
+    func test_fetchTrack_unwrapsPointsFromWhaleTrackResponse() async throws {
         MockURLProtocol.handler = { req in
             XCTAssertEqual(req.url?.path, "/api/v1/whales/wh_a/track")
             let body = """
-            [{
-              "id":"si_1","observedAt":"2026-04-20T17:45:00.000Z",
-              "latitude":48.5163,"longitude":-123.1552,
-              "locationName":"Lime Kiln","behaviorNotes":"travelling"
-            }]
+            {
+              "whaleId":"wh_a","catalogId":"A1",
+              "points":[{
+                "id":"si_1","observedAt":"2026-04-20T17:45:00.000Z",
+                "latitude":48.5163,"longitude":-123.1552,
+                "locationName":"Lime Kiln","behaviorNotes":"travelling"
+              }]
+            }
             """.data(using: .utf8)!
             return (
                 HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,

@@ -38,16 +38,19 @@ struct ContractFixtureTests {
 
     @Test("Whale catalog decodes the released public shape")
     func whaleCatalogDecodes() throws {
-        let whales = try JSONDecoder.fluke.decode(
-            [Whale].self,
+        let response = try JSONDecoder.fluke.decode(
+            PaginatedResponse<Whale>.self,
             from: FixtureLoader.data(named: "whales")
         )
 
+        let whales = response.items
         #expect(whales.count == 1)
         #expect(whales[0].catalogId == "FX-001")
         #expect(whales[0].sex == .female)
         #expect(whales[0].deathYear == nil)
         #expect(whales[0].notableEvents[0].type == .milestone)
+        #expect(!response.page.hasMore)
+        #expect(response.page.nextCursor == nil)
     }
 
     @Test("Whale detail decodes released relationships and recent sightings")
@@ -64,11 +67,12 @@ struct ContractFixtureTests {
 
     @Test("Sightings decode the released public shape")
     func publicSightingsDecode() throws {
-        let sightings = try JSONDecoder.fluke.decode(
-            [Sighting].self,
+        let response = try JSONDecoder.fluke.decode(
+            PaginatedResponse<Sighting>.self,
             from: FixtureLoader.data(named: "sightings")
         )
 
+        let sightings = response.items
         #expect(sightings.count == 1)
         #expect(sightings[0].id == "fixture-sighting-1")
         #expect(sightings[0].photos[0].orderIndex == 0)
@@ -77,11 +81,12 @@ struct ContractFixtureTests {
 
     @Test("External sightings decode the released source shape")
     func externalSightingsDecode() throws {
-        let sightings = try JSONDecoder.fluke.decode(
-            [ExternalSighting].self,
+        let response = try JSONDecoder.fluke.decode(
+            PaginatedResponse<ExternalSighting>.self,
             from: FixtureLoader.data(named: "external-sightings")
         )
 
+        let sightings = response.items
         #expect(sightings[0].source == "fixture-feed")
         #expect(sightings[0].trusted)
         #expect(sightings[0].sourceURL == "https://fixtures.invalid/observations/1")
@@ -89,12 +94,25 @@ struct ContractFixtureTests {
 
     @Test("Historical sightings decode the released atlas shape")
     func historicalSightingsDecode() throws {
-        let sightings = try JSONDecoder.fluke.decode(
-            [HistoricalSighting].self,
+        let response = try JSONDecoder.fluke.decode(
+            PaginatedResponse<HistoricalSighting>.self,
             from: FixtureLoader.data(named: "historical-sightings")
         )
 
+        let sightings = response.items
         #expect(sightings[0].whaleIds == ["fixture-whale-alpha"])
+    }
+
+    @Test("Whale tracks decode released identity metadata and points")
+    func whaleTrackDecodes() throws {
+        let track = try JSONDecoder.fluke.decode(
+            WhaleTrack.self,
+            from: FixtureLoader.data(named: "whale-track")
+        )
+
+        #expect(track.whaleId == "fixture-whale-alpha")
+        #expect(track.catalogId == "FX-001")
+        #expect(track.points[0].id == "fixture-sighting-1")
     }
 
     @Test("Prediction decodes the released atlas shape")
@@ -127,6 +145,9 @@ struct ContractFixtureTests {
             from: FixtureLoader.data(named: "safe-error")
         )
 
-        #expect(response.error == "Requested fixture resource was not found.")
+        #expect(response.code == "NOT_FOUND")
+        #expect(response.message == "Requested fixture resource was not found.")
+        #expect(response.requestId == "fixture-request-1")
+        #expect(!response.retryable)
     }
 }

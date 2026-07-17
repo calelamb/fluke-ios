@@ -29,6 +29,7 @@ public actor HistoricalSightingsRepository {
                 .map { "\($0.name)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0.value)" }
                 .joined(separator: "&")
         }
-        return try await api.get(path)
+        let response: PaginatedResponse<HistoricalSighting> = try await api.get(path)
+        return response.items
     }
 }

@@ -24,3 +24,9 @@ public struct MovementTrackPoint: Codable, Hashable, Sendable, Identifiable {
         self.behaviorNotes = behaviorNotes
     }
 }
+
+public struct WhaleTrack: Codable, Hashable, Sendable {
+    public let whaleId: String
+    public let catalogId: String
+    public let points: [MovementTrackPoint]
+}

@@ -4,11 +4,11 @@ import XCTest
 final class JSONDecoderTests: XCTestCase {
 
     func test_whale_decodesFromAPIShape() throws {
-        let whales = try JSONDecoder.fluke.decode(
-            [Whale].self,
+        let response = try JSONDecoder.fluke.decode(
+            PaginatedResponse<Whale>.self,
             from: FixtureLoader.data(named: "whales")
         )
-        let whale = try XCTUnwrap(whales.first)
+        let whale = try XCTUnwrap(response.items.first)
 
         XCTAssertEqual(whale.id, "fixture-whale-alpha")
         XCTAssertEqual(whale.catalogId, "FX-001")
@@ -18,11 +18,11 @@ final class JSONDecoderTests: XCTestCase {
     }
 
     func test_sighting_decodesCanonicalPublicShape() throws {
-        let sightings = try JSONDecoder.fluke.decode(
-            [Sighting].self,
+        let response = try JSONDecoder.fluke.decode(
+            PaginatedResponse<Sighting>.self,
             from: FixtureLoader.data(named: "sightings")
         )
-        let sighting = try XCTUnwrap(sightings.first)
+        let sighting = try XCTUnwrap(response.items.first)
 
         XCTAssertEqual(sighting.id, "fixture-sighting-1")
         XCTAssertEqual(sighting.locationName, "Fixture Strait")

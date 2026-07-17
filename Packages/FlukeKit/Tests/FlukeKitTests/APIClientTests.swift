@@ -20,7 +20,7 @@ final class APIClientTests: XCTestCase {
         client = nil
     }
 
-    func test_get_decodesArrayOfWhales() async throws {
+    func test_get_decodesPaginatedWhaleResponse() async throws {
         let body = try FixtureLoader.data(named: "whales")
 
         MockURLProtocol.handler = { request in
@@ -36,9 +36,10 @@ final class APIClientTests: XCTestCase {
             )
         }
 
-        let whales: [Whale] = try await client.get("/api/v1/whales")
-        XCTAssertEqual(whales.count, 1)
-        XCTAssertEqual(whales.first?.catalogId, "FX-001")
+        let response: PaginatedResponse<Whale> = try await client.get("/api/v1/whales")
+        XCTAssertEqual(response.items.count, 1)
+        XCTAssertEqual(response.items.first?.catalogId, "FX-001")
+        XCTAssertFalse(response.page.hasMore)
     }
 
     func test_get_throwsUnauthorizedOn401() async {

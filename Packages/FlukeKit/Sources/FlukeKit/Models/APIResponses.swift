@@ -15,6 +15,19 @@ public struct Capabilities: Codable, Hashable, Sendable {
     public let submissions: Bool
 }
 
+public struct PageMetadata: Codable, Hashable, Sendable {
+    public let hasMore: Bool
+    public let nextCursor: String?
+}
+
+public struct PaginatedResponse<Item: Codable & Hashable & Sendable>: Codable, Hashable, Sendable {
+    public let items: [Item]
+    public let page: PageMetadata
+}
+
 public struct SafeError: Codable, Hashable, Sendable {
-    public let error: String
+    public let code: String
+    public let message: String
+    public let requestId: String
+    public let retryable: Bool
 }

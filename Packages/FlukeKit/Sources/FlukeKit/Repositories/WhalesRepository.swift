@@ -12,7 +12,8 @@ public actor WhalesRepository {
 
     /// Fetch the full catalog from the live API. No caching yet.
     public func fetchAll() async throws -> [Whale] {
-        try await api.get(Endpoint.whales)
+        let response: PaginatedResponse<Whale> = try await api.get(Endpoint.whales)
+        return response.items
     }
 
     public func find(byId id: String) async throws -> WhaleProfile? {
@@ -21,6 +22,7 @@ public actor WhalesRepository {
 
     /// Fetch the per-whale movement track (used by Atlas Trace sub-view).
     public func fetchTrack(whaleId: String) async throws -> [MovementTrackPoint] {
-        try await api.get(Endpoint.whaleTrack(id: whaleId))
+        let response: WhaleTrack = try await api.get(Endpoint.whaleTrack(id: whaleId))
+        return response.points
     }
 }
