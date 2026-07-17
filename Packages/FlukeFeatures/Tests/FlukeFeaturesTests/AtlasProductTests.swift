@@ -149,6 +149,147 @@ struct AtlasProductTests {
     #expect(cells[1].lng == AtlasProjection.bounds.east)
   }
 
+  @Test("Timeline composes cached-offline notice with empty truth")
+  func timelineOfflineEmptyComposition() async {
+    let model = TimelineViewModel(
+      repository: AtlasHistoryFixture(result: .cachedOffline(payload: .empty, metadata: metadata))
+    )
+
+    await model.load()
+
+    #expect(model.statusComposition.notice == .offline)
+    #expect(model.statusComposition.truth == .empty("No historical sightings in this window."))
+  }
+
+  @Test("Timeline composes stale notice with empty truth")
+  func timelineStaleEmptyComposition() async {
+    let failure = staleFailure()
+    let model = TimelineViewModel(
+      repository: AtlasHistoryFixture(
+        result: .stale(payload: .empty, metadata: metadata, failure: failure)
+      )
+    )
+
+    await model.load()
+
+    #expect(model.statusComposition.notice == .stale(failure))
+    #expect(model.statusComposition.truth == .empty("No historical sightings in this window."))
+  }
+
+  @Test("Range composes cached-offline notice with empty truth")
+  func rangeOfflineEmptyComposition() async {
+    let model = RangeViewModel(
+      repository: AtlasHistoryFixture(result: .cachedOffline(payload: .empty, metadata: metadata))
+    )
+
+    await model.load()
+
+    #expect(model.statusComposition.notice == .offline)
+    #expect(model.statusComposition.truth == .empty("No range data for this pod and window."))
+  }
+
+  @Test("Range composes stale notice with empty truth")
+  func rangeStaleEmptyComposition() async {
+    let failure = staleFailure()
+    let model = RangeViewModel(
+      repository: AtlasHistoryFixture(
+        result: .stale(payload: .empty, metadata: metadata, failure: failure)
+      )
+    )
+
+    await model.load()
+
+    #expect(model.statusComposition.notice == .stale(failure))
+    #expect(model.statusComposition.truth == .empty("No range data for this pod and window."))
+  }
+
+  @Test("Trace composes cached-offline notice with empty truth")
+  func traceOfflineEmptyComposition() async {
+    let model = TraceViewModel(
+      repository: AtlasWhalesFixture(
+        track: .cachedOffline(payload: .empty, metadata: metadata)
+      ),
+      selectedWhaleID: "J35"
+    )
+
+    await model.loadIfNeeded()
+
+    #expect(model.statusComposition(hasCatalog: true).notice == .offline)
+    #expect(
+      model.statusComposition(hasCatalog: true).truth
+        == .empty("No movement points were returned for this whale."))
+  }
+
+  @Test("Trace composes stale notice with sparse truth")
+  func traceStaleSparseComposition() async {
+    let failure = staleFailure()
+    let model = TraceViewModel(
+      repository: AtlasWhalesFixture(
+        track: .stale(
+          payload: .value([movement(id: "one", time: 100)]),
+          metadata: metadata,
+          failure: failure
+        )
+      ),
+      selectedWhaleID: "J35"
+    )
+
+    await model.loadIfNeeded()
+
+    #expect(model.statusComposition(hasCatalog: true).notice == .stale(failure))
+    #expect(
+      model.statusComposition(hasCatalog: true).truth
+        == .sparse("Not enough sightings yet to trace a movement pattern."))
+  }
+
+  @Test("Predict composes cached-offline notice with empty truth")
+  func predictOfflineEmptyComposition() async {
+    let model = PredictViewModel(
+      repository: AtlasPredictionFixture(
+        result: .cachedOffline(payload: .empty, metadata: metadata)
+      ))
+    model.subject = .pod(.j)
+
+    await model.loadIfNeeded()
+
+    #expect(model.statusComposition.notice == .offline)
+    #expect(
+      model.statusComposition.truth
+        == .empty("Not enough data to show a prediction for this subject and horizon."))
+  }
+
+  @Test("Predict composes stale notice with empty truth")
+  func predictStaleEmptyComposition() async {
+    let failure = staleFailure()
+    let model = PredictViewModel(
+      repository: AtlasPredictionFixture(
+        result: .stale(payload: .empty, metadata: metadata, failure: failure)
+      ))
+    model.subject = .pod(.j)
+
+    await model.loadIfNeeded()
+
+    #expect(model.statusComposition.notice == .stale(failure))
+    #expect(
+      model.statusComposition.truth
+        == .empty("Not enough data to show a prediction for this subject and horizon."))
+  }
+
+  @Test("Predict snapshot state preserves its selected subject and offline empty truth")
+  func predictInitialComposition() {
+    let model = PredictViewModel(
+      repository: AtlasPredictionFixture(
+        result: .cachedOffline(payload: .empty, metadata: metadata)
+      ),
+      initialState: .empty(notice: .offline, isRefreshing: false),
+      initialSubject: .pod(.j)
+    )
+
+    #expect(model.subject == .pod(.j))
+    #expect(model.statusComposition.notice == .offline)
+    #expect(model.statusComposition.truth != nil)
+  }
+
   @Test("Flowing dashed paths stop when Reduce Motion is enabled")
   func reducedMotionPath() {
     #expect(AnimatedPolylineLayer.dashPattern(drawComplete: true, reduceMotion: false) == [8, 6])
@@ -184,6 +325,15 @@ struct AtlasProductTests {
 
   private func whale(id: String, catalogID: String, pod: String) -> Whale {
     makeWhale(id: id, catalogId: catalogID, name: nil, ecotype: .resident, pod: pod)
+  }
+
+  private func staleFailure() -> BrowseFailure {
+    BrowseFailure(
+      code: "STALE",
+      message: "Showing saved Atlas data.",
+      retryable: true,
+      requestId: nil
+    )
   }
 }
 

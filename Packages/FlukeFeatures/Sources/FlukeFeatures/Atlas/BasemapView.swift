@@ -30,8 +30,8 @@ public struct BasemapView: View {
             .italic()
             .foregroundStyle(Color.abyss.opacity(opacity(for: feature.kind)))
             .position(
-              x: CGFloat(p.x) * geo.size.width,
-              y: CGFloat(p.y) * geo.size.height
+              x: CGFloat(p.x) * geo.size.width + labelOffset(for: feature.name).width,
+              y: CGFloat(p.y) * geo.size.height + labelOffset(for: feature.name).height
             )
         }
       }
@@ -67,6 +67,18 @@ public struct BasemapView: View {
     case "pass", "inlet": return 9
     case "point": return 8
     default: return 9
+    }
+  }
+
+  private func labelOffset(for name: String) -> CGSize {
+    switch name {
+    case "Haro Strait": CGSize(width: -42, height: -10)
+    case "Rosario Strait": CGSize(width: 48, height: -10)
+    case "San Juan Islands": CGSize(width: 0, height: 12)
+    case "Lime Kiln Point": CGSize(width: -46, height: 25)
+    case "Friday Harbor": CGSize(width: 42, height: 27)
+    case "Possession Sound": CGSize(width: -26, height: 0)
+    default: .zero
     }
   }
 

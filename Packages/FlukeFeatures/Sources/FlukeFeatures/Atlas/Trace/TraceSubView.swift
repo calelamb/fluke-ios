@@ -6,18 +6,37 @@ public struct TraceSubView: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var viewModel: TraceViewModel
   public let catalog: [Whale]
+  private let loadsAutomatically: Bool
 
   public init(
     repository: any WhalesRepositoryProtocol,
     catalog: [Whale],
     initialWhaleID: String? = nil
   ) {
+    self.init(
+      repository: repository,
+      catalog: catalog,
+      initialWhaleID: initialWhaleID,
+      initialState: .idle,
+      loadsAutomatically: true
+    )
+  }
+
+  init(
+    repository: any WhalesRepositoryProtocol,
+    catalog: [Whale],
+    initialWhaleID: String? = nil,
+    initialState: BrowseViewState<[MovementTrackPoint]>,
+    loadsAutomatically: Bool
+  ) {
     _viewModel = State(
       initialValue: TraceViewModel(
         repository: repository,
-        selectedWhaleID: initialWhaleID
+        selectedWhaleID: initialWhaleID,
+        initialState: initialState
       ))
     self.catalog = catalog
+    self.loadsAutomatically = loadsAutomatically
   }
 
   public var body: some View {
@@ -59,6 +78,7 @@ public struct TraceSubView: View {
       }
     }
     .task(id: catalog.first?.id) {
+      guard loadsAutomatically else { return }
       if viewModel.selectedWhaleId == nil {
         viewModel.selectedWhaleId = catalog.first?.id
         return
@@ -66,6 +86,7 @@ public struct TraceSubView: View {
       await viewModel.loadIfNeeded()
     }
     .onChange(of: viewModel.selectedWhaleId) { _, _ in
+      guard loadsAutomatically else { return }
       Task { await viewModel.loadIfNeeded() }
     }
   }
@@ -124,31 +145,24 @@ public struct TraceSubView: View {
 
   @ViewBuilder
   private var stateMessage: some View {
-    if catalog.isEmpty {
-      Text("The whale catalog is unavailable for trace selection.")
-        .font(.flukeBody)
-        .padding(12)
-        .background(Color.bone.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
-    } else if let notice = viewModel.state.notice {
+    let composition = viewModel.statusComposition(hasCatalog: !catalog.isEmpty)
+    if let notice = composition.notice {
       switch notice {
       case .offline: BrowseStatusView(kind: .offline) { Task { await viewModel.retry() } }
       case .stale(let failure):
         BrowseStatusView(kind: .stale(failure)) { Task { await viewModel.retry() } }
       }
-    } else if let failure = viewModel.state.failure {
+    }
+    if let failure = viewModel.state.failure {
       BrowseStatusView(kind: .failure(failure)) { Task { await viewModel.retry() } }
     } else if viewModel.state.isLoading {
       ProgressView("Loading movement trace").padding(12).background(Color.bone, in: Capsule())
-    } else if viewModel.isSparse {
-      Text("Not enough sightings yet to trace a movement pattern.")
+    } else if let truth = composition.truth {
+      Text(truth.message)
         .font(.flukeBody)
         .padding(12)
         .background(Color.bone.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
-    } else if viewModel.points.isEmpty, viewModel.selectedWhaleId != nil {
-      Text("No movement points were returned for this whale.")
-        .font(.flukeBody)
-        .padding(12)
-        .background(Color.bone.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier("atlas.trace.truth")
     }
   }
 }

@@ -6,10 +6,33 @@ public struct PredictSubView: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var viewModel: PredictViewModel
   private let catalog: [Whale]
+  private let loadsAutomatically: Bool
 
   public init(repository: any PredictionRepositoryProtocol, catalog: [Whale] = []) {
-    _viewModel = State(initialValue: PredictViewModel(repository: repository))
+    self.init(
+      repository: repository,
+      catalog: catalog,
+      initialState: .idle,
+      initialSubject: nil,
+      loadsAutomatically: true
+    )
+  }
+
+  init(
+    repository: any PredictionRepositoryProtocol,
+    catalog: [Whale],
+    initialState: BrowseViewState<Prediction?>,
+    initialSubject: PredictViewModel.Subject?,
+    loadsAutomatically: Bool
+  ) {
+    _viewModel = State(
+      initialValue: PredictViewModel(
+        repository: repository,
+        initialState: initialState,
+        initialSubject: initialSubject
+      ))
     self.catalog = catalog
+    self.loadsAutomatically = loadsAutomatically
   }
 
   public var body: some View {
@@ -35,6 +58,7 @@ public struct PredictSubView: View {
       }
     }
     .task {
+      guard loadsAutomatically else { return }
       if viewModel.subject == nil { viewModel.subject = .pod(.j) }
       await viewModel.loadIfNeeded()
     }
@@ -112,21 +136,23 @@ public struct PredictSubView: View {
 
   @ViewBuilder
   private var stateMessage: some View {
-    if let notice = viewModel.state.notice {
+    if let notice = viewModel.statusComposition.notice {
       switch notice {
       case .offline: BrowseStatusView(kind: .offline) { Task { await viewModel.retry() } }
       case .stale(let failure):
         BrowseStatusView(kind: .stale(failure)) { Task { await viewModel.retry() } }
       }
-    } else if let failure = viewModel.state.failure {
+    }
+    if let failure = viewModel.state.failure {
       BrowseStatusView(kind: .failure(failure)) { Task { await viewModel.retry() } }
     } else if viewModel.state.isLoading {
       ProgressView("Loading prediction").padding(12).background(Color.bone, in: Capsule())
-    } else if viewModel.isEmpty {
-      Text("Not enough data to show a prediction for this subject and horizon.")
+    } else if let truth = viewModel.statusComposition.truth {
+      Text(truth.message)
         .font(.flukeBody)
         .padding(12)
         .background(Color.bone.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier("atlas.predict.truth")
     }
   }
 

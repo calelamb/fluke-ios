@@ -22,6 +22,19 @@ public final class TimelineViewModel {
     self.now = now
   }
 
+  init(
+    repository: any HistoricalSightingsRepositoryProtocol,
+    now: @escaping () -> Date = Date.init,
+    initialState: BrowseViewState<[HistoricalSighting]>
+  ) {
+    self.repository = repository
+    self.now = now
+    state = initialState
+    if let last = initialState.value?.max(by: { $0.observedAt < $1.observedAt }) {
+      scrubberDate = last.observedAt
+    }
+  }
+
   public func load() async {
     loadGeneration += 1
     let generation = loadGeneration
@@ -92,6 +105,23 @@ public final class TimelineViewModel {
 
   public func podCounts(catalog: [Whale]) -> [Pod: Int] {
     tracks(catalog: catalog).mapValues(\.count)
+  }
+
+  public var statusComposition: AtlasStatusComposition {
+    AtlasStatusComposition(
+      notice: state.notice,
+      truth: hasConfirmedEmpty
+        ? .empty("No historical sightings in this window.")
+        : nil
+    )
+  }
+
+  private var hasConfirmedEmpty: Bool {
+    switch state {
+    case .empty: true
+    case .content(let sightings, _, _): sightings.isEmpty
+    case .idle, .loading, .failed: false
+    }
   }
 
   private func pod(for whale: Whale) -> Pod? {

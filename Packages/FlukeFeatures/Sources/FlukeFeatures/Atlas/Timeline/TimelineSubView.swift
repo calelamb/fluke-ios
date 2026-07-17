@@ -6,13 +6,30 @@ public struct TimelineSubView: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var viewModel: TimelineViewModel
   public let catalog: [Whale]
+  private let loadsAutomatically: Bool
 
   public init(
     repository: any HistoricalSightingsRepositoryProtocol,
     catalog: [Whale]
   ) {
-    _viewModel = State(initialValue: TimelineViewModel(repository: repository))
+    self.init(
+      repository: repository,
+      catalog: catalog,
+      initialState: .idle,
+      loadsAutomatically: true
+    )
+  }
+
+  init(
+    repository: any HistoricalSightingsRepositoryProtocol,
+    catalog: [Whale],
+    initialState: BrowseViewState<[HistoricalSighting]>,
+    loadsAutomatically: Bool
+  ) {
+    _viewModel = State(
+      initialValue: TimelineViewModel(repository: repository, initialState: initialState))
     self.catalog = catalog
+    self.loadsAutomatically = loadsAutomatically
   }
 
   public var body: some View {
@@ -47,7 +64,10 @@ public struct TimelineSubView: View {
         .padding(.bottom, 12)
       }
     }
-    .task { await viewModel.load() }
+    .task {
+      guard loadsAutomatically else { return }
+      await viewModel.load()
+    }
   }
 
   private var tracks: some View {
@@ -69,10 +89,15 @@ public struct TimelineSubView: View {
   private var podFilters: some View {
     Group {
       if dynamicTypeSize.isAccessibilitySize {
-        Menu("Visible pods") {
+        LazyVGrid(
+          columns: [
+            GridItem(.flexible(minimum: 96), spacing: 8),
+            GridItem(.flexible(minimum: 96), spacing: 8),
+          ],
+          spacing: 8
+        ) {
           podFilterButtons
         }
-        .frame(minHeight: 44)
       } else {
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 8) { podFilterButtons }
@@ -98,21 +123,23 @@ public struct TimelineSubView: View {
 
   @ViewBuilder
   private var stateMessage: some View {
-    if let notice = viewModel.state.notice {
+    if let notice = viewModel.statusComposition.notice {
       switch notice {
       case .offline: BrowseStatusView(kind: .offline) { Task { await viewModel.retry() } }
       case .stale(let failure):
         BrowseStatusView(kind: .stale(failure)) { Task { await viewModel.retry() } }
       }
-    } else if let failure = viewModel.state.failure {
+    }
+    if let failure = viewModel.state.failure {
       BrowseStatusView(kind: .failure(failure)) { Task { await viewModel.retry() } }
     } else if viewModel.state.isLoading {
       ProgressView("Loading timeline").padding(12).background(Color.bone, in: Capsule())
-    } else if viewModel.historicalSightings.isEmpty {
-      Text("No historical sightings in this window.")
+    } else if let truth = viewModel.statusComposition.truth {
+      Text(truth.message)
         .font(.flukeBody)
         .padding(12)
         .background(Color.bone.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier("atlas.timeline.truth")
     }
   }
 }

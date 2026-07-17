@@ -32,6 +32,16 @@ public final class PredictViewModel {
     self.predictions = repository
   }
 
+  init(
+    repository: any PredictionRepositoryProtocol,
+    initialState: BrowseViewState<Prediction?>,
+    initialSubject: Subject?
+  ) {
+    self.predictions = repository
+    subject = initialSubject
+    state = initialState
+  }
+
   public func loadIfNeeded() async {
     guard let subject else {
       state = .idle
@@ -68,6 +78,23 @@ public final class PredictViewModel {
     if case .empty = state { return true }
     if case .content(nil, _, _) = state { return true }
     return false
+  }
+
+  public var statusComposition: AtlasStatusComposition {
+    AtlasStatusComposition(
+      notice: state.notice,
+      truth: isConfirmedEmpty
+        ? .empty("Not enough data to show a prediction for this subject and horizon.")
+        : nil
+    )
+  }
+
+  private var isConfirmedEmpty: Bool {
+    switch state {
+    case .empty: true
+    case .content(let prediction, _, _): prediction == nil
+    case .idle, .loading, .failed: false
+    }
   }
 
   private func invalidateQueryState() {

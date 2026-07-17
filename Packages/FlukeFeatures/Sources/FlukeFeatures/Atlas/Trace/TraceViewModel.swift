@@ -28,6 +28,21 @@ public final class TraceViewModel {
     self.now = now
   }
 
+  init(
+    repository: any WhalesRepositoryProtocol,
+    selectedWhaleID: String? = nil,
+    now: @escaping () -> Date = Date.init,
+    initialState: BrowseViewState<[MovementTrackPoint]>
+  ) {
+    self.whales = repository
+    self.selectedWhaleId = selectedWhaleID
+    self.now = now
+    state = initialState
+    if let last = initialState.value?.max(by: { $0.observedAt < $1.observedAt }) {
+      scrubberDate = last.observedAt
+    }
+  }
+
   public func loadIfNeeded() async {
     guard let id = selectedWhaleId else {
       state = .idle
@@ -77,6 +92,29 @@ public final class TraceViewModel {
     }
     return
       "Historical trace for \(subject) through \(scrubberDate.formatted(date: .abbreviated, time: .omitted)): \(count) \(noun)."
+  }
+
+  public func statusComposition(hasCatalog: Bool) -> AtlasStatusComposition {
+    let truth: AtlasModeTruth?
+    if !hasCatalog {
+      truth = .empty("The whale catalog is unavailable for trace selection.")
+    } else if isSparse {
+      truth = .sparse("Not enough sightings yet to trace a movement pattern.")
+    } else if hasConfirmedEmpty {
+      truth = .empty("No movement points were returned for this whale.")
+    } else {
+      truth = nil
+    }
+    return AtlasStatusComposition(notice: state.notice, truth: truth)
+  }
+
+  private var hasConfirmedEmpty: Bool {
+    guard selectedWhaleId != nil else { return false }
+    return switch state {
+    case .empty: true
+    case .content(let points, _, _): points.isEmpty
+    case .idle, .loading, .failed: false
+    }
   }
 
   private static func sorted(

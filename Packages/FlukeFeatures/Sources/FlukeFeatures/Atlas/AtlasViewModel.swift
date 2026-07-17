@@ -19,6 +19,27 @@ public enum AtlasProjection {
   }
 }
 
+public struct AtlasStatusComposition: Equatable, Sendable {
+  public let notice: BrowseNotice?
+  public let truth: AtlasModeTruth?
+
+  public init(notice: BrowseNotice?, truth: AtlasModeTruth?) {
+    self.notice = notice
+    self.truth = truth
+  }
+}
+
+public enum AtlasModeTruth: Equatable, Sendable {
+  case empty(String)
+  case sparse(String)
+
+  public var message: String {
+    switch self {
+    case .empty(let message), .sparse(let message): message
+    }
+  }
+}
+
 @MainActor
 @Observable
 public final class AtlasViewModel {

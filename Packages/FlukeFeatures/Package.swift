@@ -25,7 +25,8 @@ let package = Package(
         .testTarget(
             name: "FlukeFeaturesTests",
             dependencies: ["FlukeFeatures"],
-            path: "Tests/FlukeFeaturesTests"
+            path: "Tests/FlukeFeaturesTests",
+            exclude: ["__Snapshots__"]
         ),
     ]
 )

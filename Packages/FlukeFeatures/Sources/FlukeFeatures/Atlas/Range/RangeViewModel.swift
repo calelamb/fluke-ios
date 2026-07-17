@@ -63,6 +63,16 @@ public final class RangeViewModel {
     self.now = now
   }
 
+  init(
+    repository: any HistoricalSightingsRepositoryProtocol,
+    now: @escaping () -> Date = Date.init,
+    initialState: BrowseViewState<[HistoricalSighting]>
+  ) {
+    self.repository = repository
+    self.now = now
+    state = initialState
+  }
+
   public func load() async {
     loadGeneration += 1
     let generation = loadGeneration
@@ -135,6 +145,23 @@ public final class RangeViewModel {
     let noun = total == 1 ? "sighting" : "sightings"
     return
       "Historical range for \(selectedPod.displayName), \(monthSummary): \(total) \(noun) in \(heatmap.count) map cells."
+  }
+
+  public var statusComposition: AtlasStatusComposition {
+    AtlasStatusComposition(
+      notice: state.notice,
+      truth: hasConfirmedEmpty
+        ? .empty("No range data for this pod and window.")
+        : nil
+    )
+  }
+
+  private var hasConfirmedEmpty: Bool {
+    switch state {
+    case .empty: true
+    case .content(let sightings, _, _): sightings.isEmpty
+    case .idle, .loading, .failed: false
+    }
   }
 
   private func invalidateQueryState() {

@@ -5,9 +5,20 @@ import SwiftUI
 public struct RangeSubView: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var viewModel: RangeViewModel
+  private let loadsAutomatically: Bool
 
   public init(repository: any HistoricalSightingsRepositoryProtocol) {
-    _viewModel = State(initialValue: RangeViewModel(repository: repository))
+    self.init(repository: repository, initialState: .idle, loadsAutomatically: true)
+  }
+
+  init(
+    repository: any HistoricalSightingsRepositoryProtocol,
+    initialState: BrowseViewState<[HistoricalSighting]>,
+    loadsAutomatically: Bool
+  ) {
+    _viewModel = State(
+      initialValue: RangeViewModel(repository: repository, initialState: initialState))
+    self.loadsAutomatically = loadsAutomatically
   }
 
   public var body: some View {
@@ -31,8 +42,12 @@ public struct RangeSubView: View {
         .padding(.bottom, 12)
       }
     }
-    .task { await viewModel.load() }
+    .task {
+      guard loadsAutomatically else { return }
+      await viewModel.load()
+    }
     .onChange(of: viewModel.selectedPod) { _, _ in
+      guard loadsAutomatically else { return }
       Task { await viewModel.load() }
     }
   }
@@ -116,21 +131,23 @@ public struct RangeSubView: View {
 
   @ViewBuilder
   private var stateMessage: some View {
-    if let notice = viewModel.state.notice {
+    if let notice = viewModel.statusComposition.notice {
       switch notice {
       case .offline: BrowseStatusView(kind: .offline) { Task { await viewModel.retry() } }
       case .stale(let failure):
         BrowseStatusView(kind: .stale(failure)) { Task { await viewModel.retry() } }
       }
-    } else if let failure = viewModel.state.failure {
+    }
+    if let failure = viewModel.state.failure {
       BrowseStatusView(kind: .failure(failure)) { Task { await viewModel.retry() } }
     } else if viewModel.state.isLoading {
       ProgressView("Loading range").padding(12).background(Color.bone, in: Capsule())
-    } else if viewModel.sightings.isEmpty {
-      Text("No range data for this pod and window.")
+    } else if let truth = viewModel.statusComposition.truth {
+      Text(truth.message)
         .font(.flukeBody)
         .padding(12)
         .background(Color.bone.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier("atlas.range.truth")
     }
   }
 
