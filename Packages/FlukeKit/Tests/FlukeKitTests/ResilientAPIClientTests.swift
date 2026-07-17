@@ -115,18 +115,17 @@ struct ResilientAPIClientTests {
             transport: transport,
             requestTimeout: .milliseconds(10)
         )
-        Task {
-            try await Task.sleep(for: .milliseconds(500))
+        let safetyRelease = Task {
+            try await Task.sleep(for: .seconds(5))
             await transport.release()
         }
-        let clock = ContinuousClock()
-        let startedAt = clock.now
 
         await #expect(throws: APIError.timeout) {
             let _: HealthResponse = try await client.get("/api/v1/health")
         }
 
-        #expect(startedAt.duration(to: clock.now) < .milliseconds(100))
+        #expect(await transport.wasReleased == false)
+        safetyRelease.cancel()
         await transport.release()
     }
 
@@ -152,6 +151,7 @@ struct ResilientAPIClientTests {
 
 private actor IgnoringCancellationTransport: HTTPTransport {
     private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Never>?
+    private(set) var wasReleased = false
 
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         await withCheckedContinuation { continuation in
@@ -160,6 +160,7 @@ private actor IgnoringCancellationTransport: HTTPTransport {
     }
 
     func release() {
+        wasReleased = true
         continuation?.resume(returning: (
             Data(#"{"status":"ok","timestamp":"2026-07-16T00:00:00.000Z"}"#.utf8),
             HTTPURLResponse(
