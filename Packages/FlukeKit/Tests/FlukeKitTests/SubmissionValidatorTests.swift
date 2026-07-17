@@ -44,8 +44,11 @@ struct SubmissionValidatorTests {
     #expect(throws: SubmissionValidationError.photos) {
       try SubmissionValidator.validate(.fixture(photoCount: 6))
     }
-    let payload = try SubmissionValidator.validate(.fixture(groupSize: 200, photoCount: 1))
-    #expect(payload.groupSize == 200)
+    let payload = try SubmissionValidator.validate(.fixture(groupSize: 100, photoCount: 1))
+    #expect(payload.groupSize == 100)
+    #expect(throws: SubmissionValidationError.groupSize) {
+      try SubmissionValidator.validate(.fixture(groupSize: 101))
+    }
   }
 }
 

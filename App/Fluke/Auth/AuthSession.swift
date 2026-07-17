@@ -141,6 +141,7 @@ final class AuthSession {
   }
 
   var isAuthenticated: Bool { signedInUser != nil }
+  var authenticatedEmail: String? { signedInUser?.email }
 
   private func presentationError(for error: Error) -> AuthPresentationError {
     if error as? AuthServiceError == .invalidAppleCredential {

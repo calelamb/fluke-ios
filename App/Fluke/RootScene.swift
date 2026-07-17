@@ -168,6 +168,7 @@ struct RootScene: View {
         service: environment.submissionService,
         queue: environment.submissionQueue,
         isSignedIn: authSession.isAuthenticated,
+        signedInObserverEmail: authSession.authenticatedEmail,
         submissionsEnabled: submissionsAvailable
       ))
       .presentationDetents([.large])

@@ -32,17 +32,20 @@ public final class SubmitViewModel {
   private let service: any SubmissionServiceProtocol
   private let queue: any SubmissionQueueProtocol
   private let isSignedIn: Bool
+  private let signedInObserverEmail: String?
   private let submissionsEnabled: Bool
 
   public init(
     service: any SubmissionServiceProtocol,
     queue: any SubmissionQueueProtocol,
     isSignedIn: Bool = false,
+    signedInObserverEmail: String? = nil,
     submissionsEnabled: Bool = true
   ) {
     self.service = service
     self.queue = queue
     self.isSignedIn = isSignedIn
+    self.signedInObserverEmail = signedInObserverEmail
     self.submissionsEnabled = submissionsEnabled
   }
 
@@ -72,8 +75,8 @@ public final class SubmitViewModel {
       payload = try SubmissionValidator.validate(SubmissionDraft(
         latitude: latitude, longitude: longitude, observedAt: observedAt,
         groupSize: groupSize, notes: notes, locationName: locationName,
-        observerEmail: isSignedIn ? nil : email, photoCount: photos.count
-      ), requiresObserverEmail: !isSignedIn)
+        observerEmail: isSignedIn ? signedInObserverEmail : email, photoCount: photos.count
+      ))
     } catch let error as SubmissionValidationError {
       state = .validation(error)
       return

@@ -7,6 +7,7 @@ public protocol SubmissionServiceProtocol: Sendable {
 
 public enum SubmissionServiceError: Error, Equatable, Sendable {
   case invalidPhotos
+  case missingObserverEmail
   case partial(receipt: SubmissionReceipt, failedPhotoIndices: [Int])
 }
 
@@ -18,6 +19,8 @@ public enum SubmissionUploadLimits {
 }
 
 public struct SubmissionService: SubmissionServiceProtocol, Sendable {
+  /// Photo POSTs use `Idempotency-Key: <clientSubmissionId>:<photoIdempotencyUUID>`.
+  /// The API photo route must deduplicate this key within the parent sighting.
   private let api: APIClient
 
   public init(api: APIClient) { self.api = api }
@@ -37,9 +40,12 @@ public struct SubmissionService: SubmissionServiceProtocol, Sendable {
     if let existingReceipt = payload.existingReceipt {
       receipt = existingReceipt
     } else {
+      guard let request = SubmitSightingRequest(payload: payload) else {
+        throw SubmissionServiceError.missingObserverEmail
+      }
       receipt = try await api.post(
         APIRequest(path: "/api/v1/sightings"),
-        body: payload,
+        body: request,
         headers: ["Idempotency-Key": payload.clientSubmissionID.uuidString]
       )
     }
@@ -72,3 +78,30 @@ public struct SubmissionService: SubmissionServiceProtocol, Sendable {
 }
 
 private struct EmptySubmissionResponse: Decodable, Sendable {}
+
+/// Exact wire DTO for `SubmitSightingPayloadSchema`. Queue-only receipt and
+/// photo-count fields must never cross this boundary.
+private struct SubmitSightingRequest: Encodable, Sendable {
+  let clientSubmissionId: UUID
+  let observedAt: String
+  let latitude: Double
+  let longitude: Double
+  let locationName: String?
+  let groupSize: Int?
+  let behaviorNotes: String?
+  let observerEmail: String
+
+  init?(payload: SubmissionPayload) {
+    guard let observerEmail = payload.observerEmail else { return nil }
+    clientSubmissionId = payload.clientSubmissionID
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    observedAt = formatter.string(from: payload.observedAt)
+    latitude = payload.latitude
+    longitude = payload.longitude
+    locationName = payload.locationName
+    groupSize = payload.groupSize
+    behaviorNotes = payload.notes
+    self.observerEmail = observerEmail
+  }
+}

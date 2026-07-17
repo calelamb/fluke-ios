@@ -41,7 +41,7 @@ public struct SubmitView: View {
       LocationPickerView(latitude: $model.latitude, longitude: $model.longitude)
       TextField("Location name", text: $model.locationName)
       DatePicker("Observed", selection: $model.observedAt)
-      Stepper("Group size: \(model.groupSize)", value: $model.groupSize, in: 1...200)
+      Stepper("Group size: \(model.groupSize)", value: $model.groupSize, in: 1...100)
       if model.showsObserverEmail {
         TextField("Observer email", text: $model.email).textContentType(.emailAddress)
       }

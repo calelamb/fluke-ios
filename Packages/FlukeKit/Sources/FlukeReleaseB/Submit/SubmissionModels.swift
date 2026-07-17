@@ -140,6 +140,23 @@ public struct SubmissionReceipt: Codable, Hashable, Sendable {
 
   enum CodingKeys: String, CodingKey {
     case id
-    case photoUploadToken = "photo_upload_token"
+    case photoUploadToken
+    case legacyPhotoUploadToken = "photo_upload_token"
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(String.self, forKey: .id)
+    if let token = try container.decodeIfPresent(String.self, forKey: .photoUploadToken) {
+      photoUploadToken = token
+    } else {
+      photoUploadToken = try container.decode(String.self, forKey: .legacyPhotoUploadToken)
+    }
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(id, forKey: .id)
+    try container.encode(photoUploadToken, forKey: .photoUploadToken)
   }
 }

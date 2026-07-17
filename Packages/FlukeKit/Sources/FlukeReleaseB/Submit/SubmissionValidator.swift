@@ -22,7 +22,7 @@ public enum SubmissionValidator {
     guard draft.observedAt <= now.addingTimeInterval(300) else {
       throw SubmissionValidationError.observedAt
     }
-    guard (1...200).contains(draft.groupSize) else { throw SubmissionValidationError.groupSize }
+    guard (1...100).contains(draft.groupSize) else { throw SubmissionValidationError.groupSize }
     guard bounded(draft.notes, maximum: 2_000) else { throw SubmissionValidationError.notes }
     guard bounded(draft.locationName, maximum: 200) else {
       throw SubmissionValidationError.locationName

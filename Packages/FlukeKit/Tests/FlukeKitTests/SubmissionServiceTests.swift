@@ -8,7 +8,7 @@ struct SubmissionServiceTests {
   @Test("Creates one sighting then uploads photos with the receipt token")
   func createsThenUploads() async throws {
     let transport = SubmissionTransport(responses: [
-      .json(201, #"{"id":"s-1","photo_upload_token":"token-1"}"#),
+      .json(201, #"{"ok":true,"id":"s-1","photoUploadToken":"token-1"}"#),
       .json(201, "{}"),
       .json(201, "{}"),
     ])
@@ -27,6 +27,18 @@ struct SubmissionServiceTests {
     ])
     #expect(requests.dropFirst().allSatisfy { $0.value(forHTTPHeaderField: "x-photo-upload-token") == "token-1" })
     #expect(requests.first?.value(forHTTPHeaderField: "Idempotency-Key") == payload.clientSubmissionID.uuidString)
+    let body = try #require(requests.first?.httpBody)
+    let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+    #expect(Set(json.keys) == [
+      "clientSubmissionId", "observedAt", "latitude", "longitude", "locationName",
+      "groupSize", "behaviorNotes", "observerEmail",
+    ])
+    #expect(json["clientSubmissionId"] as? String == payload.clientSubmissionID.uuidString)
+    #expect(json["observedAt"] as? String == "2023-11-14T22:13:20.000Z")
+    #expect(json["behaviorNotes"] as? String == "Traveling north")
+    #expect(json["observerEmail"] as? String == "observer@example.com")
+    #expect(json["photoCount"] == nil)
+    #expect(json["existingReceipt"] == nil)
     #expect(requests[1].value(forHTTPHeaderField: "Idempotency-Key") == "\(payload.clientSubmissionID.uuidString):11111111-1111-1111-1111-111111111111")
     #expect(requests[2].value(forHTTPHeaderField: "Idempotency-Key") == "\(payload.clientSubmissionID.uuidString):22222222-2222-2222-2222-222222222222")
   }
@@ -34,7 +46,7 @@ struct SubmissionServiceTests {
   @Test("Partial photo retry skips sighting creation and reports only failed indices")
   func partialRetryIsIdempotent() async throws {
     let firstTransport = SubmissionTransport(responses: [
-      .json(201, #"{"id":"s-1","photo_upload_token":"token-1"}"#),
+      .json(201, #"{"ok":true,"id":"s-1","photoUploadToken":"token-1"}"#),
       .json(201, "{}"),
       .json(503, #"{"error":"try later"}"#),
     ])
@@ -71,7 +83,7 @@ struct SubmissionServiceTests {
   @Test("Processed photo limit reserves enough bytes for multipart framing")
   func multipartBoundaryFitsMutationLimit() async throws {
     let transport = SubmissionTransport(responses: [
-      .json(201, #"{"id":"s-1","photo_upload_token":"token-1"}"#),
+      .json(201, #"{"ok":true,"id":"s-1","photoUploadToken":"token-1"}"#),
       .json(201, "{}"),
     ])
     let service = SubmissionService(api: APIClient(

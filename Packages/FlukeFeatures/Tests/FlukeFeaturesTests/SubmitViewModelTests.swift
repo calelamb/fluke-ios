@@ -29,15 +29,20 @@ struct SubmitViewModelTests {
     #expect(model.dismissal == .requiresConfirmation)
   }
 
-  @Test("Signed-in submit omits email while anonymous validates it")
+  @Test("Signed-in submit uses hidden account email while anonymous validates it")
   func authEmailBehavior() async {
     let service = SubmitService()
-    let signedIn = SubmitViewModel(service: service, queue: RecordingSubmissionQueue(), isSignedIn: true)
+    let signedIn = SubmitViewModel(
+      service: service,
+      queue: RecordingSubmissionQueue(),
+      isSignedIn: true,
+      signedInObserverEmail: "account@example.com"
+    )
     signedIn.email = "bad"
     signedIn.photos = [.fixture]
     await signedIn.submit()
     #expect(signedIn.state == .success)
-    #expect(await service.payloads.first?.observerEmail == nil)
+    #expect(await service.payloads.first?.observerEmail == "account@example.com")
 
     let anonymous = SubmitViewModel(service: SubmitService(), queue: RecordingSubmissionQueue())
     anonymous.email = "bad"
