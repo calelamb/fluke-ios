@@ -72,6 +72,11 @@ public final class SubmitViewModel {
     submissionsEnabled ? nil : "Sighting submissions are temporarily unavailable."
   }
 
+  public var failureMessage: String? {
+    guard case .failed(let message) = state else { return nil }
+    return message
+  }
+
   public func addPhotos(_ additions: [ProcessedPhoto]) {
     photos = Array((photos + additions).reduce([ProcessedPhoto]()) { unique, photo in
       guard !unique.contains(where: {

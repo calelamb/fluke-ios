@@ -35,14 +35,33 @@ if info.get("ITSAppUsesNonExemptEncryption") is not False:
     raise SystemExit("ITSAppUsesNonExemptEncryption must be false")
 
 privacy = load_plist(privacy_path)
+expected_types = [
+    "NSPrivacyCollectedDataTypeEmailAddress",
+    "NSPrivacyCollectedDataTypeName",
+    "NSPrivacyCollectedDataTypePhotosorVideos",
+    "NSPrivacyCollectedDataTypeCoarseLocation",
+    "NSPrivacyCollectedDataTypeUserID",
+    "NSPrivacyCollectedDataTypeOtherUserContent",
+]
+expected_collected_data = [
+    {
+        "NSPrivacyCollectedDataType": data_type,
+        "NSPrivacyCollectedDataTypeLinked": True,
+        "NSPrivacyCollectedDataTypePurposes": [
+            "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+        ],
+        "NSPrivacyCollectedDataTypeTracking": False,
+    }
+    for data_type in expected_types
+]
 expected_privacy = {
     "NSPrivacyTracking": False,
     "NSPrivacyTrackingDomains": [],
-    "NSPrivacyCollectedDataTypes": [],
+    "NSPrivacyCollectedDataTypes": expected_collected_data,
     "NSPrivacyAccessedAPITypes": [],
 }
 if privacy != expected_privacy:
-    raise SystemExit("PrivacyInfo.xcprivacy must declare no tracking, collection, or required-reason API access")
+    raise SystemExit("PrivacyInfo.xcprivacy must declare the complete linked app-functionality data set with no tracking or required-reason API access")
 
 try:
     with open(metadata_path, encoding="utf-8") as source:
@@ -75,12 +94,15 @@ if metadata["privacyURL"] != "https://fluke-pnw.vercel.app/privacy":
 release_copy = " ".join(
     str(metadata[key]) for key in ("description", "promotionalText", "whatsNew", "reviewNotes")
 ).lower()
-for forbidden in ("sign in to", "create an account", "submit a sighting", "photo identification is available"):
+for forbidden in ("read-only", "four tabs", "photo identification is available"):
     if forbidden in release_copy:
-        raise SystemExit(f"metadata makes a Release B promise: {forbidden}")
-for required in ("read-only", "sightings", "whales", "learn", "atlas"):
+        raise SystemExit(f"metadata contains stale or unsupported launch copy: {forbidden}")
+for required in (
+    "accounts are optional", "submit", "moderation", "queued", "training",
+    "rights-cleared", "sightings", "whales", "identify", "learn", "you", "atlas",
+):
     if required not in release_copy:
-        raise SystemExit(f"metadata is missing Release A scope: {required}")
+        raise SystemExit(f"metadata is missing full-launch scope: {required}")
 
 with open(license_path, encoding="utf-8") as source:
     license_text = source.read()

@@ -44,14 +44,32 @@ try:
         privacy = plistlib.load(source)
 except (OSError, plistlib.InvalidFileException) as error:
     raise SystemExit(f"invalid archived privacy manifest: {error}")
+expected_types = [
+    "NSPrivacyCollectedDataTypeEmailAddress",
+    "NSPrivacyCollectedDataTypeName",
+    "NSPrivacyCollectedDataTypePhotosorVideos",
+    "NSPrivacyCollectedDataTypeCoarseLocation",
+    "NSPrivacyCollectedDataTypeUserID",
+    "NSPrivacyCollectedDataTypeOtherUserContent",
+]
 expected_privacy = {
     "NSPrivacyTracking": False,
     "NSPrivacyTrackingDomains": [],
-    "NSPrivacyCollectedDataTypes": [],
+    "NSPrivacyCollectedDataTypes": [
+        {
+            "NSPrivacyCollectedDataType": data_type,
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ],
+            "NSPrivacyCollectedDataTypeTracking": False,
+        }
+        for data_type in expected_types
+    ],
     "NSPrivacyAccessedAPITypes": [],
 }
 if privacy != expected_privacy:
-    raise SystemExit("archived privacy manifest does not match Release A data use")
+    raise SystemExit("archived privacy manifest does not match the full launch data use")
 
 license_paths = []
 for directory, _, filenames in os.walk(app_path):

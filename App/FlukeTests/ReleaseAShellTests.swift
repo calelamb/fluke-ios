@@ -1,6 +1,7 @@
 import FlukeKit
 import FlukeUI
 import Foundation
+import SwiftUI
 import Testing
 import UIKit
 
@@ -25,6 +26,11 @@ struct ReleaseAShellTests {
     _ = FlukeApp()
 
     #expect(UIFont(name: "Fraunces", size: 24) != nil)
+  }
+
+  @Test("The fixed PNW palette always launches with legible light system chrome")
+  func launchAppearance() {
+    #expect(FlukeApp.preferredColorScheme == .light)
   }
 
   @Test("The app environment accepts one isolated browse cache")

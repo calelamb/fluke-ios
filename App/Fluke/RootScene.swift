@@ -56,6 +56,7 @@ struct RootScene: View {
   @State private var atlasRouteRevision = 0
   @State private var isAtlasPresented = false
   @State private var isQueueFlushInFlight = false
+  @State private var isCapabilityRefreshInFlight = false
 
   init(environment: AppEnvironment) {
     let submissionQueue = DeferredSubmissionQueueBridge(queue: environment.submissionQueue)
@@ -165,25 +166,18 @@ struct RootScene: View {
         Task { await flushQueuedSubmissions() }
       }
       networkMonitor.start(queue: DispatchQueue(label: "app.fluke.Fluke.submission-network"))
-      let loadedCapabilities = await LaunchCapabilityState.load(
-        using: environment.fetchCapabilities
-      )
-      capabilities = loadedCapabilities
-      identifyService = IdentifyComposition.resolve(
-        enabled: loadedCapabilities.identificationEnabled,
-        factory: environment.identifyServiceFactory
-      )
-      if accountAvailability == .enabled {
-        await authSession.restore()
-      } else {
-        authSession.expire()
-      }
+      await refreshCapabilities()
     }
     .onChange(of: scenePhase) { _, phase in
-      if phase == .active { Task { await flushQueuedSubmissions() } }
+      guard phase == .active else { return }
+      Task {
+        await flushQueuedSubmissions()
+        if capabilities == .unavailable { await refreshCapabilities() }
+      }
     }
     .onDisappear { networkMonitor.cancel() }
     .environment(\.launchCapabilities, capabilities)
+    .environment(\.locationPickerPresentation, locationPickerPresentation)
     .environment(\.openAtlas) { whaleID in
       presentAtlas(for: whaleID)
     }
@@ -195,9 +189,11 @@ struct RootScene: View {
           queue: environment.submissionQueue,
           isSignedIn: authSession.isAuthenticated,
           signedInObserverEmail: authSession.authenticatedEmail,
-          submissionsEnabled: route.submissionsEnabled
+          submissionsEnabled: route.submissionsEnabled,
+          observedAt: environment.submissionObservedAt()
         )
       )
+      .environment(\.locationPickerPresentation, locationPickerPresentation)
       .presentationDetents([.large])
     }
     .fullScreenCover(isPresented: $isAtlasPresented) {
@@ -261,6 +257,25 @@ struct RootScene: View {
     let after = await submissionQueue.queuedEntries().count
     if let message = SubmissionFlushAnnouncement.message(before: before, after: after) {
       UIAccessibility.post(notification: .announcement, argument: message)
+    }
+  }
+
+  private func refreshCapabilities() async {
+    guard !isCapabilityRefreshInFlight else { return }
+    isCapabilityRefreshInFlight = true
+    capabilities = .loading
+    defer { isCapabilityRefreshInFlight = false }
+
+    let loaded = await LaunchCapabilityState.load(using: environment.fetchCapabilities)
+    capabilities = loaded
+    identifyService = IdentifyComposition.resolve(
+      enabled: loaded.identificationEnabled,
+      factory: environment.identifyServiceFactory
+    )
+    if accountAvailability == .enabled {
+      if !authSession.isAuthenticated { await authSession.restore() }
+    } else {
+      authSession.expire()
     }
   }
 
@@ -338,6 +353,13 @@ struct RootScene: View {
     case .signedIn(let user):
       return YouAuthState.signedIn(user: user, notice: notice)
     }
+  }
+
+  private var locationPickerPresentation: LocationPickerPresentation {
+    #if DEBUG || FLUKE_XCTEST_FIXTURES
+      if AppStoreScreenshotFixtureMode.isEnabled() { return .deterministicPreview }
+    #endif
+    return .interactiveMap
   }
 
   private func completeSignInAuthorization(_ result: Result<ASAuthorization, Error>) {

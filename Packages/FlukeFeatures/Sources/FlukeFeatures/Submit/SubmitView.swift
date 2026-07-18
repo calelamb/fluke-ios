@@ -53,6 +53,11 @@ public struct SubmitView: View {
     ScrollViewReader { proxy in
       Form {
         if let message = model.disabledMessage { Text(message).foregroundStyle(Color.ember) }
+        if let message = model.failureMessage {
+          Text(message)
+            .foregroundStyle(Color.ember)
+            .accessibilityIdentifier("submission.failure")
+        }
         LocationPickerView(latitude: $model.latitude, longitude: $model.longitude)
           .id(SubmissionFormField.location)
           .listRowBackground(validationBackground(for: .location))
@@ -127,6 +132,7 @@ public struct SubmitView: View {
       case .success: "Sighting submitted"
       case .queued: "Sighting saved on this device and queued for upload"
       case .partial: "Sighting submitted; some photos are queued"
+      case .failed(let message): message
       default: nil
       }
     #if canImport(UIKit)

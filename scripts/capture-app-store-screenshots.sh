@@ -29,6 +29,7 @@ fi
 xcrun simctl status_bar "$simulator_udid" override \
   --time 9:41 --batteryState charged --batteryLevel 100 \
   --wifiBars 3 --cellularBars 4 --operatorName Fluke
+xcrun simctl ui "$simulator_udid" appearance light
 
 curl --fail --silent --show-error --max-time 90 \
   https://fluke-api.onrender.com/api/v1/health >/dev/null
@@ -46,6 +47,7 @@ xcodebuild test \
   -maximum-concurrent-test-simulator-destinations 1 \
   -resultBundlePath "$result_bundle" \
   ENABLE_TESTABILITY=YES \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS=FLUKE_XCTEST_FIXTURES \
   CODE_SIGNING_ALLOWED=NO
 
 xcrun xcresulttool export attachments \
@@ -62,7 +64,10 @@ attachments_root, output_root = sys.argv[1:]
 with open(os.path.join(attachments_root, "manifest.json"), encoding="utf-8") as source:
     manifest = json.load(source)
 
-expected = ["01-sightings", "02-whales", "03-learn", "04-atlas"]
+expected = [
+    "01-sightings", "02-whales", "03-submit", "04-identify",
+    "05-atlas", "06-you", "07-learn",
+]
 exported = {}
 for test in manifest:
     attachments = test.get("attachments", [])

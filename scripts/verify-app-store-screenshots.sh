@@ -76,4 +76,26 @@ PY
   fi
 done
 
+expected_names=(
+  01-sightings.png
+  02-whales.png
+  03-submit.png
+  04-identify.png
+  05-atlas.png
+  06-you.png
+  07-learn.png
+)
+actual_names=()
+for screenshot in "${screenshots[@]}"; do
+  actual_names+=("$(basename "$screenshot")")
+done
+sorted_names=()
+while IFS= read -r name; do
+  sorted_names+=("$name")
+done < <(printf '%s\n' "${actual_names[@]}" | sort)
+if [[ "${sorted_names[*]}" != "${expected_names[*]}" ]]; then
+  printf 'App Store screenshot set must contain exactly: %s\n' "${expected_names[*]}" >&2
+  exit 1
+fi
+
 printf 'Validated %d App Store screenshot(s) at %s\n' "${#screenshots[@]}" "$expected_dimensions"

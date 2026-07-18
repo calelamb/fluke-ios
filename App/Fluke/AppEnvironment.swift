@@ -28,24 +28,43 @@ enum LaunchCapabilityState: Equatable, Sendable {
   case available(LaunchCapabilities)
   case unavailable
 
-  static func load(
-    using fetch: () async throws -> Capabilities
-  ) async -> LaunchCapabilityState {
-    guard let capabilities = try? await fetch() else { return .unavailable }
+  private static let coldWakeRetryDelaysNanoseconds: [UInt64] = [
+    2_000_000_000,
+    5_000_000_000,
+    10_000_000_000,
+  ]
 
-    return .available(
-      LaunchCapabilities(
-        accounts: capabilities.accounts,
-        identification: capabilities.identification,
-        submissions: capabilities.submissions
-      )
-    )
+  static func load(
+    using fetch: () async throws -> Capabilities,
+    retryDelaysNanoseconds: [UInt64] = coldWakeRetryDelaysNanoseconds,
+    sleep: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
+  ) async -> LaunchCapabilityState {
+    for attempt in 0...retryDelaysNanoseconds.count {
+      if let capabilities = try? await fetch() {
+        return .available(
+          LaunchCapabilities(
+            accounts: capabilities.accounts,
+            identification: capabilities.identification,
+            submissions: capabilities.submissions
+          )
+        )
+      }
+      guard attempt < retryDelaysNanoseconds.count else { break }
+      do {
+        try await sleep(retryDelaysNanoseconds[attempt])
+      } catch {
+        return .unavailable
+      }
+    }
+
+    return .unavailable
   }
 }
 
 struct AppEnvironment {
   typealias CapabilitiesFetch = () async throws -> Capabilities
   typealias IdentifyServiceFactory = @MainActor @Sendable () -> any IdentifyServiceProtocol
+  typealias SubmissionObservedAt = @MainActor @Sendable () -> Date
 
   let apiBaseURL: URL
   let authService: any AuthServiceProtocol
@@ -59,6 +78,7 @@ struct AppEnvironment {
   let sightingsRepository: SightingsRepository
   let sessionHintStore: any SessionHintStore
   let submissionQueue: SubmissionQueue
+  let submissionObservedAt: SubmissionObservedAt
   let submissionService: any SubmissionServiceProtocol
   let whalesRepository: WhalesRepository
 
@@ -89,6 +109,7 @@ struct AppEnvironment {
     configuration: AppBuildConfiguration,
     session: URLSession = .shared,
     capabilitiesFetch: CapabilitiesFetch? = nil,
+    submissionObservedAt: @escaping SubmissionObservedAt = Date.init,
     cacheStore: any BrowseCacheStore = MemoryBrowseCacheStore()
   ) throws -> AppEnvironment {
     let apiBaseURL = try validatedAPIBaseURL(
@@ -113,6 +134,7 @@ struct AppEnvironment {
       sightingsRepository: SightingsRepository(api: client, cache: cacheStore),
       sessionHintStore: KeychainSessionHintStore(),
       submissionQueue: submissionQueue,
+      submissionObservedAt: submissionObservedAt,
       submissionService: SubmissionService(api: client),
       whalesRepository: WhalesRepository(api: client, cache: cacheStore)
     )

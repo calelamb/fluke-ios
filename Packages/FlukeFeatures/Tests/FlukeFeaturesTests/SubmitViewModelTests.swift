@@ -124,9 +124,11 @@ struct SubmitViewModelTests {
 
     await model.submit()
     #expect(model.state == .failed("Fluke couldn't submit this sighting. Please try again."))
+    #expect(model.failureMessage == "Fluke couldn't submit this sighting. Please try again.")
     await model.submit()
 
     #expect(model.state == .success)
+    #expect(model.failureMessage == nil)
     #expect(model.dismissal == .allowed)
     #expect(await service.callCount == 2)
   }
