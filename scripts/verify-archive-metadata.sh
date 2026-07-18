@@ -30,8 +30,9 @@ if signing_identity is not None and (
     not isinstance(signing_identity, str) or not signing_identity.strip()
 ):
     raise SystemExit("archive signing identity is invalid")
-if signing_identity and not signing_identity.startswith("Apple Distribution:"):
-    raise SystemExit("signed archive must use an Apple Distribution identity")
+distribution_prefixes = ("Apple Distribution:", "iPhone Distribution:")
+if signing_identity and not signing_identity.startswith(distribution_prefixes):
+    raise SystemExit("signed archive must use an Apple or iPhone Distribution identity")
 if signing_identity and not signing_identity.endswith(f" ({expected_team_id})"):
     raise SystemExit("signed archive distribution identity team mismatch")
 

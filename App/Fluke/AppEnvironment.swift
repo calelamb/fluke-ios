@@ -28,15 +28,9 @@ enum LaunchCapabilityState: Equatable, Sendable {
   case available(LaunchCapabilities)
   case unavailable
 
-  private static let coldWakeRetryDelaysNanoseconds: [UInt64] = [
-    2_000_000_000,
-    5_000_000_000,
-    10_000_000_000,
-  ]
-
   static func load(
     using fetch: () async throws -> Capabilities,
-    retryDelaysNanoseconds: [UInt64] = coldWakeRetryDelaysNanoseconds,
+    retryDelaysNanoseconds: [UInt64] = [2_000_000_000, 5_000_000_000, 10_000_000_000],
     sleep: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
   ) async -> LaunchCapabilityState {
     for attempt in 0...retryDelaysNanoseconds.count {

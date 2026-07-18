@@ -338,10 +338,18 @@ expect_success "valid signed distribution archive passes" env \
   FLUKE_FAKE_EMBEDDED_PROFILE="$signed_profile" \
   "$archive_verifier" "$archive_path" app.fluke.Fluke 17.0
 /usr/libexec/PlistBuddy -c \
+  'Set :ApplicationProperties:SigningIdentity iPhone\ Distribution:\ Cale\ Lamb\ (86RBV2JZ8F)' \
+  "$archive_path/Info.plist"
+expect_success "valid legacy-named distribution archive passes" env \
+  PATH="$archive_signing_bin:$PATH" \
+  FLUKE_FAKE_SIGNED_ENTITLEMENTS="$signed_entitlements" \
+  FLUKE_FAKE_EMBEDDED_PROFILE="$signed_profile" \
+  "$archive_verifier" "$archive_path" app.fluke.Fluke 17.0
+/usr/libexec/PlistBuddy -c \
   'Set :ApplicationProperties:SigningIdentity Apple\ Development:\ Cale\ Lamb\ (86RBV2JZ8F)' \
   "$archive_path/Info.plist"
 expect_failure "signed archive rejects a development identity" \
-  "signed archive must use an Apple Distribution identity" env \
+  "signed archive must use an Apple or iPhone Distribution identity" env \
   PATH="$archive_signing_bin:$PATH" \
   FLUKE_FAKE_SIGNED_ENTITLEMENTS="$signed_entitlements" \
   FLUKE_FAKE_EMBEDDED_PROFILE="$signed_profile" \
