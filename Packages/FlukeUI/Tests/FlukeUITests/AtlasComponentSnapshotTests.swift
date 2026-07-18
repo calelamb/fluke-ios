@@ -15,14 +15,14 @@ final class AtlasComponentSnapshotTests: XCTestCase {
             size: size
         )
 
-        assertSnapshot(of: image, as: releaseImageSnapshot)
+        assertSnapshot(of: image, as: releaseImageSnapshot, named: releaseSnapshotName())
     }
 }
 
 private struct AtlasComponentGallery: View {
-    private let start = Date(timeIntervalSince1970: 315_532_800)
-    private let end = Date(timeIntervalSince1970: 1_735_689_600)
-    @State private var date = Date(timeIntervalSince1970: 1_262_304_000)
+    private let start = Date(timeIntervalSince1970: 315_576_000)
+    private let end = Date(timeIntervalSince1970: 1_735_732_800)
+    @State private var date = Date(timeIntervalSince1970: 1_262_347_200)
 
     var body: some View {
         VStack(spacing: 16) {

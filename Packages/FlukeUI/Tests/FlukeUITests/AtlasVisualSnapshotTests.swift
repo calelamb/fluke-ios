@@ -16,13 +16,13 @@ final class AtlasVisualSnapshotTests: XCTestCase {
       size: size
     )
 
-    assertSnapshot(of: image, as: releaseImageSnapshot)
+    assertSnapshot(of: image, as: releaseImageSnapshot, named: releaseSnapshotName())
   }
 }
 
 private struct AtlasEditorialGallery: View {
-  private let start = Date(timeIntervalSince1970: 1_735_689_600)
-  private let end = Date(timeIntervalSince1970: 1_767_225_600)
+  private let start = Date(timeIntervalSince1970: 1_735_732_800)
+  private let end = Date(timeIntervalSince1970: 1_767_268_800)
   @State private var date = Date(timeIntervalSince1970: 1_751_457_600)
 
   var body: some View {
