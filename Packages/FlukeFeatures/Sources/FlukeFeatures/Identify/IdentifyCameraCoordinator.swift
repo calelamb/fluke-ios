@@ -18,7 +18,8 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
   private let authorization: any IdentifyCameraAuthorizationProviding
   private let makeSession: () -> any IdentifyCameraSessionProviding
   private var session: (any IdentifyCameraSessionProviding)?
-  private var isOpening = false
+  private var openingGeneration: UInt64?
+  private var openingWaiters: [CheckedContinuation<Void, Never>] = []
   private var isSessionActive = false
   private var lifecycleGeneration: UInt64 = 0
 
@@ -63,10 +64,20 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
   func openCamera() async { await open() }
 
   func open() async {
-    guard !isSessionActive, !isOpening else { return }
-    isOpening = true
-    defer { isOpening = false }
-    let openingGeneration = lifecycleGeneration
+    let requestedGeneration = lifecycleGeneration
+    if let activeOpeningGeneration = openingGeneration {
+      await waitForOpening()
+      guard requestedGeneration == lifecycleGeneration else { return }
+      if activeOpeningGeneration != requestedGeneration { await open() }
+      return
+    }
+    guard !isSessionActive else { return }
+    openingGeneration = requestedGeneration
+    await performOpen(generation: requestedGeneration)
+    finishOpening(generation: requestedGeneration)
+  }
+
+  private func performOpen(generation openingGeneration: UInt64) async {
     state = .requestingPermission
     let permission = await resolvedPermission()
     guard await openingMayContinue(generation: openingGeneration) else { return }
@@ -96,10 +107,12 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
   }
 
   func run() async {
+    let runGeneration = lifecycleGeneration
     await open()
+    guard runGeneration == lifecycleGeneration else { return }
     guard isSessionActive, let session else { return }
     for await event in session.events {
-      if Task.isCancelled { break }
+      if Task.isCancelled || runGeneration != lifecycleGeneration { break }
       switch event {
       case .interrupted:
         await stop(for: .interrupted)
@@ -108,7 +121,9 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
       }
       break
     }
-    if Task.isCancelled { await stop(for: .cancelled) }
+    if Task.isCancelled, runGeneration == lifecycleGeneration {
+      await stop(for: .cancelled)
+    }
   }
 
   func applicationDidEnterBackground() async {
@@ -203,5 +218,18 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
     let session = makeSession()
     self.session = session
     return session
+  }
+
+  private func waitForOpening() async {
+    guard openingGeneration != nil else { return }
+    await withCheckedContinuation { openingWaiters.append($0) }
+  }
+
+  private func finishOpening(generation: UInt64) {
+    guard openingGeneration == generation else { return }
+    openingGeneration = nil
+    let waiters = openingWaiters
+    openingWaiters = []
+    for waiter in waiters { waiter.resume() }
   }
 }

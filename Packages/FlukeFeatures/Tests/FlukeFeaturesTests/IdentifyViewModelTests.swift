@@ -152,6 +152,59 @@ struct IdentifyViewModelTests {
     #expect(media.frameConsumerCount == 1)
     #expect(await identifier.resetCount == 1)
   }
+
+  @Test("reopen after stop waits for a suspended media open to invalidate")
+  func reopenDuringSuspendedMediaOpen() async {
+    let identifier = RecordingLocalIdentifier(results: [])
+    let media = SequencedSuspendedOpenIdentifyMedia()
+    let model = IdentifyViewModel(capability: .onDevice(identifier), media: media)
+    let staleOpen = Task { await model.openCamera() }
+    await media.waitForOpens(1)
+
+    model.cameraDidStop()
+    let reopen = Task { await model.openCamera() }
+    media.resumeOpen(1, presented: false)
+    for _ in 0..<100 where media.openCount < 2 { await Task.yield() }
+    guard media.openCount == 2 else {
+      await staleOpen.value
+      await reopen.value
+      Issue.record("Expected the foreground reopen to reach media")
+      return
+    }
+    media.resumeOpen(2, presented: true)
+    await staleOpen.value
+    await reopen.value
+
+    #expect(media.openCount == 2)
+    #expect(media.frameConsumerCount == 1)
+    #expect(await identifier.resetCount == 2)
+    #expect(model.presentation == .analyzing)
+  }
+
+  @Test("old inference cleanup cannot clear a reopened inference indicator")
+  func staleInferenceCleanupPreservesNewActivity() async throws {
+    let identifier = SequencedSuspendedLocalIdentifier(result: Self.state(prominent: nil))
+    let media = RecordingIdentifyMedia()
+    let model = IdentifyViewModel(capability: .onDevice(identifier), media: media)
+    await model.openCamera()
+    await media.yield(try Self.frame())
+    await identifier.waitForRequests(1)
+
+    model.cameraDidStop()
+    media.close()
+    await model.openCamera()
+    await media.yield(try Self.frame())
+    await identifier.waitForRequests(2)
+    #expect(model.isIdentifying)
+
+    await identifier.resumeRequest(1)
+    for _ in 0..<20 { await Task.yield() }
+
+    #expect(model.isIdentifying)
+
+    await identifier.resumeRequest(2)
+    await Self.waitUntil { !model.isIdentifying }
+  }
 }
 
 extension IdentifyViewModelTests {
@@ -294,6 +347,42 @@ private final class SuspendedOpenIdentifyMedia: IdentifyMediaProviding {
   }
 }
 
+@MainActor
+private final class SequencedSuspendedOpenIdentifyMedia: IdentifyMediaProviding {
+  private let channel = CameraFrameChannel.make()
+  private var continuations: [Int: CheckedContinuation<Void, Never>] = [:]
+  private var outcomes: [Int: Bool] = [:]
+  private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
+  let cameraState = PhotoCameraState.available
+  private(set) var isCameraPresented = false
+  private(set) var openCount = 0
+  private(set) var frameConsumerCount = 0
+  var frames: AsyncStream<CameraFrame> {
+    frameConsumerCount += 1
+    return channel.frames
+  }
+
+  func openCamera() async {
+    openCount += 1
+    let request = openCount
+    let ready = waiters.filter { request >= $0.0 }
+    waiters.removeAll { request >= $0.0 }
+    for waiter in ready { waiter.1.resume() }
+    await withCheckedContinuation { continuations[request] = $0 }
+    isCameraPresented = outcomes.removeValue(forKey: request) ?? false
+  }
+
+  func waitForOpens(_ count: Int) async {
+    guard openCount < count else { return }
+    await withCheckedContinuation { waiters.append((count, $0)) }
+  }
+
+  func resumeOpen(_ request: Int, presented: Bool) {
+    outcomes[request] = presented
+    continuations.removeValue(forKey: request)?.resume()
+  }
+}
+
 private actor SuspendedLocalIdentifier: LocalIdentifying {
   let result: LocalIdentificationState
   private var continuation: CheckedContinuation<Void, Never>?
@@ -324,5 +413,33 @@ private actor SuspendedLocalIdentifier: LocalIdentifying {
   func resume() {
     continuation?.resume()
     continuation = nil
+  }
+}
+
+private actor SequencedSuspendedLocalIdentifier: LocalIdentifying {
+  private let result: LocalIdentificationState
+  private var continuations: [Int: CheckedContinuation<Void, Never>] = [:]
+  private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
+  private(set) var requestCount = 0
+
+  init(result: LocalIdentificationState) { self.result = result }
+
+  func identify(frame _: CameraFrame) async -> LocalIdentificationState {
+    requestCount += 1
+    let request = requestCount
+    let ready = waiters.filter { request >= $0.0 }
+    waiters.removeAll { request >= $0.0 }
+    for waiter in ready { waiter.1.resume() }
+    await withCheckedContinuation { continuations[request] = $0 }
+    return result
+  }
+
+  func waitForRequests(_ count: Int) async {
+    guard requestCount < count else { return }
+    await withCheckedContinuation { waiters.append((count, $0)) }
+  }
+
+  func resumeRequest(_ request: Int) {
+    continuations.removeValue(forKey: request)?.resume()
   }
 }

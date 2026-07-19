@@ -72,7 +72,9 @@ public final class IdentifyViewModel {
   private let capability: IdentifyCapability
   private let media: any IdentifyMediaProviding
   private var inferenceTask: Task<Void, Never>?
-  private var isOpeningCamera = false
+  private var openingGeneration: UInt64?
+  private var openingWaiters: [CheckedContinuation<Void, Never>] = []
+  private var lifecycleGeneration: UInt64 = 0
 
   public init(capability: IdentifyCapability, media: any IdentifyMediaProviding) {
     self.capability = capability
@@ -101,52 +103,87 @@ public final class IdentifyViewModel {
   }
 
   public func openCamera() async {
-    guard case .onDevice(let identifier) = capability,
-      !media.isCameraPresented,
-      !isOpeningCamera
-    else { return }
+    guard case .onDevice(let identifier) = capability else { return }
+    let requestedGeneration = lifecycleGeneration
+    if let activeOpeningGeneration = openingGeneration {
+      await waitForOpening()
+      guard requestedGeneration == lifecycleGeneration else { return }
+      if activeOpeningGeneration != requestedGeneration { await openCamera() }
+      return
+    }
+    guard !media.isCameraPresented else { return }
     guard case .available = media.cameraState else { return }
-    isOpeningCamera = true
-    defer { isOpeningCamera = false }
+    openingGeneration = requestedGeneration
+    await performOpen(identifier: identifier, generation: requestedGeneration)
+    finishOpening(generation: requestedGeneration)
+  }
+
+  private func performOpen(
+    identifier: any LocalIdentifying,
+    generation: UInt64
+  ) async {
     result = nil
     presentation = .analyzing
     await identifier.resetSession()
     await media.openCamera()
+    guard generation == lifecycleGeneration else { return }
     guard media.isCameraPresented else {
       presentation = .idle
       return
     }
-    consumeFrames(using: identifier)
+    consumeFrames(using: identifier, generation: generation)
   }
 
   public func cameraDidStop() {
+    lifecycleGeneration &+= 1
     inferenceTask?.cancel()
     inferenceTask = nil
     isIdentifying = false
     if result == nil { presentation = .idle }
   }
 
-  private func consumeFrames(using identifier: any LocalIdentifying) {
+  private func consumeFrames(
+    using identifier: any LocalIdentifying,
+    generation: UInt64
+  ) {
     inferenceTask?.cancel()
     let frames = media.frames
     inferenceTask = Task { [weak self] in
       for await frame in frames {
-        guard !Task.isCancelled else { break }
+        guard !Task.isCancelled, self?.lifecycleGeneration == generation else { break }
         self?.isIdentifying = true
         do {
           let state = try await identifier.identify(frame: frame)
-          guard !Task.isCancelled else { break }
+          guard !Task.isCancelled, self?.lifecycleGeneration == generation else { break }
           self?.apply(state)
         } catch is CancellationError {
           break
         } catch {
-          guard !Task.isCancelled else { break }
+          guard !Task.isCancelled, self?.lifecycleGeneration == generation else { break }
           self?.apply(error)
         }
-        self?.isIdentifying = false
+        self?.finishInference(generation: generation)
       }
-      self?.isIdentifying = false
+      self?.finishInference(generation: generation)
     }
+  }
+
+  private func finishInference(generation: UInt64) {
+    guard generation == lifecycleGeneration else { return }
+    isIdentifying = false
+  }
+
+  private func waitForOpening() async {
+    guard openingGeneration != nil else { return }
+    await withCheckedContinuation { openingWaiters.append($0) }
+  }
+
+  private func finishOpening(generation: UInt64) {
+    guard openingGeneration == generation else { return }
+    openingGeneration = nil
+    let waiters = openingWaiters
+    openingWaiters = []
+    for waiter in waiters { waiter.resume() }
   }
 
   private func apply(_ state: LocalIdentificationState) {

@@ -164,6 +164,62 @@ struct IdentifyCameraPipelineTests {
   }
 
   @MainActor
+  @Test("reopen after close waits for a suspended permission open to invalidate")
+  func reopenDuringSuspendedPermission() async {
+    let authorization = SuspendedStatusCameraAuthorization()
+    let session = ImmediateFinishCameraSession()
+    let coordinator = IdentifyCameraCoordinator(
+      authorization: authorization,
+      session: session
+    )
+    let staleOpen = Task { await coordinator.open() }
+    await authorization.waitUntilStatusRequested()
+
+    await coordinator.close()
+    let reopen = Task { await coordinator.open() }
+    await authorization.resumeInitialStatus(.authorized)
+    await staleOpen.value
+    await reopen.value
+
+    #expect(await authorization.statusRequestCount == 2)
+    #expect(await session.startCount == 1)
+    #expect(coordinator.state == .running)
+    #expect(coordinator.isPresented)
+  }
+
+  @MainActor
+  @Test("reopen after close waits for a suspended capture start to invalidate")
+  func reopenDuringSuspendedStart() async {
+    let authorization = RecordingCameraAuthorization(status: .authorized)
+    let session = SequencedSuspendedStartCameraSession()
+    let coordinator = IdentifyCameraCoordinator(
+      authorization: authorization,
+      session: session
+    )
+    let staleOpen = Task { await coordinator.open() }
+    await session.waitForStarts(1)
+
+    await coordinator.close()
+    let reopen = Task { await coordinator.open() }
+    await session.resumeStart(1)
+    for _ in 0..<100 where await session.startCount < 2 { await Task.yield() }
+    guard await session.startCount == 2 else {
+      await staleOpen.value
+      await reopen.value
+      Issue.record("Expected the foreground reopen to start capture")
+      return
+    }
+    await session.resumeStart(2)
+    await staleOpen.value
+    await reopen.value
+
+    #expect(await session.startCount == 2)
+    #expect(await session.stopCount == 1)
+    #expect(coordinator.state == .running)
+    #expect(coordinator.isPresented)
+  }
+
+  @MainActor
   @Test("a denied permission request remains closed")
   func deniedPermissionRequest() async {
     let authorization = RecordingCameraAuthorization(status: .notDetermined)
@@ -377,6 +433,32 @@ struct IdentifyCameraPipelineTests {
   }
 
   @MainActor
+  @Test("cancelling an old run cannot stop a reopened generation")
+  func staleRunCancellationPreservesReopen() async {
+    let authorization = RecordingCameraAuthorization(status: .authorized)
+    let session = RecordingCameraSession()
+    let coordinator = IdentifyCameraCoordinator(
+      authorization: authorization,
+      session: session
+    )
+    let staleRun = Task { await coordinator.run() }
+    await session.waitForStarts(1)
+
+    await coordinator.close()
+    let reopenedRun = Task { await coordinator.run() }
+    await session.waitForStarts(2)
+    staleRun.cancel()
+    await staleRun.value
+
+    #expect(await session.stopCount == 1)
+    #expect(coordinator.state == .running)
+    #expect(coordinator.isPresented)
+
+    reopenedRun.cancel()
+    await reopenedRun.value
+  }
+
+  @MainActor
   @Test("capture interruption events release the active session")
   func interruptionEvent() async {
     let authorization = RecordingCameraAuthorization(status: .authorized)
@@ -569,7 +651,11 @@ private actor RecordingCameraSession: IdentifyCameraSessionProviding {
   }
 
   func waitUntilStarted() async {
-    guard startCount == 0 else { return }
+    await waitForStarts(1)
+  }
+
+  func waitForStarts(_ count: Int) async {
+    guard startCount < count else { return }
     await withCheckedContinuation { startWaiters.append($0) }
   }
 }
@@ -644,6 +730,36 @@ private actor SuspendedStartCameraSession: IdentifyCameraSessionProviding {
   func resumeStart() {
     startContinuation?.resume()
     startContinuation = nil
+  }
+}
+
+private actor SequencedSuspendedStartCameraSession: IdentifyCameraSessionProviding {
+  nonisolated let frames = CameraFrameChannel.make().frames
+  nonisolated let events = AsyncStream<IdentifyCameraSessionEvent> { $0.finish() }
+  nonisolated let previewSession: AVCaptureSession? = nil
+  private var startContinuations: [Int: CheckedContinuation<Void, Never>] = [:]
+  private var startWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+  private(set) var startCount = 0
+  private(set) var stopCount = 0
+
+  func start() async {
+    startCount += 1
+    let request = startCount
+    let ready = startWaiters.filter { request >= $0.0 }
+    startWaiters.removeAll { request >= $0.0 }
+    for waiter in ready { waiter.1.resume() }
+    await withCheckedContinuation { startContinuations[request] = $0 }
+  }
+
+  func stop() { stopCount += 1 }
+
+  func waitForStarts(_ count: Int) async {
+    guard startCount < count else { return }
+    await withCheckedContinuation { startWaiters.append((count, $0)) }
+  }
+
+  func resumeStart(_ request: Int) {
+    startContinuations.removeValue(forKey: request)?.resume()
   }
 }
 
