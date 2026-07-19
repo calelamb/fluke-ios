@@ -61,9 +61,14 @@ API_PRIVATE_KEYS_DIR="…/fluke-secrets" xcrun altool --upload-app --type ios \
 ## Still gated (deliberately)
 
 - **Live matching** stays off until a rights-cleared catalog passes the model
-  release verifier (`ready:true`) — path: NOAA public-domain SRKW imagery
-  (no permission needed, needs curation + eval + likely fine-tune) or grants
-  from CWR / Orca Network (letters drafted in `fluke/docs/outreach/`, unsent).
+  release verifier (`ready:true`). Researched 2026-07-19: there is NO
+  public-domain path for SRKW/Bigg's imagery — the CWR catalog is contractor
+  copyright, DFO catalogs are Canadian Crown copyright, NOAA drone imagery is
+  credited to non-federal researchers. The only rights-clean federal sets
+  (CC0 Gulf of Mexico, PD 1997 Alaska B&W) are wrong populations, useful for
+  pretraining only. Licensing grants (CWR / Orca Network / DFO / SR3) are the
+  critical path; the drafted letters in `fluke/docs/outreach/` cite the
+  retired demo and need a rewrite before sending.
 - The full `verify-app-store-1-1-submission.sh` packaging verifier still
   expects the identifier-live evidence set (screenshot provenance, complete
   physical-device report). Its dormant-mode variant is intentionally not
