@@ -295,6 +295,28 @@ struct IdentifyCameraPipelineTests {
   }
 
   @MainActor
+  @Test("cancellation cleans up when a suspended session start later fails")
+  func cancellationDuringFailingSessionStart() async {
+    let authorization = RecordingCameraAuthorization(status: .authorized)
+    let session = SuspendedFailingStartCameraSession()
+    let coordinator = IdentifyCameraCoordinator(
+      authorization: authorization,
+      session: session
+    )
+    let task = Task { await coordinator.run() }
+    await session.waitUntilStartRequested()
+
+    task.cancel()
+    await session.resumeStartWithFailure()
+    await task.value
+
+    #expect(await session.startCount == 1)
+    #expect(await session.stopCount == 1)
+    #expect(!coordinator.isPresented)
+    #expect(coordinator.state == .stopped(.cancelled))
+  }
+
+  @MainActor
   @Test("permission loss stops and releases an active session")
   func permissionLoss() async {
     let authorization = RecordingCameraAuthorization(status: .authorized)

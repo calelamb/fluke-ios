@@ -85,7 +85,11 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
       isPresented = true
       state = .running
     } catch {
-      guard openingGeneration == lifecycleGeneration, !Task.isCancelled else { return }
+      guard openingGeneration == lifecycleGeneration else { return }
+      if Task.isCancelled {
+        await stopAfterCancelledStart(session: session)
+        return
+      }
       isPresented = false
       state = .permission(.unavailable)
     }
@@ -158,6 +162,16 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
     isPresented = false
     await session.stop()
     state = .permission(.unavailable)
+  }
+
+  private func stopAfterCancelledStart(
+    session: any IdentifyCameraSessionProviding
+  ) async {
+    lifecycleGeneration &+= 1
+    isSessionActive = false
+    isPresented = false
+    state = .stopped(.cancelled)
+    await session.stop()
   }
 
   private func openingMayContinue(generation: UInt64) async -> Bool {
