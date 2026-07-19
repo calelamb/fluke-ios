@@ -1,121 +1,52 @@
-import FlukeReleaseB
-import Foundation
-import Observation
+import AVFoundation
 import SwiftUI
 
 #if canImport(UIKit)
-  import AVFoundation
   import UIKit
 
-  @MainActor
-  @Observable
-  final class IdentifyCameraCoordinator: IdentifyMediaProviding {
-    var isPresented = false
-    private var continuation: CheckedContinuation<IdentifyPhoto?, Error>?
+  public struct IdentifyCameraView: UIViewRepresentable {
+    private let session: AVCaptureSession
 
-    var cameraState: PhotoCameraState {
-      guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
-        return PhotoSelectionPresentation.cameraState(for: .unavailable)
-      }
-      let authorization: PhotoCameraAuthorization =
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .denied: .denied
-        case .restricted: .restricted
-        default: .available
-        }
-      return PhotoSelectionPresentation.cameraState(for: authorization)
+    public init(session: AVCaptureSession) {
+      self.session = session
     }
 
-    func requestCameraPhoto() async throws -> IdentifyPhoto? {
-      guard continuation == nil, cameraState == .available else {
-        return nil
-      }
-      return try await withCheckedThrowingContinuation { continuation in
-        self.continuation = continuation
-        isPresented = true
-      }
+    public func makeUIView(context: Context) -> IdentifyCameraPreviewView {
+      let view = IdentifyCameraPreviewView()
+      view.update(session: session)
+      return view
     }
 
-    func complete(with data: Data?) {
-      defer { finishPresentation() }
-      guard let data else {
-        continuation?.resume(returning: nil)
-        continuation = nil
-        return
-      }
-      do {
-        continuation?.resume(returning: try IdentifyPhoto(bytes: data))
-      } catch {
-        continuation?.resume(throwing: error)
-      }
-      continuation = nil
+    public func updateUIView(_ view: IdentifyCameraPreviewView, context: Context) {
+      view.update(session: session)
     }
-
-    func cancel() {
-      continuation?.resume(returning: nil)
-      continuation = nil
-      finishPresentation()
-    }
-
-    private func finishPresentation() { isPresented = false }
   }
 
-  public struct IdentifyCameraView: UIViewControllerRepresentable {
-    let onPhoto: (Data?) -> Void
-    let onCancel: () -> Void
+  @MainActor
+  public final class IdentifyCameraPreviewView: UIView {
+    public override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
 
-    public init(onPhoto: @escaping (Data?) -> Void, onCancel: @escaping () -> Void) {
-      self.onPhoto = onPhoto
-      self.onCancel = onCancel
+    private var previewLayer: AVCaptureVideoPreviewLayer {
+      layer as! AVCaptureVideoPreviewLayer
     }
 
-    public func makeUIViewController(context: Context) -> UIImagePickerController {
-      let picker = UIImagePickerController()
-      picker.sourceType = .camera
-      picker.cameraCaptureMode = .photo
-      picker.delegate = context.coordinator
-      picker.accessibilityLabel = "Dorsal fin camera"
-      return picker
+    public override init(frame: CGRect) {
+      super.init(frame: frame)
+      previewLayer.videoGravity = .resizeAspectFill
+      accessibilityLabel = "Live dorsal fin camera preview"
     }
 
-    public func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
+    @available(*, unavailable)
+    public required init?(coder: NSCoder) { nil }
 
-    public func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
-
-    public final class Coordinator: NSObject, UIImagePickerControllerDelegate,
-      UINavigationControllerDelegate
-    {
-      private let parent: IdentifyCameraView
-      init(parent: IdentifyCameraView) { self.parent = parent }
-
-      public func imagePickerController(
-        _ picker: UIImagePickerController,
-        didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-      ) {
-        let data = (info[.originalImage] as? UIImage)?.jpegData(compressionQuality: 0.82)
-        parent.onPhoto(data)
-      }
-
-      public func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-        parent.onCancel()
-      }
+    func update(session: AVCaptureSession) {
+      guard previewLayer.session !== session else { return }
+      previewLayer.session = session
     }
   }
 #else
-  @MainActor
-  @Observable
-  final class IdentifyCameraCoordinator: IdentifyMediaProviding {
-    var isPresented = false
-    var cameraState: PhotoCameraState {
-      PhotoSelectionPresentation.cameraState(for: .unavailable)
-    }
-    func requestCameraPhoto() async throws -> IdentifyPhoto? { nil }
-    func complete(with data: Data?) {}
-    func cancel() {}
-  }
-
   public struct IdentifyCameraView: View {
-    public init(onPhoto: @escaping (Data?) -> Void, onCancel: @escaping () -> Void) {}
+    public init(session: AVCaptureSession) {}
     public var body: some View { EmptyView() }
   }
 #endif

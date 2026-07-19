@@ -113,6 +113,7 @@ private struct IdentifyReadyView: View {
   private let browseWhales: () -> Void
   private let submitSighting: () -> Void
   private let camera: IdentifyCameraCoordinator
+  @Environment(\.scenePhase) private var scenePhase
   @State private var model: IdentifyViewModel
   @State private var selectedPhoto: PhotosPickerItem?
 
@@ -162,16 +163,44 @@ private struct IdentifyReadyView: View {
     .sheet(
       isPresented: Binding(
         get: { camera.isPresented },
-        set: { if !$0 { camera.cancel() } }
+        set: { if !$0 { Task { await camera.close() } } }
       )
     ) {
-      IdentifyCameraView(
-        onPhoto: { camera.complete(with: $0) },
-        onCancel: { camera.cancel() }
-      )
-      .ignoresSafeArea()
+      if let session = camera.previewSession {
+        ZStack(alignment: .topTrailing) {
+          IdentifyCameraView(session: session)
+            .ignoresSafeArea()
+          Button("Close", systemImage: "xmark") {
+            Task { await camera.close() }
+          }
+          .labelStyle(.iconOnly)
+          .accessibilityLabel("Close live camera")
+          .padding()
+        }
+        .task { await camera.run() }
+      }
     }
     .onChange(of: selectedPhoto) { _, item in load(item) }
+    .onChange(of: scenePhase) { _, phase in
+      Task {
+        if phase == .background {
+          await camera.applicationDidEnterBackground()
+        } else if phase == .active {
+          await camera.permissionDidChange()
+        }
+      }
+    }
+    .onReceive(
+      NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)
+    ) {
+      _ in
+      let thermalState = ProcessInfo.processInfo.thermalState
+      Task {
+        await camera.thermalStateDidChange(
+          isSeriousOrCritical: thermalState == .serious || thermalState == .critical)
+      }
+    }
+    .onDisappear { Task { await camera.viewDidDisappear() } }
   }
 
   private var controls: some View {
@@ -181,7 +210,7 @@ private struct IdentifyReadyView: View {
         Button {
           Task { await model.openCamera() }
         } label: {
-          Label("Take a photo", systemImage: "camera")
+          Label("Open live camera", systemImage: "camera.viewfinder")
         }
         .buttonStyle(FlukeButtonStyle.primary)
         .disabled(model.isIdentifying)

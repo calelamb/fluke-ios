@@ -2,31 +2,33 @@
 import PackageDescription
 
 let package = Package(
-    name: "FlukeFeatures",
-    platforms: [.iOS(.v17), .macOS(.v14)],
-    products: [
-        .library(name: "FlukeFeatures", targets: ["FlukeFeatures"]),
-    ],
-    dependencies: [
-        .package(path: "../FlukeKit"),
-        .package(path: "../FlukeUI"),
-    ],
-    targets: [
-        .target(
-            name: "FlukeFeatures",
-            dependencies: [
-                .product(name: "FlukeKit", package: "FlukeKit"),
-                .product(name: "FlukeReleaseB", package: "FlukeKit"),
-                "FlukeUI",
-            ],
-            path: "Sources/FlukeFeatures",
-            resources: [.process("Resources")]
-        ),
-        .testTarget(
-            name: "FlukeFeaturesTests",
-            dependencies: ["FlukeFeatures"],
-            path: "Tests/FlukeFeaturesTests",
-            exclude: ["__Snapshots__"]
-        ),
-    ]
+  name: "FlukeFeatures",
+  platforms: [.iOS(.v17), .macOS(.v14)],
+  products: [
+    .library(name: "FlukeFeatures", targets: ["FlukeFeatures"])
+  ],
+  dependencies: [
+    .package(path: "../FlukeKit"),
+    .package(path: "../FlukeML"),
+    .package(path: "../FlukeUI"),
+  ],
+  targets: [
+    .target(
+      name: "FlukeFeatures",
+      dependencies: [
+        .product(name: "FlukeKit", package: "FlukeKit"),
+        .product(name: "FlukeReleaseB", package: "FlukeKit"),
+        .product(name: "FlukeML", package: "FlukeML"),
+        "FlukeUI",
+      ],
+      path: "Sources/FlukeFeatures",
+      resources: [.process("Resources")]
+    ),
+    .testTarget(
+      name: "FlukeFeaturesTests",
+      dependencies: ["FlukeFeatures"],
+      path: "Tests/FlukeFeaturesTests",
+      exclude: ["__Snapshots__"]
+    ),
+  ]
 )
