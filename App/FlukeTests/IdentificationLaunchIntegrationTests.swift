@@ -90,7 +90,7 @@ private actor LaunchAuthRecorder: AuthServiceProtocol {
   private(set) var currentUserCount = 0
 
   func signIn(credential _: AppleCredential) async throws -> AuthenticatedUser {
-    try await currentUser()
+    currentUser()
   }
 
   func currentUser() -> AuthenticatedUser {
