@@ -4,7 +4,7 @@ public struct StableMatchState: Equatable, Sendable {
   public let history: [LocalMatch?]
   public let prominent: LocalMatch?
 
-  public init(history: [LocalMatch?] = [], prominent: LocalMatch? = nil) {
+  init(history: [LocalMatch?] = [], prominent: LocalMatch? = nil) {
     self.history = history
     self.prominent = prominent
   }
@@ -43,7 +43,8 @@ public struct StableMatchReducer: Sendable {
 
   public func reduce(state: StableMatchState, candidate: LocalMatch?) -> StableMatchState {
     let safeCandidate = candidate.flatMap { $0.score.isFinite ? $0 : nil }
-    let history = Array((state.history + [safeCandidate]).suffix(windowSize))
+    let retained = state.history.suffix(max(0, windowSize - 1))
+    let history = Array(retained) + [safeCandidate]
     let identifiers = history.compactMap(\.self).map(\.catalogID)
     let wins = identifiers.reduce([String: Int]()) { counts, identifier in
       var updated = counts

@@ -1,6 +1,4 @@
-import CoreVideo
 import Foundation
-import ImageIO
 
 public enum LocalIdentifierError: Error, Equatable, LocalizedError, Sendable {
   case modelResourceMissing
@@ -29,31 +27,11 @@ public enum LocalIdentifierError: Error, Equatable, LocalizedError, Sendable {
 }
 
 public protocol EmbeddingProviding: Sendable {
-  func embedding(
-    pixelBuffer: CVPixelBuffer,
-    orientation: CGImagePropertyOrientation
-  ) async throws -> [Float]
+  func embedding(frame: CameraFrame) async throws -> [Float]
 }
 
 public protocol LocalIdentifying: Sendable {
   func identify(frame: CameraFrame) async throws -> LocalIdentificationState
-}
-
-// Capture owns the pixel buffer for the duration of identification and does not mutate its bytes.
-public struct CameraFrame: @unchecked Sendable {
-  public let pixelBuffer: CVPixelBuffer
-  public let orientation: CGImagePropertyOrientation
-
-  public init(
-    pixelBuffer: CVPixelBuffer,
-    orientation: CGImagePropertyOrientation
-  ) throws {
-    guard CVPixelBufferGetWidth(pixelBuffer) > 0, CVPixelBufferGetHeight(pixelBuffer) > 0 else {
-      throw LocalIdentifierError.invalidPixelBuffer
-    }
-    self.pixelBuffer = pixelBuffer
-    self.orientation = orientation
-  }
 }
 
 public struct LocalIdentificationState: Equatable, Sendable {
@@ -89,19 +67,16 @@ public actor LocalIdentifier: LocalIdentifying {
   }
 
   public static func load(bundle: Bundle = .main) async throws -> LocalIdentifier {
-    let embedder = try await CoreMLEmbedder.load(bundle: bundle)
     let catalog = try ReferenceCatalog.load(
       bundle: bundle,
       compatibility: CoreMLEmbedder.artifactCompatibility
     )
+    let embedder = try await CoreMLEmbedder.load(bundle: bundle)
     return LocalIdentifier(embedder: embedder, catalog: catalog)
   }
 
   public func identify(frame: CameraFrame) async throws -> LocalIdentificationState {
-    let embedding = try await embedder.embedding(
-      pixelBuffer: frame.pixelBuffer,
-      orientation: frame.orientation
-    )
+    let embedding = try await embedder.embedding(frame: frame)
     let matches = try searcher.search(embedding: embedding, limit: Self.resultLimit)
     let eligible = matches.first.flatMap { first in
       reducer.isEligible(first: first, second: matches.dropFirst().first) ? first : nil

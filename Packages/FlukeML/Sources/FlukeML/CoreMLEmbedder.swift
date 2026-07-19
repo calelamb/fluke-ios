@@ -1,10 +1,7 @@
-import CoreImage
 import CoreML
-@preconcurrency import CoreVideo
 import Foundation
-import ImageIO
 
-public actor CoreMLEmbedder: @preconcurrency EmbeddingProviding {
+public actor CoreMLEmbedder: EmbeddingProviding {
   public static let packageSHA256 =
     "e784dac753edb2b70dd31d1a74208b736cf805c0e34b87d81a7bad11e1c13109"
   public static let artifactCompatibility = IdentifierArtifactCompatibility(
@@ -36,10 +33,14 @@ public actor CoreMLEmbedder: @preconcurrency EmbeddingProviding {
     guard let url = compiledModelURL(in: bundle) else {
       throw LocalIdentifierError.modelResourceMissing
     }
+    return try await load(compiledModelURL: url)
+  }
+
+  static func load(compiledModelURL: URL) async throws -> CoreMLEmbedder {
     let configuration = MLModelConfiguration()
     configuration.computeUnits = .all
     do {
-      let model = try await MLModel.load(contentsOf: url, configuration: configuration)
+      let model = try await MLModel.load(contentsOf: compiledModelURL, configuration: configuration)
       try validate(model: model)
       return CoreMLEmbedder(predictor: MLModelPredictor(model: model))
     } catch let error as LocalIdentifierError {
@@ -49,16 +50,10 @@ public actor CoreMLEmbedder: @preconcurrency EmbeddingProviding {
     }
   }
 
-  public func embedding(
-    pixelBuffer: CVPixelBuffer,
-    orientation: CGImagePropertyOrientation
-  ) async throws -> [Float] {
+  public func embedding(frame: CameraFrame) async throws -> [Float] {
     let input: MLMultiArray
     do {
-      input = try preprocessor.makeInput(
-        pixelBuffer: pixelBuffer,
-        orientation: orientation
-      )
+      input = try preprocessor.makeInput(frame: frame)
     } catch let error as LocalIdentifierError {
       throw error
     } catch {
@@ -116,15 +111,14 @@ extension CoreMLEmbedder {
   }
 
   static func validatedEmbedding(_ prediction: CoreMLPrediction) throws -> [Float] {
-    let value = prediction.value
     guard prediction.name == "embedding",
-      value.dataType == .float32,
-      value.shape.map(\.intValue) == [1, expectedOutputCount],
-      value.count == expectedOutputCount
+      prediction.isFloat32,
+      prediction.shape == [1, expectedOutputCount],
+      prediction.values.count == expectedOutputCount
     else {
       throw LocalIdentifierError.invalidModelOutput
     }
-    let result = (0..<value.count).map { value[$0].floatValue }
+    let result = prediction.values
     guard result.allSatisfy(\.isFinite) else {
       throw LocalIdentifierError.invalidEmbedding
     }
@@ -138,9 +132,18 @@ extension CoreMLEmbedder {
   }
 }
 
-struct CoreMLPrediction: @unchecked Sendable {
+struct CoreMLPrediction: Sendable {
   let name: String
-  let value: MLMultiArray
+  let isFloat32: Bool
+  let shape: [Int]
+  let values: [Float]
+
+  init(name: String, value: MLMultiArray) {
+    self.name = name
+    isFloat32 = value.dataType == .float32
+    shape = value.shape.map(\.intValue)
+    values = (0..<value.count).map { value[$0].floatValue }
+  }
 }
 
 protocol CoreMLPredicting: Sendable {
@@ -164,113 +167,5 @@ private final class MLModelPredictor: CoreMLPredicting, @unchecked Sendable {
       throw LocalIdentifierError.invalidModelOutput
     }
     return CoreMLPrediction(name: "embedding", value: value)
-  }
-}
-
-struct CoreMLImagePreprocessor: Sendable {
-  private static let resizeShortestEdge = 256
-  private static let cropSize = 224
-  private static let means: [Float] = [0.485, 0.456, 0.406]
-  private static let standardDeviations: [Float] = [0.229, 0.224, 0.225]
-
-  func makeInput(
-    pixelBuffer: CVPixelBuffer,
-    orientation: CGImagePropertyOrientation
-  ) throws -> MLMultiArray {
-    let width = CVPixelBufferGetWidth(pixelBuffer)
-    let height = CVPixelBufferGetHeight(pixelBuffer)
-    guard width > 0, height > 0 else { throw LocalIdentifierError.invalidPixelBuffer }
-
-    let image = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
-    let normalized = image.transformed(
-      by: CGAffineTransform(
-        translationX: -image.extent.minX,
-        y: -image.extent.minY
-      )
-    )
-    let target = targetSize(
-      width: Int(normalized.extent.width), height: Int(normalized.extent.height))
-    let resized = try bicubicResize(normalized, target: target)
-    let crop = CGRect(
-      x: (target.width - Self.cropSize) / 2,
-      y: (target.height - Self.cropSize) / 2,
-      width: Self.cropSize,
-      height: Self.cropSize
-    )
-    let cropped = resized.cropped(to: crop).transformed(
-      by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY)
-    )
-    let bytes = try renderedRGBBytes(cropped)
-    return try normalizedTensor(bytes)
-  }
-}
-
-extension CoreMLImagePreprocessor {
-  fileprivate struct PixelSize {
-    let width: Int
-    let height: Int
-  }
-
-  fileprivate func targetSize(width: Int, height: Int) -> PixelSize {
-    if width <= height {
-      return PixelSize(
-        width: Self.resizeShortestEdge,
-        height: Self.resizeShortestEdge * height / width
-      )
-    }
-    return PixelSize(
-      width: Self.resizeShortestEdge * width / height,
-      height: Self.resizeShortestEdge
-    )
-  }
-
-  fileprivate func bicubicResize(_ image: CIImage, target: PixelSize) throws -> CIImage {
-    guard let filter = CIFilter(name: "CIBicubicScaleTransform") else {
-      throw LocalIdentifierError.preprocessingFailed
-    }
-    let scaleY = CGFloat(target.height) / image.extent.height
-    let scaleX = CGFloat(target.width) / image.extent.width
-    filter.setValue(image, forKey: kCIInputImageKey)
-    filter.setValue(scaleY, forKey: kCIInputScaleKey)
-    filter.setValue(scaleX / scaleY, forKey: kCIInputAspectRatioKey)
-    filter.setValue(0, forKey: "inputB")
-    filter.setValue(0.5, forKey: "inputC")
-    guard let output = filter.outputImage else {
-      throw LocalIdentifierError.preprocessingFailed
-    }
-    return output
-  }
-
-  fileprivate func renderedRGBBytes(_ image: CIImage) throws -> [UInt8] {
-    let rowBytes = Self.cropSize * 4
-    var bytes = [UInt8](repeating: 0, count: rowBytes * Self.cropSize)
-    let context = CIContext(options: [.cacheIntermediates: false])
-    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
-      throw LocalIdentifierError.preprocessingFailed
-    }
-    context.render(
-      image,
-      toBitmap: &bytes,
-      rowBytes: rowBytes,
-      bounds: CGRect(x: 0, y: 0, width: Self.cropSize, height: Self.cropSize),
-      format: .RGBA8,
-      colorSpace: colorSpace
-    )
-    return bytes
-  }
-
-  fileprivate func normalizedTensor(_ bytes: [UInt8]) throws -> MLMultiArray {
-    let tensor = try MLMultiArray(shape: [1, 3, 224, 224], dataType: .float32)
-    let planeSize = Self.cropSize * Self.cropSize
-    let values = tensor.dataPointer.bindMemory(to: Float32.self, capacity: tensor.count)
-    for pixelIndex in 0..<planeSize {
-      let byteIndex = pixelIndex * 4
-      for channel in 0..<3 {
-        let rescaled = Float(bytes[byteIndex + channel]) / 255
-        values[channel * planeSize + pixelIndex] =
-          (rescaled - Self.means[channel]) / Self.standardDeviations[channel]
-      }
-    }
-    return tensor
   }
 }

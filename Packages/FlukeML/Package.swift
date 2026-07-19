@@ -27,6 +27,10 @@ let package = Package(
         .process("Fixtures/producer-metadata.json"),
         .copy("Fixtures/python-catalog"),
         .process("Fixtures/python-catalog-provenance.json"),
+        .process("Fixtures/preprocessing-source.png"),
+        .process("Fixtures/preprocessing-golden.f32"),
+        .process("Fixtures/embedding-golden.f32"),
+        .process("Fixtures/preprocessing-provenance.json"),
       ]
     ),
   ]

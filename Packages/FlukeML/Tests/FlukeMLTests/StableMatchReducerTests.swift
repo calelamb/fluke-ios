@@ -1,5 +1,3 @@
-import CoreVideo
-import ImageIO
 import Testing
 
 @testable import FlukeML
@@ -64,6 +62,25 @@ struct StableMatchReducerTests {
     #expect(state.history.count == 5)
   }
 
+  @Test("bounds even an oversized internal history before appending")
+  func boundsOversizedInternalHistory() {
+    let reducer = StableMatchReducer(
+      scoreThreshold: 0.72,
+      marginThreshold: 0.08,
+      requiredWins: 3,
+      windowSize: 5
+    )
+    let oversized = StableMatchState(
+      history: [LocalMatch?](repeating: Self.candidate("old"), count: 10_000),
+      prominent: nil
+    )
+
+    let updated = reducer.reduce(state: oversized, candidate: Self.candidate("new"))
+
+    #expect(updated.history.count == 5)
+    #expect(updated.history.last??.catalogID == "new")
+  }
+
   @Test("identifier embeds, searches, thresholds, and stabilizes through one actor")
   func localIdentifierPipeline() async throws {
     let fixture = try FixtureCatalog()
@@ -97,10 +114,7 @@ extension StableMatchReducerTests {
   fileprivate struct FixedEmbedder: EmbeddingProviding {
     let embedding: [Float]
 
-    func embedding(
-      pixelBuffer _: CVPixelBuffer,
-      orientation _: CGImagePropertyOrientation
-    ) async throws -> [Float] {
+    func embedding(frame _: CameraFrame) async throws -> [Float] {
       embedding
     }
   }
