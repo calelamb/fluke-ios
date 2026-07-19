@@ -129,6 +129,8 @@ To re-record (e.g., after a deliberate visual change), delete the relevant PNG f
 
 The recorded snapshots are committed to git — they're the visual contract. PRs touching components should show the updated PNG diffs.
 
+Atlas snapshots use the stable `macos-15` name suffix on the pinned macOS 15 CI runner (for example, `test_atlasComponents.macos-15.png`). Keep that exact suffix when reviewing or updating the macOS 15 references; SnapshotTesting does not append its default `.1` counter after an explicit snapshot name.
+
 ### View model tests
 
 View models live in `FlukeFeatures/<Feature>/<Feature>ViewModel.swift`. Test them with mocked repositories:
