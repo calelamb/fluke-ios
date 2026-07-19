@@ -51,6 +51,21 @@ struct IdentifyCameraPipelineTests {
     #expect(decisions == [true, false, true, false, true])
   }
 
+  @Test("sampling accepts the first frame after a timestamp epoch rewinds")
+  func samplingTimestampRewind() {
+    var gate = FrameSamplingGate(minimumIntervalNanoseconds: 500_000_000)
+
+    let decisions = [
+      gate.shouldAccept(timestampNanoseconds: 8_000_000_000),
+      gate.shouldAccept(timestampNanoseconds: 8_100_000_000),
+      gate.shouldAccept(timestampNanoseconds: 100_000_000),
+      gate.shouldAccept(timestampNanoseconds: 200_000_000),
+      gate.shouldAccept(timestampNanoseconds: 600_000_000),
+    ]
+
+    #expect(decisions == [true, false, true, false, true])
+  }
+
   @Test("zero-buffer stream drops frames without demand or while one is in flight")
   func boundedBackpressure() async throws {
     let channel = CameraFrameChannel.make()
@@ -192,6 +207,94 @@ struct IdentifyCameraPipelineTests {
   }
 
   @MainActor
+  @Test(
+    "every stop intent wins while authorization is suspended",
+    arguments: PendingCameraStop.allCases)
+  func stopDuringAuthorization(stop: PendingCameraStop) async {
+    let authorization = SuspendedStatusCameraAuthorization()
+    let session = ImmediateFinishCameraSession()
+    let coordinator = IdentifyCameraCoordinator(
+      authorization: authorization,
+      session: session
+    )
+    let task = Task {
+      if stop == .cancelled {
+        await coordinator.run()
+      } else {
+        await coordinator.open()
+      }
+    }
+    await authorization.waitUntilStatusRequested()
+
+    if stop == .permissionLost {
+      await authorization.setCurrentStatus(.denied)
+    }
+    await Self.request(stop: stop, coordinator: coordinator, task: task)
+    await authorization.resumeInitialStatus(.authorized)
+    await task.value
+
+    #expect(await session.startCount == 0)
+    #expect(await session.stopCount == 0)
+    #expect(!coordinator.isPresented)
+    #expect(coordinator.state != .running)
+  }
+
+  @MainActor
+  @Test(
+    "every stop intent releases a session whose start is suspended exactly once",
+    arguments: PendingCameraStop.allCases)
+  func stopDuringSessionStart(stop: PendingCameraStop) async {
+    let authorization = RecordingCameraAuthorization(status: .authorized)
+    let session = SuspendedStartCameraSession()
+    let coordinator = IdentifyCameraCoordinator(
+      authorization: authorization,
+      session: session
+    )
+    let task = Task {
+      if stop == .cancelled {
+        await coordinator.run()
+      } else {
+        await coordinator.open()
+      }
+    }
+    await session.waitUntilStartRequested()
+
+    if stop == .permissionLost {
+      await authorization.setStatus(.denied)
+    }
+    await Self.request(stop: stop, coordinator: coordinator, task: task)
+    await session.resumeStart()
+    await task.value
+
+    #expect(await session.startCount == 1)
+    #expect(await session.stopCount == 1)
+    #expect(!coordinator.isPresented)
+    #expect(coordinator.state != .running)
+  }
+
+  @MainActor
+  @Test("a stop intent is preserved when a suspended session start later fails")
+  func stopDuringFailingSessionStart() async {
+    let authorization = RecordingCameraAuthorization(status: .authorized)
+    let session = SuspendedFailingStartCameraSession()
+    let coordinator = IdentifyCameraCoordinator(
+      authorization: authorization,
+      session: session
+    )
+    let task = Task { await coordinator.open() }
+    await session.waitUntilStartRequested()
+
+    await coordinator.close()
+    await session.resumeStartWithFailure()
+    await task.value
+
+    #expect(await session.startCount == 1)
+    #expect(await session.stopCount == 0)
+    #expect(!coordinator.isPresented)
+    #expect(coordinator.state == .stopped(.explicitClose))
+  }
+
+  @MainActor
   @Test("permission loss stops and releases an active session")
   func permissionLoss() async {
     let authorization = RecordingCameraAuthorization(status: .authorized)
@@ -306,6 +409,30 @@ struct IdentifyCameraPipelineTests {
 }
 
 extension IdentifyCameraPipelineTests {
+  @MainActor
+  static func request(
+    stop: PendingCameraStop,
+    coordinator: IdentifyCameraCoordinator,
+    task: Task<Void, Never>
+  ) async {
+    switch stop {
+    case .close:
+      await coordinator.close()
+    case .background:
+      await coordinator.applicationDidEnterBackground()
+    case .viewDisappeared:
+      await coordinator.viewDidDisappear()
+    case .thermal:
+      await coordinator.thermalStateDidChange(isSeriousOrCritical: true)
+    case .permissionLost:
+      await coordinator.permissionDidChange()
+    case .interrupted:
+      await coordinator.sessionWasInterrupted()
+    case .cancelled:
+      task.cancel()
+    }
+  }
+
   static func frame() throws -> CameraFrame {
     var pixelBuffer: CVPixelBuffer?
     guard
@@ -324,6 +451,16 @@ extension IdentifyCameraPipelineTests {
   }
 
   static func requireSendable<Value: Sendable>(_: Value.Type) {}
+}
+
+enum PendingCameraStop: CaseIterable, Sendable {
+  case close
+  case background
+  case viewDisappeared
+  case thermal
+  case permissionLost
+  case interrupted
+  case cancelled
 }
 
 private enum CameraTestError: Error {
@@ -391,5 +528,110 @@ private actor RecordingCameraSession: IdentifyCameraSessionProviding {
   func waitUntilStarted() async {
     guard startCount == 0 else { return }
     await withCheckedContinuation { startWaiters.append($0) }
+  }
+}
+
+private actor SuspendedStatusCameraAuthorization: IdentifyCameraAuthorizationProviding {
+  private var initialStatusContinuation: CheckedContinuation<IdentifyCameraPermission, Never>?
+  private var requestWaiters: [CheckedContinuation<Void, Never>] = []
+  private var currentStatus = IdentifyCameraPermission.authorized
+  private var statusRequestCount = 0
+
+  func status() async -> IdentifyCameraPermission {
+    statusRequestCount += 1
+    guard statusRequestCount == 1 else { return currentStatus }
+    let waiters = requestWaiters
+    requestWaiters = []
+    waiters.forEach { $0.resume() }
+    return await withCheckedContinuation { initialStatusContinuation = $0 }
+  }
+
+  func requestAccess() async -> Bool { currentStatus == .authorized }
+
+  func waitUntilStatusRequested() async {
+    guard statusRequestCount == 0 else { return }
+    await withCheckedContinuation { requestWaiters.append($0) }
+  }
+
+  func setCurrentStatus(_ status: IdentifyCameraPermission) {
+    currentStatus = status
+  }
+
+  func resumeInitialStatus(_ status: IdentifyCameraPermission) {
+    initialStatusContinuation?.resume(returning: status)
+    initialStatusContinuation = nil
+  }
+}
+
+private actor ImmediateFinishCameraSession: IdentifyCameraSessionProviding {
+  nonisolated let frames = CameraFrameChannel.make().frames
+  nonisolated let events = AsyncStream<IdentifyCameraSessionEvent> { $0.finish() }
+  nonisolated let previewSession: AVCaptureSession? = nil
+  private(set) var startCount = 0
+  private(set) var stopCount = 0
+
+  func start() { startCount += 1 }
+  func stop() { stopCount += 1 }
+}
+
+private actor SuspendedStartCameraSession: IdentifyCameraSessionProviding {
+  nonisolated let frames = CameraFrameChannel.make().frames
+  nonisolated let events = AsyncStream<IdentifyCameraSessionEvent> { $0.finish() }
+  nonisolated let previewSession: AVCaptureSession? = nil
+  private var startContinuation: CheckedContinuation<Void, Never>?
+  private var startWaiters: [CheckedContinuation<Void, Never>] = []
+  private(set) var startCount = 0
+  private(set) var stopCount = 0
+
+  func start() async {
+    startCount += 1
+    let waiters = startWaiters
+    startWaiters = []
+    waiters.forEach { $0.resume() }
+    await withCheckedContinuation { startContinuation = $0 }
+  }
+
+  func stop() { stopCount += 1 }
+
+  func waitUntilStartRequested() async {
+    guard startCount == 0 else { return }
+    await withCheckedContinuation { startWaiters.append($0) }
+  }
+
+  func resumeStart() {
+    startContinuation?.resume()
+    startContinuation = nil
+  }
+}
+
+private actor SuspendedFailingStartCameraSession: IdentifyCameraSessionProviding {
+  private enum StartFailure: Error { case rejected }
+
+  nonisolated let frames = CameraFrameChannel.make().frames
+  nonisolated let events = AsyncStream<IdentifyCameraSessionEvent> { $0.finish() }
+  nonisolated let previewSession: AVCaptureSession? = nil
+  private var startContinuation: CheckedContinuation<Void, any Error>?
+  private var startWaiters: [CheckedContinuation<Void, Never>] = []
+  private(set) var startCount = 0
+  private(set) var stopCount = 0
+
+  func start() async throws {
+    startCount += 1
+    let waiters = startWaiters
+    startWaiters = []
+    waiters.forEach { $0.resume() }
+    try await withCheckedThrowingContinuation { startContinuation = $0 }
+  }
+
+  func stop() { stopCount += 1 }
+
+  func waitUntilStartRequested() async {
+    guard startCount == 0 else { return }
+    await withCheckedContinuation { startWaiters.append($0) }
+  }
+
+  func resumeStartWithFailure() {
+    startContinuation?.resume(throwing: StartFailure.rejected)
+    startContinuation = nil
   }
 }

@@ -71,8 +71,11 @@ struct FrameSamplingGate: Sendable {
       self.lastAcceptedNanoseconds = timestampNanoseconds
       return true
     }
-    guard timestampNanoseconds >= lastAcceptedNanoseconds,
-      timestampNanoseconds - lastAcceptedNanoseconds >= minimumIntervalNanoseconds
+    guard timestampNanoseconds >= lastAcceptedNanoseconds else {
+      self.lastAcceptedNanoseconds = timestampNanoseconds
+      return true
+    }
+    guard timestampNanoseconds - lastAcceptedNanoseconds >= minimumIntervalNanoseconds
     else {
       return false
     }

@@ -19,6 +19,52 @@ enum IdentifyVideoOutputConfiguration {
   #endif
 }
 
+#if os(iOS)
+  struct AVFoundationCameraInputFactory: Sendable {
+    private let makeInput: @Sendable () throws -> AVCaptureInput
+
+    init(_ makeInput: @escaping @Sendable () throws -> AVCaptureInput) {
+      self.makeInput = makeInput
+    }
+
+    init(
+      discover:
+        @escaping @Sendable (
+          AVCaptureDevice.DeviceType, AVMediaType, AVCaptureDevice.Position
+        ) -> AVCaptureDevice?,
+      makeInput: @escaping @Sendable (AVCaptureDevice) throws -> AVCaptureInput
+    ) {
+      self.makeInput = {
+        guard
+          let device = discover(
+            .builtInWideAngleCamera,
+            .video,
+            .back
+          )
+        else {
+          throw IdentifyCameraSessionError.cameraUnavailable
+        }
+        do {
+          return try makeInput(device)
+        } catch {
+          throw IdentifyCameraSessionError.inputUnavailable
+        }
+      }
+    }
+
+    func makeBackWideVideoInput() throws -> AVCaptureInput {
+      try makeInput()
+    }
+
+    static let live = AVFoundationCameraInputFactory(
+      discover: { deviceType, mediaType, position in
+        AVCaptureDevice.default(deviceType, for: mediaType, position: position)
+      },
+      makeInput: { try AVCaptureDeviceInput(device: $0) }
+    )
+  }
+#endif
+
 struct AVFoundationCameraAuthorization: IdentifyCameraAuthorizationProviding {
   func status() async -> IdentifyCameraPermission {
     #if os(iOS)
@@ -57,25 +103,43 @@ private enum IdentifyCameraSessionError: Error {
     nonisolated let previewSession: AVCaptureSession?
 
     private let captureSession: AVCaptureSession
+    private let inputFactory: AVFoundationCameraInputFactory
+    private let outputFactory: @Sendable () -> AVCaptureVideoDataOutput
+    private let notificationCenter: NotificationCenter
     private let frameContinuation: AsyncStream<CameraFrame>.Continuation
     private let eventContinuation: AsyncStream<IdentifyCameraSessionEvent>.Continuation
     private let frameDelegate: IdentifyVideoFrameDelegate
     private var configured = false
     private var observerTokens: [NSObjectProtocol] = []
 
-    init() {
+    init(
+      captureSession: AVCaptureSession = AVCaptureSession(),
+      inputFactory: AVFoundationCameraInputFactory = .live,
+      outputFactory: @escaping @Sendable () -> AVCaptureVideoDataOutput = {
+        AVCaptureVideoDataOutput()
+      },
+      notificationCenter: NotificationCenter = .default,
+      frameConverter: @escaping (CVPixelBuffer) throws -> CameraFrame = {
+        try CameraFrame(pixelBuffer: $0, orientation: .up)
+      }
+    ) {
       let frameChannel = CameraFrameChannel.make()
       let eventChannel = AsyncStream<IdentifyCameraSessionEvent>.makeStream()
-      let captureSession = AVCaptureSession()
       frames = frameChannel.frames
       events = eventChannel.stream
       previewSession = captureSession
       self.captureSession = captureSession
+      self.inputFactory = inputFactory
+      self.outputFactory = outputFactory
+      self.notificationCenter = notificationCenter
       frameContinuation = frameChannel.continuation
       eventContinuation = eventChannel.continuation
       frameDelegate = IdentifyVideoFrameDelegate(
-        frameContinuation: frameChannel.continuation,
-        eventContinuation: eventChannel.continuation
+        processor: IdentifyVideoFrameProcessor(
+          frameContinuation: frameChannel.continuation,
+          eventContinuation: eventChannel.continuation,
+          convert: frameConverter
+        )
       )
     }
 
@@ -93,7 +157,7 @@ private enum IdentifyCameraSessionError: Error {
 
     func stop() {
       if captureSession.isRunning { captureSession.stopRunning() }
-      observerTokens.forEach(NotificationCenter.default.removeObserver)
+      observerTokens.forEach(notificationCenter.removeObserver)
       observerTokens = []
       guard configured else { return }
       captureSession.beginConfiguration()
@@ -106,12 +170,12 @@ private enum IdentifyCameraSessionError: Error {
     private func installObservers() {
       guard observerTokens.isEmpty else { return }
       observerTokens = [
-        NotificationCenter.default.addObserver(
+        notificationCenter.addObserver(
           forName: .AVCaptureSessionWasInterrupted,
           object: captureSession,
           queue: nil
         ) { [eventContinuation] _ in eventContinuation.yield(.interrupted) },
-        NotificationCenter.default.addObserver(
+        notificationCenter.addObserver(
           forName: .AVCaptureSessionRuntimeError,
           object: captureSession,
           queue: nil
@@ -120,22 +184,8 @@ private enum IdentifyCameraSessionError: Error {
     }
 
     private func configure() throws {
-      guard
-        let device = AVCaptureDevice.default(
-          .builtInWideAngleCamera,
-          for: .video,
-          position: .back
-        )
-      else {
-        throw IdentifyCameraSessionError.cameraUnavailable
-      }
-      let input: AVCaptureDeviceInput
-      do {
-        input = try AVCaptureDeviceInput(device: device)
-      } catch {
-        throw IdentifyCameraSessionError.inputUnavailable
-      }
-      let output = AVCaptureVideoDataOutput()
+      let input = try inputFactory.makeBackWideVideoInput()
+      let output = outputFactory()
       IdentifyVideoOutputConfiguration.apply(to: output)
       output.setSampleBufferDelegate(frameDelegate, queue: frameDelegate.queue)
 
@@ -160,17 +210,10 @@ private enum IdentifyCameraSessionError: Error {
     AVCaptureVideoDataOutputSampleBufferDelegate
   {
     let queue = DispatchQueue(label: "app.fluke.identify.camera.frames")
+    private let processor: IdentifyVideoFrameProcessor
 
-    private let frameContinuation: AsyncStream<CameraFrame>.Continuation
-    private let eventContinuation: AsyncStream<IdentifyCameraSessionEvent>.Continuation
-    private var samplingGate = FrameSamplingGate()
-
-    init(
-      frameContinuation: AsyncStream<CameraFrame>.Continuation,
-      eventContinuation: AsyncStream<IdentifyCameraSessionEvent>.Continuation
-    ) {
-      self.frameContinuation = frameContinuation
-      self.eventContinuation = eventContinuation
+    init(processor: IdentifyVideoFrameProcessor) {
+      self.processor = processor
     }
 
     func captureOutput(
@@ -178,6 +221,29 @@ private enum IdentifyCameraSessionError: Error {
       didOutput sampleBuffer: CMSampleBuffer,
       from connection: AVCaptureConnection
     ) {
+      processor.process(sampleBuffer: sampleBuffer)
+    }
+  }
+
+  final class IdentifyVideoFrameProcessor {
+    private let frameContinuation: AsyncStream<CameraFrame>.Continuation
+    private let eventContinuation: AsyncStream<IdentifyCameraSessionEvent>.Continuation
+    private let convert: (CVPixelBuffer) throws -> CameraFrame
+    private var samplingGate = FrameSamplingGate()
+
+    init(
+      frameContinuation: AsyncStream<CameraFrame>.Continuation,
+      eventContinuation: AsyncStream<IdentifyCameraSessionEvent>.Continuation,
+      convert: @escaping (CVPixelBuffer) throws -> CameraFrame = {
+        try CameraFrame(pixelBuffer: $0, orientation: .up)
+      }
+    ) {
+      self.frameContinuation = frameContinuation
+      self.eventContinuation = eventContinuation
+      self.convert = convert
+    }
+
+    func process(sampleBuffer: CMSampleBuffer) {
       let timestamp = Self.nanoseconds(for: sampleBuffer)
       // This is the intentional <=2 fps sampling drop, before retaining frame storage.
       guard samplingGate.shouldAccept(timestampNanoseconds: timestamp) else { return }
@@ -188,7 +254,7 @@ private enum IdentifyCameraSessionError: Error {
         return
       }
       do {
-        let frame = try CameraFrame(pixelBuffer: pixelBuffer, orientation: .up)
+        let frame = try convert(pixelBuffer)
         frameContinuation.yield(frame)
       } catch {
         eventContinuation.yield(.failed)

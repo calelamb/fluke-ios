@@ -112,10 +112,12 @@ private struct DorsalFramingGuide: View {
 private struct IdentifyReadyView: View {
   private let browseWhales: () -> Void
   private let submitSighting: () -> Void
-  private let camera: IdentifyCameraCoordinator
   @Environment(\.scenePhase) private var scenePhase
-  @State private var model: IdentifyViewModel
+  @State private var owner: IdentifyReadyState
   @State private var selectedPhoto: PhotosPickerItem?
+
+  private var camera: IdentifyCameraCoordinator { owner.camera }
+  private var model: IdentifyViewModel { owner.model }
 
   init(
     online: Bool,
@@ -123,14 +125,9 @@ private struct IdentifyReadyView: View {
     browseWhales: @escaping () -> Void,
     submitSighting: @escaping () -> Void
   ) {
-    let camera = IdentifyCameraCoordinator()
-    self.camera = camera
     self.browseWhales = browseWhales
     self.submitSighting = submitSighting
-    _model = State(
-      initialValue: IdentifyViewModel(
-        capability: true, online: online, media: camera, service: service
-      ))
+    _owner = State(initialValue: IdentifyReadyState(online: online, service: service))
   }
 
   var body: some View {

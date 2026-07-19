@@ -19,6 +19,7 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
   private let makeSession: () -> any IdentifyCameraSessionProviding
   private var session: (any IdentifyCameraSessionProviding)?
   private var isSessionActive = false
+  private var lifecycleGeneration: UInt64 = 0
 
   convenience init() {
     self.init(
@@ -65,8 +66,10 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
 
   func open() async {
     guard !isSessionActive else { return }
+    let openingGeneration = lifecycleGeneration
     state = .requestingPermission
     let permission = await resolvedPermission()
+    guard await openingMayContinue(generation: openingGeneration) else { return }
     guard permission == .authorized else {
       state = .permission(permission)
       isPresented = false
@@ -76,9 +79,13 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
     do {
       try await session.start()
       isSessionActive = true
+      guard await startedSessionMayPublish(generation: openingGeneration, session: session) else {
+        return
+      }
       isPresented = true
       state = .running
     } catch {
+      guard openingGeneration == lifecycleGeneration, !Task.isCancelled else { return }
       isPresented = false
       state = .permission(.unavailable)
     }
@@ -136,19 +143,45 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
   }
 
   private func stop(for reason: IdentifyCameraStopReason) async {
+    lifecycleGeneration &+= 1
+    isPresented = false
+    state = .stopped(reason)
     guard isSessionActive, let session else { return }
     isSessionActive = false
-    isPresented = false
     await session.stop()
-    state = .stopped(reason)
   }
 
   private func stopForUnavailableSession() async {
+    lifecycleGeneration &+= 1
     guard isSessionActive, let session else { return }
     isSessionActive = false
     isPresented = false
     await session.stop()
     state = .permission(.unavailable)
+  }
+
+  private func openingMayContinue(generation: UInt64) async -> Bool {
+    guard !Task.isCancelled else {
+      await stop(for: .cancelled)
+      return false
+    }
+    return generation == lifecycleGeneration
+  }
+
+  private func startedSessionMayPublish(
+    generation: UInt64,
+    session: any IdentifyCameraSessionProviding
+  ) async -> Bool {
+    guard !Task.isCancelled else {
+      await stop(for: .cancelled)
+      return false
+    }
+    guard generation == lifecycleGeneration else {
+      isSessionActive = false
+      await session.stop()
+      return false
+    }
+    return true
   }
 
   private func resolvedSession() -> any IdentifyCameraSessionProviding {

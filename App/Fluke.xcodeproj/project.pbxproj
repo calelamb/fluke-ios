@@ -13,6 +13,9 @@
 		A10000042FA6000000000004 /* FlukeKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10100012FA6000000000001 /* FlukeKit */; };
 		A10000052FA6000000000005 /* FlukeReleaseB in Frameworks */ = {isa = PBXBuildFile; productRef = A10100042FA6000000000004 /* FlukeReleaseB */; };
 		A10000062FA6000000000006 /* FlukeML in Frameworks */ = {isa = PBXBuildFile; productRef = A10100052FA6000000000005 /* FlukeML */; };
+		A10000072FA6000000000007 /* FlukeFeatures in Frameworks */ = {isa = PBXBuildFile; productRef = A10100032FA6000000000003 /* FlukeFeatures */; };
+		A10000082FA6000000000008 /* FlukeML in Frameworks */ = {isa = PBXBuildFile; productRef = A10100052FA6000000000005 /* FlukeML */; };
+		A10000092FA6000000000009 /* FlukeReleaseB in Frameworks */ = {isa = PBXBuildFile; productRef = A10100042FA6000000000004 /* FlukeReleaseB */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -90,6 +93,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000042FA6000000000004 /* FlukeKit in Frameworks */,
+				A10000072FA6000000000007 /* FlukeFeatures in Frameworks */,
+				A10000082FA6000000000008 /* FlukeML in Frameworks */,
+				A10000092FA6000000000009 /* FlukeReleaseB in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -183,6 +189,9 @@
 			name = FlukeTests;
 			packageProductDependencies = (
 				A10100012FA6000000000001 /* FlukeKit */,
+				A10100032FA6000000000003 /* FlukeFeatures */,
+				A10100052FA6000000000005 /* FlukeML */,
+				A10100042FA6000000000004 /* FlukeReleaseB */,
 			);
 			productName = FlukeTests;
 			productReference = 97C8ECDB2FA59EE000BCF41D /* FlukeTests.xctest */;
