@@ -48,7 +48,17 @@ public struct ProviderFreshness: Codable, Equatable, Sendable {
     lastSuccessAt = try values.decodeIfPresent(Date.self, forKey: .lastSuccessAt)
     provider = try values.decode(FeedProvider.self, forKey: .provider)
     status = try values.decode(FeedProviderStatus.self, forKey: .status)
-    try require((1...(31 * 24 * 60 * 60)).contains(expectedMaximumLag), decoder, "Invalid provider lag")
+    try require(
+      (1...(31 * 24 * 60 * 60)).contains(expectedMaximumLag), decoder, "Invalid provider lag")
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var values = encoder.container(keyedBy: CodingKeys.self)
+    try values.encode(expectedMaximumLag, forKey: .expectedMaximumLag)
+    try values.encode(lastAttemptAt, forKey: .lastAttemptAt)
+    try values.encode(lastSuccessAt, forKey: .lastSuccessAt)
+    try values.encode(provider, forKey: .provider)
+    try values.encode(status, forKey: .status)
   }
 }
 
@@ -72,6 +82,7 @@ public struct FeedSightingPhoto: Codable, Hashable, Sendable {
     try requireStableID(id, decoder)
     try requireHTTPURL(url, decoder)
     try requireHTTPURL(thumbnailUrl, decoder)
+    try require((0..<1_000).contains(orderIndex), decoder, "Invalid photo order")
   }
 }
 
@@ -252,13 +263,25 @@ public enum SightingFeedItem: Codable, Hashable, Sendable, Identifiable {
   case removed(RemovedFeedSighting)
 
   public var id: String {
-    switch self { case .internal(let value): value.id; case .external(let value): value.id; case .removed(let value): value.id }
+    switch self {
+    case .internal(let value): value.id
+    case .external(let value): value.id
+    case .removed(let value): value.id
+    }
   }
   public var revision: Int {
-    switch self { case .internal(let value): value.revision; case .external(let value): value.revision; case .removed(let value): value.revision }
+    switch self {
+    case .internal(let value): value.revision
+    case .external(let value): value.revision
+    case .removed(let value): value.revision
+    }
   }
   public var observedAt: Date? {
-    switch self { case .internal(let value): value.observedAt; case .external(let value): value.observedAt; case .removed: nil }
+    switch self {
+    case .internal(let value): value.observedAt
+    case .external(let value): value.observedAt
+    case .removed: nil
+    }
   }
 
   public init(from decoder: any Decoder) throws {
@@ -302,7 +325,9 @@ public struct SightingFeedPage: Decodable, Sendable {
     providers = try values.decode([ProviderFreshness].self, forKey: .providers)
     syncCursor = try values.decode(String.self, forKey: .syncCursor)
     try require(items.count <= 100, decoder, "Too many feed items")
-    try require(providers.count == 2 && Set(providers.map(\.provider)).count == 2, decoder, "Invalid providers")
+    try require(
+      providers.count == 2 && Set(providers.map(\.provider)).count == 2, decoder,
+      "Invalid providers")
     try requireCursor(syncCursor, decoder)
     if let pageCursor { try requireCursor(pageCursor, decoder) }
     try require(hasMore || pageCursor == nil, decoder, "Unexpected terminal page cursor")
@@ -310,16 +335,25 @@ public struct SightingFeedPage: Decodable, Sendable {
 }
 
 public struct SightingFeedState: Codable, Equatable, Sendable {
+  public static let maximumRetainedRevisions = 10_000
+
   public let items: [SightingFeedItem]
   public let tombstones: [String: Int]
+  public let revisionFloor: Int
   public let syncCursor: String
   public let providers: [ProviderFreshness]
 
   private enum CodingKeys: String, CodingKey, CaseIterable {
-    case items, tombstones, syncCursor, providers
+    case items, tombstones, revisionFloor, syncCursor, providers
   }
 
-  public init(items: [SightingFeedItem], tombstones: [String: Int], syncCursor: String, providers: [ProviderFreshness]) {
+  public init(
+    items: [SightingFeedItem],
+    tombstones: [String: Int],
+    revisionFloor: Int = 0,
+    syncCursor: String,
+    providers: [ProviderFreshness]
+  ) {
     var active: [String: SightingFeedItem] = [:]
     for item in items where item.observedAt != nil {
       guard item.revision > (active[item.id]?.revision ?? 0) else { continue }
@@ -328,8 +362,10 @@ public struct SightingFeedState: Codable, Equatable, Sendable {
     for (id, revision) in tombstones where revision >= (active[id]?.revision ?? Int.max) {
       active[id] = nil
     }
-    self.items = Self.sorted(Array(active.values))
-    self.tombstones = tombstones
+    let bounded = Self.bounded(active: active, tombstones: tombstones, floor: revisionFloor)
+    self.items = Self.sorted(Array(bounded.active.values))
+    self.tombstones = bounded.tombstones
+    self.revisionFloor = bounded.floor
     self.syncCursor = syncCursor
     self.providers = providers
   }
@@ -339,30 +375,54 @@ public struct SightingFeedState: Codable, Equatable, Sendable {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     let decodedItems = try values.decode([SightingFeedItem].self, forKey: .items)
     let decodedTombstones = try values.decode([String: Int].self, forKey: .tombstones)
+    let decodedFloor = try values.decode(Int.self, forKey: .revisionFloor)
     let decodedCursor = try values.decode(String.self, forKey: .syncCursor)
     let decodedProviders = try values.decode([ProviderFreshness].self, forKey: .providers)
-    try require(decodedItems.allSatisfy { $0.observedAt != nil }, decoder, "Cached items contain tombstones")
+    try require(
+      decodedItems.allSatisfy { $0.observedAt != nil }, decoder, "Cached items contain tombstones")
+    try require(
+      decodedItems.count + decodedTombstones.count <= Self.maximumRetainedRevisions, decoder,
+      "Cached state exceeds limit")
+    try require(
+      Set(decodedItems.map(\.id)).count == decodedItems.count, decoder,
+      "Cached items contain duplicate IDs")
+    try require(
+      Set(decodedItems.map(\.id)).isDisjoint(with: decodedTombstones.keys), decoder,
+      "Cached state overlaps active and removed IDs")
+    try require(
+      (0...9_007_199_254_740_991).contains(decodedFloor), decoder, "Invalid revision floor")
     for (id, revision) in decodedTombstones {
       try requirePublicID(id, decoder)
       try requireRevision(revision, decoder)
+      try require(revision > decodedFloor, decoder, "Cached tombstone is below revision floor")
     }
+    try require(
+      decodedProviders.count == 2
+        && Set(decodedProviders.map(\.provider)) == Set(FeedProvider.allCases),
+      decoder,
+      "Invalid cached providers"
+    )
     try requireCursor(decodedCursor, decoder)
     self.init(
       items: decodedItems,
       tombstones: decodedTombstones,
+      revisionFloor: decodedFloor,
       syncCursor: decodedCursor,
       providers: decodedProviders
     )
   }
 
-  public func applying(items incoming: [SightingFeedItem], syncCursor: String, providers: [ProviderFreshness]) -> Self {
+  public func applying(
+    items incoming: [SightingFeedItem], syncCursor: String, providers: [ProviderFreshness]
+  ) -> Self {
     var active: [String: SightingFeedItem] = [:]
     for item in items where item.revision > (active[item.id]?.revision ?? 0) {
       active[item.id] = item
     }
     var removed = tombstones
     for item in incoming {
-      let knownRevision = max(active[item.id]?.revision ?? 0, removed[item.id] ?? 0)
+      let knownRevision = max(
+        active[item.id]?.revision ?? revisionFloor, removed[item.id] ?? revisionFloor)
       guard item.revision > knownRevision else { continue }
       switch item {
       case .removed:
@@ -373,12 +433,38 @@ public struct SightingFeedState: Codable, Equatable, Sendable {
         removed[item.id] = nil
       }
     }
-    return Self(items: Array(active.values), tombstones: removed, syncCursor: syncCursor, providers: providers)
+    return Self(
+      items: Array(active.values), tombstones: removed, revisionFloor: revisionFloor,
+      syncCursor: syncCursor, providers: providers
+    )
+  }
+
+  private static func bounded(
+    active initialActive: [String: SightingFeedItem],
+    tombstones initialTombstones: [String: Int],
+    floor initialFloor: Int
+  ) -> (active: [String: SightingFeedItem], tombstones: [String: Int], floor: Int) {
+    var active = initialActive
+    var tombstones = initialTombstones.filter { $0.value > initialFloor }
+    var floor = initialFloor
+    while active.count + tombstones.count > maximumRetainedRevisions {
+      if let oldest = tombstones.min(by: { $0.value < $1.value }) {
+        tombstones[oldest.key] = nil
+        floor = max(floor, oldest.value)
+      } else if let oldest = sorted(Array(active.values)).last {
+        active[oldest.id] = nil
+        floor = max(floor, oldest.revision)
+      }
+    }
+    tombstones = tombstones.filter { $0.value > floor }
+    return (active, tombstones, floor)
   }
 
   private static func sorted(_ items: [SightingFeedItem]) -> [SightingFeedItem] {
     items.sorted {
-      guard $0.observedAt == $1.observedAt else { return ($0.observedAt ?? .distantPast) > ($1.observedAt ?? .distantPast) }
+      guard $0.observedAt == $1.observedAt else {
+        return ($0.observedAt ?? .distantPast) > ($1.observedAt ?? .distantPast)
+      }
       return $0.id < $1.id
     }
   }
@@ -395,11 +481,15 @@ public enum SightingFeedFreshness: Equatable, Sendable {
       guard let success = value.lastSuccessAt else { return nil }
       return max(0, Int(now.timeIntervalSince(success)))
     }
-    let allFresh = Set(unique.keys) == expected && unique.values.allSatisfy { values in
-      guard values.count == 1, let value = values.first, let success = value.lastSuccessAt else { return false }
-      let age = now.timeIntervalSince(success)
-      return age >= -300 && age <= TimeInterval(value.expectedMaximumLag)
-    }
+    let allFresh =
+      Set(unique.keys) == expected
+      && unique.values.allSatisfy { values in
+        guard values.count == 1, let value = values.first, let success = value.lastSuccessAt else {
+          return false
+        }
+        let age = now.timeIntervalSince(success)
+        return age >= -300 && age <= TimeInterval(value.expectedMaximumLag)
+      }
     self = allFresh ? .live : .recent(lastSuccessAge: ages.max())
   }
 }
@@ -411,12 +501,19 @@ private struct DynamicKey: CodingKey {
   init?(intValue: Int) { return nil }
 }
 
-private func requireExactKeys<Key: CodingKey & CaseIterable>(_ decoder: any Decoder, _ keys: [Key]) throws {
+private func requireExactKeys<Key: CodingKey & CaseIterable>(_ decoder: any Decoder, _ keys: [Key])
+  throws
+{
   let values = try decoder.container(keyedBy: DynamicKey.self)
-  try require(Set(values.allKeys.map(\.stringValue)) == Set(keys.map(\.stringValue)), decoder, "Unexpected or missing keys")
+  try require(
+    Set(values.allKeys.map(\.stringValue)) == Set(keys.map(\.stringValue)), decoder,
+    "Unexpected or missing keys")
 }
 
-private func validateFeedFields(id: String, revision: Int, latitude: Double, longitude: Double, groupSize: Int?, nestedCounts: [Int], decoder: any Decoder) throws {
+private func validateFeedFields(
+  id: String, revision: Int, latitude: Double, longitude: Double, groupSize: Int?,
+  nestedCounts: [Int], decoder: any Decoder
+) throws {
   try requirePublicID(id, decoder)
   try requireRevision(revision, decoder)
   try require(latitude.isFinite && (-90...90).contains(latitude), decoder, "Invalid latitude")
@@ -426,10 +523,14 @@ private func validateFeedFields(id: String, revision: Int, latitude: Double, lon
 }
 
 private func requirePublicID(_ value: String, _ decoder: any Decoder) throws {
-  try require(!value.isEmpty && value.utf16.count <= 2_710 && value.contains(where: { !$0.isWhitespace }), decoder, "Invalid feed ID")
+  try require(
+    !value.isEmpty && value.utf16.count <= 2_710 && value.contains(where: { !$0.isWhitespace }),
+    decoder, "Invalid feed ID")
 }
 private func requireStableID(_ value: String, _ decoder: any Decoder) throws {
-  try require(!value.isEmpty && value.utf16.count <= 200 && value.contains(where: { !$0.isWhitespace }), decoder, "Invalid stable ID")
+  try require(
+    !value.isEmpty && value.utf16.count <= 200 && value.contains(where: { !$0.isWhitespace }),
+    decoder, "Invalid stable ID")
 }
 private func requireRevision(_ value: Int, _ decoder: any Decoder) throws {
   try require((1...9_007_199_254_740_991).contains(value), decoder, "Invalid revision")
@@ -444,7 +545,9 @@ private func requireHTTPURL(_ value: String, _ decoder: any Decoder) throws {
   let components = URLComponents(string: value)
   let scheme = components?.scheme?.lowercased()
   let hasHost = components?.host?.isEmpty == false
-  try require(value.utf16.count <= 2_048 && hasHost && (scheme == "http" || scheme == "https"), decoder, "Invalid HTTP URL")
+  try require(
+    value.utf16.count <= 2_048 && hasHost && (scheme == "http" || scheme == "https"), decoder,
+    "Invalid HTTP URL")
 }
 
 private func decodeEcotype<Key: CodingKey>(
@@ -457,7 +560,9 @@ private func decodeEcotype<Key: CodingKey>(
   guard let value = Ecotype(rawValue: rawValue) else { throw corrupt(decoder, "Invalid ecotype") }
   return value
 }
-private func require(_ condition: @autoclosure () -> Bool, _ decoder: any Decoder, _ message: String) throws {
+private func require(
+  _ condition: @autoclosure () -> Bool, _ decoder: any Decoder, _ message: String
+) throws {
   guard condition() else { throw corrupt(decoder, message) }
 }
 private func corrupt(_ decoder: any Decoder, _ message: String) -> DecodingError {

@@ -12,7 +12,9 @@ public actor FeedPollingActor {
   private let sleep: Sleep
   private var foreground = false
   private var visible = false
-  private var loop: Task<Void, Never>?
+  private var loop: PollingLoop?
+  private var retirement: PollingLoop?
+  private var lifecycleLease: UUID?
 
   public init(
     refresh: @escaping Refresh,
@@ -24,24 +26,53 @@ public actor FeedPollingActor {
 
   public var hasActiveLoop: Bool { loop != nil }
 
-  public func setForeground(_ value: Bool) {
-    foreground = value
-    reconcileLoop()
+  public func setLifecycle(visible: Bool, foreground: Bool) async {
+    self.visible = visible
+    self.foreground = foreground
+    await reconcileLoop()
   }
 
-  public func setVisible(_ value: Bool) {
-    visible = value
-    reconcileLoop()
+  public func maintainLifecycle(visible: Bool, foreground: Bool) async {
+    let lease = UUID()
+    lifecycleLease = lease
+    await setLifecycle(visible: visible, foreground: foreground)
+    do {
+      try await Task.sleep(for: .seconds(31_536_000))
+    } catch {
+      // SwiftUI cancels the structured lifecycle task when its identity changes.
+    }
+    guard lifecycleLease == lease else { return }
+    lifecycleLease = nil
+    await setLifecycle(visible: false, foreground: false)
   }
 
-  private func reconcileLoop() {
+  private func reconcileLoop() async {
     guard foreground && visible else {
-      loop?.cancel()
+      guard let current = loop else { return }
       loop = nil
+      retirement = current
+      current.task.cancel()
+      await current.task.value
+      if retirement?.id == current.id { retirement = nil }
       return
     }
     guard loop == nil else { return }
-    loop = Task { await run() }
+    if let retirement {
+      await retirement.task.value
+      if self.retirement?.id == retirement.id { self.retirement = nil }
+    }
+    guard foreground && visible && loop == nil else { return }
+    let id = UUID()
+    let task = Task {
+      await run()
+      loopDidFinish(id)
+    }
+    loop = PollingLoop(id: id, task: task)
+  }
+
+  private func loopDidFinish(_ id: UUID) {
+    if loop?.id == id { loop = nil }
+    if retirement?.id == id { retirement = nil }
   }
 
   private func run() async {
@@ -63,5 +94,9 @@ public actor FeedPollingActor {
       }
     }
   }
+}
 
+private struct PollingLoop {
+  let id: UUID
+  let task: Task<Void, Never>
 }

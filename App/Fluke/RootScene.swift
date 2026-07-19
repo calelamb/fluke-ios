@@ -92,6 +92,8 @@ struct RootScene: View {
         NavigationStack {
           SightingsView(
             feedRepository: environment.sightingFeedRepository,
+            isVisible: selectedTab == .sightings,
+            isForeground: scenePhase == .active,
             onOpenWhaleMovement: presentMovement
           )
           .toolbar {
