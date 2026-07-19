@@ -3,11 +3,17 @@ import Foundation
 public actor SubmissionReplayActor {
   private let queue: SubmissionQueue
   private let service: any SubmissionServiceProtocol
+  private let invalidator: any SubmissionInvalidating
   private var isFlushing = false
 
-  public init(queue: SubmissionQueue, service: any SubmissionServiceProtocol) {
+  public init(
+    queue: SubmissionQueue,
+    service: any SubmissionServiceProtocol,
+    invalidator: any SubmissionInvalidating = NoopSubmissionInvalidator()
+  ) {
     self.queue = queue
     self.service = service
+    self.invalidator = invalidator
   }
 
   public func flush() async {
@@ -22,6 +28,7 @@ public actor SubmissionReplayActor {
         let photos = try await queue.photos(for: entry)
         _ = try await service.submit(payload: entry.payload, photos: photos)
         try await queue.discard(id: entry.id)
+        await invalidator.ownerSightingsDidChange()
       } catch is CancellationError {
         return
       } catch SubmissionServiceError.partial(let receipt, let indices) {

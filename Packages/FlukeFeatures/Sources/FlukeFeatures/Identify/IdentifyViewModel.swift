@@ -1,4 +1,5 @@
 import FlukeML
+import FlukeReleaseB
 import Foundation
 import Observation
 
@@ -88,6 +89,21 @@ public final class IdentifyViewModel {
   }
 
   public var cameraState: PhotoCameraState { media.cameraState }
+
+  public var submissionSuggestion: LocalIdentificationSuggestion? {
+    guard presentation == .stabilized, let result, let prominent = result.prominent else {
+      return nil
+    }
+    return LocalIdentificationSuggestion(
+      catalogID: prominent.catalogID,
+      similarityScore: Double(prominent.score),
+      scoreSemantics: result.artifact.scoreSemantics,
+      manifestVersion: result.artifact.manifestVersion,
+      modelVersion: result.artifact.modelVersion,
+      indexVersion: result.artifact.indexVersion,
+      matchedReferencePhotoIDs: prominent.referencePhotoIDs
+    )
+  }
 
   public var unavailableMessage: String? {
     switch availability {

@@ -24,6 +24,7 @@ public struct YouView: View {
   private let deletionAuthorizationPending: Bool
   private let repository: any LogbookRepositoryProtocol
   private let queue: any QueuedLogbookProviding
+  private let invalidationObserver: any SubmissionInvalidationObserving
   private let configureAppleRequest: (ASAuthorizationAppleIDRequest) -> Void
   private let completeAppleAuthorization: (Result<ASAuthorization, Error>) -> Void
   private let configureDeletionAuthorization: (ASAuthorizationAppleIDRequest) -> Void
@@ -42,6 +43,8 @@ public struct YouView: View {
     deletionAuthorizationPending: Bool,
     repository: any LogbookRepositoryProtocol,
     queue: any QueuedLogbookProviding,
+    invalidationObserver: any SubmissionInvalidationObserving =
+      NoopSubmissionInvalidationObserver(),
     configureAppleRequest: @escaping (ASAuthorizationAppleIDRequest) -> Void,
     completeAppleAuthorization: @escaping (Result<ASAuthorization, Error>) -> Void,
     configureDeletionAuthorization: @escaping (ASAuthorizationAppleIDRequest) -> Void,
@@ -56,6 +59,7 @@ public struct YouView: View {
     self.deletionAuthorizationPending = deletionAuthorizationPending
     self.repository = repository
     self.queue = queue
+    self.invalidationObserver = invalidationObserver
     self.configureAppleRequest = configureAppleRequest
     self.completeAppleAuthorization = completeAppleAuthorization
     self.configureDeletionAuthorization = configureDeletionAuthorization
@@ -179,6 +183,7 @@ public struct YouView: View {
       LogbookView(
         repository: repository,
         queue: queue,
+        invalidationObserver: invalidationObserver,
         onSessionExpired: sessionExpired
       )
       Divider()

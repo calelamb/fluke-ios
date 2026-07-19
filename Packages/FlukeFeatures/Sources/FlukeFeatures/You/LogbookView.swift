@@ -25,14 +25,18 @@ extension LogbookStatus {
 public struct LogbookView: View {
   @State private var viewModel: LogbookViewModel
   private let onSessionExpired: () -> Void
+  private let invalidationObserver: any SubmissionInvalidationObserving
 
   public init(
     repository: any LogbookRepositoryProtocol,
     queue: any QueuedLogbookProviding,
+    invalidationObserver: any SubmissionInvalidationObserving =
+      NoopSubmissionInvalidationObserver(),
     onSessionExpired: @escaping () -> Void
   ) {
     _viewModel = State(initialValue: LogbookViewModel(repository: repository, queue: queue))
     self.onSessionExpired = onSessionExpired
+    self.invalidationObserver = invalidationObserver
   }
 
   public var body: some View {
@@ -51,8 +55,11 @@ public struct LogbookView: View {
         rows
       }
     }
-    .task { await load() }
+    .task { await viewModel.observeInvalidations(from: invalidationObserver) }
     .refreshable { await load() }
+    .onChange(of: viewModel.sessionAction) { _, action in
+      if action == .expire { onSessionExpired() }
+    }
   }
 
   private var statusGuide: some View {

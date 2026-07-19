@@ -13,28 +13,25 @@ public struct LogbookEntry: Codable, Hashable, Identifiable, Sendable {
   public let observedAt: Date
   public let locationName: String?
   public let status: LogbookStatus
+  public let createdAt: Date?
+  public let photoCount: Int
+  public let rejectionReason: String?
 
   public init(
     id: String,
     observedAt: Date,
     locationName: String?,
-    status: LogbookStatus
+    status: LogbookStatus,
+    createdAt: Date? = nil,
+    photoCount: Int = 0,
+    rejectionReason: String? = nil
   ) {
     self.id = id
     self.observedAt = observedAt
     self.locationName = locationName
     self.status = status
-  }
-
-  init(sighting: Sighting) {
-    id = sighting.id
-    observedAt = sighting.observedAt
-    locationName = sighting.locationName
-    status =
-      switch sighting.status {
-      case .pending: .pending
-      case .approved: .approved
-      case .rejected: .rejected
-      }
+    self.createdAt = createdAt
+    self.photoCount = photoCount
+    self.rejectionReason = rejectionReason
   }
 }

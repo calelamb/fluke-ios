@@ -43,11 +43,18 @@ public struct LocalIdentificationArtifact: Equatable, Sendable {
   public let manifestVersion: String
   public let modelVersion: String
   public let indexVersion: String
+  public let scoreSemantics: String
 
-  public init(manifestVersion: String, modelVersion: String, indexVersion: String) {
+  public init(
+    manifestVersion: String,
+    modelVersion: String,
+    indexVersion: String,
+    scoreSemantics: String = "uncalibrated_similarity_not_probability"
+  ) {
     self.manifestVersion = manifestVersion
     self.modelVersion = modelVersion
     self.indexVersion = indexVersion
+    self.scoreSemantics = scoreSemantics
   }
 }
 
@@ -91,7 +98,8 @@ public actor LocalIdentifier: LocalIdentifying {
     artifact = LocalIdentificationArtifact(
       manifestVersion: catalog.manifest.manifestVersion,
       modelVersion: catalog.manifest.modelVersion,
-      indexVersion: catalog.manifest.indexVersion
+      indexVersion: catalog.manifest.indexVersion,
+      scoreSemantics: catalog.manifest.scoreSemantics
     )
     state = reducer.initialState
   }

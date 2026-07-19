@@ -37,6 +37,7 @@ public enum SubmissionValidator {
     guard (1...5).contains(draft.photoCount) else { throw SubmissionValidationError.photos }
 
     return SubmissionPayload(
+      clientSubmissionID: draft.clientSubmissionID,
       latitude: draft.latitude,
       longitude: draft.longitude,
       observedAt: draft.observedAt,
@@ -44,7 +45,9 @@ public enum SubmissionValidator {
       notes: normalized(draft.notes),
       locationName: normalized(draft.locationName),
       observerEmail: email,
-      photoCount: draft.photoCount
+      photoCount: draft.photoCount,
+      ecotypeGuess: draft.ecotypeGuess,
+      localIdentification: draft.localIdentification
     )
   }
 

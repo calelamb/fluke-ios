@@ -1,3 +1,4 @@
+import FlukeReleaseB
 import FlukeUI
 import SwiftUI
 
@@ -6,14 +7,14 @@ public struct IdentifyView: View {
   private let capabilityRevision: UInt64
   private let browseWhales: () -> Void
   private let openWhale: (String) -> Void
-  private let submitSighting: () -> Void
+  private let submitSighting: (LocalIdentificationSuggestion?) -> Void
 
   public init(
     capability: IdentifyCapability,
     capabilityRevision: UInt64 = 0,
     browseWhales: @escaping () -> Void,
     openWhale: @escaping (String) -> Void,
-    submitSighting: @escaping () -> Void
+    submitSighting: @escaping (LocalIdentificationSuggestion?) -> Void
   ) {
     self.capability = capability
     self.capabilityRevision = capabilityRevision
@@ -61,7 +62,7 @@ private struct DorsalFramingGuide: View {
 private struct IdentifyReadyView: View {
   private let browseWhales: () -> Void
   private let openWhale: (String) -> Void
-  private let submitSighting: () -> Void
+  private let submitSighting: (LocalIdentificationSuggestion?) -> Void
   @Environment(\.scenePhase) private var scenePhase
   @State private var owner: IdentifyReadyState
 
@@ -72,7 +73,7 @@ private struct IdentifyReadyView: View {
     capability: IdentifyCapability,
     browseWhales: @escaping () -> Void,
     openWhale: @escaping (String) -> Void,
-    submitSighting: @escaping () -> Void
+    submitSighting: @escaping (LocalIdentificationSuggestion?) -> Void
   ) {
     self.browseWhales = browseWhales
     self.openWhale = openWhale
@@ -98,7 +99,7 @@ private struct IdentifyReadyView: View {
         )
         Button("Browse whales", action: browseWhales)
           .buttonStyle(FlukeButtonStyle.secondary)
-        Button("Submit a sighting", action: submitSighting)
+        Button("Submit a sighting") { submitSighting(model.submissionSuggestion) }
           .buttonStyle(FlukeButtonStyle.secondary)
       }
       .padding(20)

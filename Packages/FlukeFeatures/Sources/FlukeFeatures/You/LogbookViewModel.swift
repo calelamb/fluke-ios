@@ -45,6 +45,7 @@ public final class LogbookViewModel {
 
   private let repository: any LogbookRepositoryProtocol
   private let queue: any QueuedLogbookProviding
+  private var loadGeneration: UInt64 = 0
 
   public init(
     repository: any LogbookRepositoryProtocol,
@@ -55,21 +56,38 @@ public final class LogbookViewModel {
   }
 
   public func load() async {
+    loadGeneration &+= 1
+    let generation = loadGeneration
     isLoading = true
     failure = nil
     sessionAction = nil
     let queued = await queue.queuedEntries()
+    guard generation == loadGeneration else { return }
     do {
       let server = try await repository.load()
+      guard generation == loadGeneration else { return }
       rows = Self.mergedRows(queued: queued, server: server)
     } catch APIError.unauthorized {
+      guard generation == loadGeneration else { return }
       rows = Self.queuedRows(queued)
       sessionAction = .expire
     } catch {
+      guard generation == loadGeneration else { return }
       rows = Self.queuedRows(queued)
       failure = Self.failure(from: error)
     }
     isLoading = false
+  }
+
+  public func observeInvalidations(
+    from observer: any SubmissionInvalidationObserving
+  ) async {
+    let updates = await observer.updates()
+    await load()
+    for await _ in updates {
+      guard !Task.isCancelled else { return }
+      await load()
+    }
   }
 
   private static func mergedRows(

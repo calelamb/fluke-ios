@@ -72,6 +72,40 @@ struct LogbookViewModelTests {
     #expect(model.failure?.retryable == true)
     #expect(model.failure?.message == "You're offline.")
   }
+
+  @Test("Visible observation reloads after definitive submission invalidation")
+  func reloadsForInvalidation() async {
+    let repository = CountingLogbookRepository()
+    let hub = SubmissionInvalidationHub()
+    let model = LogbookViewModel(repository: repository, queue: FixtureLogbookQueue())
+    let observation = Task { await model.observeInvalidations(from: hub) }
+    await repository.waitForLoads(1)
+
+    await hub.ownerSightingsDidChange()
+    await repository.waitForLoads(2)
+    observation.cancel()
+    await observation.value
+
+    #expect(await repository.loadCount == 2)
+  }
+}
+
+private actor CountingLogbookRepository: LogbookRepositoryProtocol {
+  private(set) var loadCount = 0
+  private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
+
+  func load() -> [LogbookEntry] {
+    loadCount += 1
+    let ready = waiters.filter { loadCount >= $0.0 }
+    waiters.removeAll { loadCount >= $0.0 }
+    for waiter in ready { waiter.1.resume() }
+    return []
+  }
+
+  func waitForLoads(_ count: Int) async {
+    guard loadCount < count else { return }
+    await withCheckedContinuation { waiters.append((count, $0)) }
+  }
 }
 
 private struct FixtureLogbookRepository: LogbookRepositoryProtocol {

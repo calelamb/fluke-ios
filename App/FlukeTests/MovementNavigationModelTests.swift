@@ -1,4 +1,5 @@
 import FlukeKit
+import FlukeReleaseB
 import Foundation
 import Testing
 
@@ -168,6 +169,29 @@ struct MovementNavigationModelTests {
 
     #expect(router.presentedRoute?.submissionsEnabled == false)
     #expect(router.pendingRoute == nil)
+  }
+
+  @Test("Submission route owns an immutable identification snapshot")
+  func submissionRouteSnapshotsEvidence() throws {
+    let suggestion = try #require(
+      LocalIdentificationSuggestion(
+        catalogID: "J35",
+        similarityScore: 0.83,
+        scoreSemantics: LocalIdentificationSuggestion.requiredScoreSemantics,
+        manifestVersion: "manifest",
+        modelVersion: "model",
+        indexVersion: "index",
+        matchedReferencePhotoIDs: ["reference-2", "reference-1"]
+      ))
+    let router = MovementSubmitPresentationRouter()
+
+    router.request(
+      submissionsEnabled: true,
+      localIdentification: suggestion,
+      movementPresented: false
+    )
+
+    #expect(router.presentedRoute?.localIdentification == suggestion)
   }
 
   @Test("Unavailable movement copy distinguishes missing truth from a catalog outage")

@@ -1,4 +1,5 @@
 import FlukeKit
+import FlukeReleaseB
 import Foundation
 import Observation
 
@@ -31,6 +32,7 @@ enum MovementDestination: Equatable, Identifiable {
 struct MovementSubmitRoute: Identifiable {
   let id = UUID()
   let submissionsEnabled: Bool
+  let localIdentification: LocalIdentificationSuggestion?
 }
 
 @MainActor
@@ -39,8 +41,15 @@ final class MovementSubmitPresentationRouter {
   var presentedRoute: MovementSubmitRoute?
   private(set) var pendingRoute: MovementSubmitRoute?
 
-  func request(submissionsEnabled: Bool, movementPresented: Bool) {
-    let route = MovementSubmitRoute(submissionsEnabled: submissionsEnabled)
+  func request(
+    submissionsEnabled: Bool,
+    localIdentification: LocalIdentificationSuggestion? = nil,
+    movementPresented: Bool
+  ) {
+    let route = MovementSubmitRoute(
+      submissionsEnabled: submissionsEnabled,
+      localIdentification: localIdentification
+    )
     if movementPresented {
       pendingRoute = route
     } else {

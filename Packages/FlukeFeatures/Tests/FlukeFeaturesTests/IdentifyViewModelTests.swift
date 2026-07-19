@@ -1,5 +1,6 @@
 import CoreVideo
 import FlukeML
+import FlukeReleaseB
 import Testing
 
 @testable import FlukeFeatures
@@ -63,6 +64,33 @@ struct IdentifyViewModelTests {
     #expect(model.presentation == .provisional)
     #expect(model.result?.prominent == nil)
     #expect(model.result?.provisional.count == 2)
+  }
+
+  @Test("Only a stabilized prominent result snapshots validated submission evidence")
+  func submissionEvidenceRequiresStabilization() async throws {
+    let prominent = Self.match("J35", whaleID: "canonical-whale")
+    let identifier = RecordingLocalIdentifier(results: [
+      .success(Self.state(prominent: nil)),
+      .success(Self.state(prominent: prominent)),
+    ])
+    let media = RecordingIdentifyMedia()
+    let model = IdentifyViewModel(capability: .onDevice(identifier), media: media)
+    await model.openCamera()
+
+    await media.yield(try Self.frame())
+    await identifier.waitForRequests(1)
+    await Self.waitUntil { model.presentation == .provisional }
+    #expect(model.submissionSuggestion == nil)
+
+    await media.yield(try Self.frame())
+    await identifier.waitForRequests(2)
+    await Self.waitUntil { model.presentation == .stabilized }
+    let suggestion = try #require(model.submissionSuggestion)
+
+    #expect(suggestion.catalogID == "J35")
+    #expect(abs(suggestion.similarityScore - 0.83) < 0.000_001)
+    #expect(suggestion.scoreSemantics == LocalIdentificationSuggestion.requiredScoreSemantics)
+    #expect(suggestion.matchedReferencePhotoIDs == ["reference-J35"])
   }
 
   @Test("empty, poor-quality, and unavailable outcomes are first-class")
@@ -211,7 +239,8 @@ extension IdentifyViewModelTests {
   static let artifact = LocalIdentificationArtifact(
     manifestVersion: "manifest-v3",
     modelVersion: "model-v2",
-    indexVersion: "index-v4"
+    indexVersion: "index-v4",
+    scoreSemantics: "uncalibrated_similarity_not_probability"
   )
 
   static func match(_ catalogID: String, whaleID: String) -> LocalMatch {

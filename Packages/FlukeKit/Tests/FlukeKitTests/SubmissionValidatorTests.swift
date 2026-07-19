@@ -1,5 +1,6 @@
-import Foundation
+import FlukeKit
 import FlukeReleaseB
+import Foundation
 import Testing
 
 @Suite("Submission validation")
@@ -26,13 +27,16 @@ struct SubmissionValidatorTests {
       try SubmissionValidator.validate(.fixture(observerEmail: "not-an-email"))
     }
     #expect(throws: SubmissionValidationError.email) {
-      try SubmissionValidator.validate(.fixture(observerEmail: String(repeating: "a", count: 245) + "@x.com"))
+      try SubmissionValidator.validate(
+        .fixture(observerEmail: String(repeating: "a", count: 245) + "@x.com"))
     }
-    let email200 = String(repeating: "a", count: 64) + "@"
+    let email200 =
+      String(repeating: "a", count: 64) + "@"
       + String(repeating: "b", count: 63) + "."
       + String(repeating: "c", count: 63) + ".example"
     #expect(email200.utf16.count == 200)
-    #expect(try SubmissionValidator.validate(.fixture(observerEmail: email200)).observerEmail == email200)
+    #expect(
+      try SubmissionValidator.validate(.fixture(observerEmail: email200)).observerEmail == email200)
     #expect(throws: SubmissionValidationError.email) {
       try SubmissionValidator.validate(.fixture(observerEmail: email200 + "x"))
     }
@@ -64,9 +68,10 @@ struct SubmissionValidatorTests {
     let locationAtLimit = String(repeating: "🐋", count: 100)
     let notesAtLimit = String(repeating: "🐋", count: 1_000)
 
-    #expect(try SubmissionValidator.validate(
-      .fixture(notes: notesAtLimit, locationName: locationAtLimit)
-    ).locationName == locationAtLimit)
+    #expect(
+      try SubmissionValidator.validate(
+        .fixture(notes: notesAtLimit, locationName: locationAtLimit)
+      ).locationName == locationAtLimit)
     #expect(throws: SubmissionValidationError.locationName) {
       try SubmissionValidator.validate(.fixture(locationName: locationAtLimit + "🐋"))
     }
@@ -85,7 +90,9 @@ extension SubmissionDraft {
     notes: String? = "Traveling north",
     locationName: String? = "Lime Kiln",
     observerEmail: String? = "observer@example.com",
-    photoCount: Int = 1
+    photoCount: Int = 1,
+    ecotypeGuess: Ecotype? = nil,
+    localIdentification: LocalIdentificationSuggestion? = nil
   ) -> SubmissionDraft {
     SubmissionDraft(
       latitude: latitude,
@@ -95,7 +102,9 @@ extension SubmissionDraft {
       notes: notes,
       locationName: locationName,
       observerEmail: observerEmail,
-      photoCount: photoCount
+      photoCount: photoCount,
+      ecotypeGuess: ecotypeGuess,
+      localIdentification: localIdentification
     )
   }
 }

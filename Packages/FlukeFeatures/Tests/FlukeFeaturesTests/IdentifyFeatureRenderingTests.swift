@@ -16,7 +16,7 @@ struct IdentifyFeatureRenderingTests {
       capability: .disabled,
       browseWhales: {},
       openWhale: { _ in },
-      submitSighting: {}
+      submitSighting: { _ in }
     )
 
     #expect(try render(view) != nil)
@@ -28,7 +28,7 @@ struct IdentifyFeatureRenderingTests {
       capability: .onDevice(RenderingIdentifier()),
       browseWhales: {},
       openWhale: { _ in },
-      submitSighting: {}
+      submitSighting: { _ in }
     )
 
     #expect(try render(view) != nil)
@@ -153,7 +153,7 @@ private struct RenderingCapabilityHost: View {
       capabilityRevision: state.revision,
       browseWhales: {},
       openWhale: { _ in },
-      submitSighting: {}
+      submitSighting: { _ in }
     )
   }
 }

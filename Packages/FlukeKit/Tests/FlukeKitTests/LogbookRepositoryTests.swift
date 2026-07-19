@@ -18,6 +18,9 @@ struct LogbookRepositoryTests {
 
     #expect(entries.map(\.status) == [.pending, .approved])
     #expect(entries.first?.locationName == "Admiralty Inlet")
+    #expect(entries.first?.createdAt == Date(timeIntervalSince1970: 1_721_318_400))
+    #expect(entries.first?.photoCount == 2)
+    #expect(entries.first?.rejectionReason == nil)
     let request = try #require(await transport.lastRequest)
     #expect(request.httpMethod == "GET")
     #expect(request.url?.path == ReleaseBEndpoint.mySightings)
@@ -45,13 +48,13 @@ struct LogbookRepositoryTests {
           "latitude": 48.1,
           "longitude": -122.7,
           "locationName": "Admiralty Inlet",
-          "ecotypeGuess": "UNKNOWN",
+          "createdAt": "2024-07-18T16:00:00.000Z",
+          "ecotypeGuess": "BIGGS",
           "groupSize": 3,
           "behaviorNotes": null,
-          "status": "PENDING",
-          "photoUrls": [],
-          "photos": [],
-          "identifiedWhales": []
+          "photoCount": 2,
+          "rejectionReason": null,
+          "status": "PENDING"
         },
         {
           "id": "approved-1",
@@ -59,13 +62,13 @@ struct LogbookRepositoryTests {
           "latitude": 48.2,
           "longitude": -122.8,
           "locationName": null,
+          "createdAt": "2024-07-17T16:00:00.000Z",
           "ecotypeGuess": null,
           "groupSize": null,
           "behaviorNotes": null,
-          "status": "APPROVED",
-          "photoUrls": [],
-          "photos": [],
-          "identifiedWhales": []
+          "photoCount": 0,
+          "rejectionReason": null,
+          "status": "APPROVED"
         }
       ],
       "page": {"hasMore": false, "nextCursor": null}

@@ -35,6 +35,11 @@ public final class SubmitViewModel {
   private let isSignedIn: Bool
   private let signedInObserverEmail: String?
   private let submissionsEnabled: Bool
+  private let clientSubmissionID: UUID
+  private let ecotypeGuess: Ecotype?
+  private let localIdentification: LocalIdentificationSuggestion?
+  private let invalidator: any SubmissionInvalidating
+  private var hasInvalidatedDefinitiveSuccess = false
   private let initialLatitude: Double
   private let initialLongitude: Double
   private let initialObservedAt: Date
@@ -45,6 +50,10 @@ public final class SubmitViewModel {
     isSignedIn: Bool = false,
     signedInObserverEmail: String? = nil,
     submissionsEnabled: Bool = true,
+    clientSubmissionID: UUID = UUID(),
+    ecotypeGuess: Ecotype? = nil,
+    localIdentification: LocalIdentificationSuggestion? = nil,
+    invalidator: any SubmissionInvalidating = NoopSubmissionInvalidator(),
     latitude: Double = 48.52,
     longitude: Double = -123.15,
     observedAt: Date = Date()
@@ -54,6 +63,10 @@ public final class SubmitViewModel {
     self.isSignedIn = isSignedIn
     self.signedInObserverEmail = signedInObserverEmail
     self.submissionsEnabled = submissionsEnabled
+    self.clientSubmissionID = clientSubmissionID
+    self.ecotypeGuess = ecotypeGuess
+    self.localIdentification = localIdentification
+    self.invalidator = invalidator
     self.latitude = latitude
     self.longitude = longitude
     self.observedAt = observedAt
@@ -78,12 +91,15 @@ public final class SubmitViewModel {
   }
 
   public func addPhotos(_ additions: [ProcessedPhoto]) {
-    photos = Array((photos + additions).reduce([ProcessedPhoto]()) { unique, photo in
-      guard !unique.contains(where: {
-        $0.idempotencyID == photo.idempotencyID || $0.bytes == photo.bytes
-      }) else { return unique }
-      return unique + [photo]
-    }.prefix(5))
+    photos = Array(
+      (photos + additions).reduce([ProcessedPhoto]()) { unique, photo in
+        guard
+          !unique.contains(where: {
+            $0.idempotencyID == photo.idempotencyID || $0.bytes == photo.bytes
+          })
+        else { return unique }
+        return unique + [photo]
+      }.prefix(5))
     photoErrorMessage = nil
   }
 
@@ -92,15 +108,21 @@ public final class SubmitViewModel {
   }
 
   public func submit() async {
-    guard submissionsEnabled, state != .submitting, state != .queued, state != .success else { return }
+    guard submissionsEnabled, state != .submitting, state != .queued, state != .success else {
+      return
+    }
     validationField = nil
     let payload: SubmissionPayload
     do {
-      payload = try SubmissionValidator.validate(SubmissionDraft(
-        latitude: latitude, longitude: longitude, observedAt: observedAt,
-        groupSize: groupSize, notes: notes, locationName: locationName,
-        observerEmail: showsObserverEmail ? email : signedInObserverEmail, photoCount: photos.count
-      ))
+      payload = try SubmissionValidator.validate(
+        SubmissionDraft(
+          latitude: latitude, longitude: longitude, observedAt: observedAt,
+          groupSize: groupSize, notes: notes, locationName: locationName,
+          observerEmail: showsObserverEmail ? email : signedInObserverEmail,
+          photoCount: photos.count,
+          clientSubmissionID: clientSubmissionID, ecotypeGuess: ecotypeGuess,
+          localIdentification: localIdentification
+        ))
     } catch let error as SubmissionValidationError {
       state = .validation(error)
       validationField = SubmissionFormField.forValidationError(error)
@@ -114,7 +136,9 @@ public final class SubmitViewModel {
     do {
       _ = try await service.submit(payload: payload, photos: photos)
       state = .success
+      await invalidateDefinitiveSuccessOnce()
     } catch SubmissionServiceError.partial(let receipt, let indices) {
+      await invalidateDefinitiveSuccessOnce()
       let remaining = indices.compactMap { photos.indices.contains($0) ? photos[$0] : nil }
       do {
         _ = try await queue.enqueue(payload: payload.resuming(receipt: receipt), photos: remaining)
@@ -134,9 +158,16 @@ public final class SubmitViewModel {
     }
   }
 
+  private func invalidateDefinitiveSuccessOnce() async {
+    guard !hasInvalidatedDefinitiveSuccess else { return }
+    hasInvalidatedDefinitiveSuccess = true
+    await invalidator.ownerSightingsDidChange()
+  }
+
   private var isDirty: Bool {
     latitude != initialLatitude || longitude != initialLongitude || observedAt != initialObservedAt
-      || !locationName.isEmpty || !notes.isEmpty || !email.isEmpty || !photos.isEmpty || groupSize != 1
+      || !locationName.isEmpty || !notes.isEmpty || !email.isEmpty || !photos.isEmpty
+      || groupSize != 1
   }
 
   private var isTerminal: Bool {

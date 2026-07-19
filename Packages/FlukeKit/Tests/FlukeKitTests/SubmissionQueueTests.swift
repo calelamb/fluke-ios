@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Testing
+
 @testable import FlukeReleaseB
 
 @Suite("Durable submission queue")
@@ -176,6 +177,33 @@ struct SubmissionQueueTests {
 
     #expect(try await relaunched.list().first?.state == .queued)
     #expect(try await relaunched.list().first?.attempts == 0)
+  }
+
+  @Test("Evidence, ecotype, submission ID, photo IDs, and reference order survive relaunch")
+  func evidenceSurvivesRelaunch() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let suggestion = LocalIdentificationSuggestion.fixture
+    let payload = try SubmissionValidator.validate(
+      .fixture(
+        photoCount: 1,
+        ecotypeGuess: .biggs,
+        localIdentification: suggestion
+      ))
+    let photo = ProcessedPhoto.fixture(1)
+    do {
+      let queue = try SubmissionQueue(directory: directory)
+      _ = try await queue.enqueue(payload: payload, photos: [photo])
+    }
+
+    let relaunched = try SubmissionQueue(directory: directory)
+    let value = try #require(try await relaunched.list().first)
+    let restoredPhoto = try #require(try await relaunched.photos(for: value).first)
+
+    #expect(value.payload.clientSubmissionID == payload.clientSubmissionID)
+    #expect(value.payload.ecotypeGuess == .biggs)
+    #expect(value.payload.localIdentification?.matchedReferencePhotoIDs == ["ref-2", "ref-1"])
+    #expect(restoredPhoto.idempotencyID == photo.idempotencyID)
   }
 
   @Test("Concurrent retries remain idempotent and actor-isolated")

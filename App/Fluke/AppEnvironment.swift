@@ -80,6 +80,7 @@ struct AppEnvironment {
   let submissionQueue: SubmissionQueue
   let submissionObservedAt: SubmissionObservedAt
   let submissionService: any SubmissionServiceProtocol
+  let submissionInvalidationHub: SubmissionInvalidationHub
   let whalesRepository: WhalesRepository
 
   static func live(bundle: Bundle = .main) throws -> AppEnvironment {
@@ -123,6 +124,7 @@ struct AppEnvironment {
     )
     let client = APIClient(baseURL: apiBaseURL, session: session)
     let submissionQueue = try SubmissionQueue()
+    let submissionInvalidationHub = SubmissionInvalidationHub()
 
     return AppEnvironment(
       apiBaseURL: apiBaseURL,
@@ -143,6 +145,7 @@ struct AppEnvironment {
       submissionQueue: submissionQueue,
       submissionObservedAt: submissionObservedAt,
       submissionService: SubmissionService(api: client),
+      submissionInvalidationHub: submissionInvalidationHub,
       whalesRepository: WhalesRepository(api: client, cache: cacheStore)
     )
   }

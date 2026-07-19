@@ -68,7 +68,8 @@ struct RootScene: View {
     self.submissionQueue = submissionQueue
     self.submissionReplay = SubmissionReplayActor(
       queue: environment.submissionQueue,
-      service: environment.submissionService
+      service: environment.submissionService,
+      invalidator: environment.submissionInvalidationHub
     )
     _signInAuthorizationFlow = State(initialValue: AppleAuthorizationFlow())
     _deletionAuthorizationFlow = State(initialValue: AppleAuthorizationFlow())
@@ -154,6 +155,7 @@ struct RootScene: View {
             deletionAuthorizationPending: deletionAuthorizationFlow.hasPendingNonce,
             repository: environment.logbookRepository,
             queue: submissionQueue,
+            invalidationObserver: environment.submissionInvalidationHub,
             configureAppleRequest: signInAuthorizationFlow.configure,
             completeAppleAuthorization: completeSignInAuthorization,
             configureDeletionAuthorization: deletionAuthorizationFlow.configure,
@@ -199,6 +201,8 @@ struct RootScene: View {
           isSignedIn: authSession.isAuthenticated,
           signedInObserverEmail: authSession.authenticatedEmail,
           submissionsEnabled: route.submissionsEnabled,
+          localIdentification: route.localIdentification,
+          invalidator: environment.submissionInvalidationHub,
           observedAt: environment.submissionObservedAt()
         )
       )
@@ -243,10 +247,11 @@ struct RootScene: View {
     Task { await movementNavigation.present(catalogID: catalogID) }
   }
 
-  private func presentSubmit() {
+  private func presentSubmit(localIdentification: LocalIdentificationSuggestion? = nil) {
     let movementPresented = movementNavigation.destination != nil
     movementSubmitPresentation.request(
       submissionsEnabled: submissionsAvailable,
+      localIdentification: localIdentification,
       movementPresented: movementPresented
     )
     if movementPresented { movementNavigation.dismiss() }
@@ -327,7 +332,7 @@ struct RootScene: View {
       MovementTrackView(
         repository: environment.whalesRepository,
         whale: whale,
-        onSubmitSighting: presentSubmit
+        onSubmitSighting: { presentSubmit() }
       )
     case .unavailable(let catalogID, let reason):
       NavigationStack {
@@ -369,7 +374,7 @@ struct RootScene: View {
         profileRequest = WhaleProfileRequest.next(whaleID: whaleID, after: profileRequest)
         selectedTab = .whales
       },
-      submitSighting: { presentSubmit() }
+      submitSighting: { presentSubmit(localIdentification: $0) }
     )
   }
 

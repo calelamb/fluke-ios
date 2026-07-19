@@ -2,7 +2,8 @@ import FlukeKit
 import Foundation
 
 public protocol SubmissionServiceProtocol: Sendable {
-  func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws -> SubmissionReceipt
+  func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws
+    -> SubmissionReceipt
 }
 
 public enum SubmissionServiceError: Error, Equatable, Sendable {
@@ -43,11 +44,12 @@ public struct SubmissionService: SubmissionServiceProtocol, Sendable {
       guard let request = SubmitSightingRequest(payload: payload) else {
         throw SubmissionServiceError.missingObserverEmail
       }
-      receipt = try await api.post(
+      let response: SubmitSightingResponse = try await api.post(
         APIRequest(path: "/api/v1/sightings"),
         body: request,
         headers: ["Idempotency-Key": payload.clientSubmissionID.uuidString]
       )
+      receipt = SubmissionReceipt(id: response.id, photoUploadToken: response.photoUploadToken)
     }
 
     var failedIndices: [Int] = []
@@ -61,7 +63,8 @@ public struct SubmissionService: SubmissionServiceProtocol, Sendable {
           parts: [part],
           headers: [
             "x-photo-upload-token": receipt.photoUploadToken,
-            "Idempotency-Key": "\(payload.clientSubmissionID.uuidString):\(photo.idempotencyID.uuidString)",
+            "Idempotency-Key":
+              "\(payload.clientSubmissionID.uuidString):\(photo.idempotencyID.uuidString)",
           ]
         )
       } catch is CancellationError {
@@ -87,9 +90,11 @@ private struct SubmitSightingRequest: Encodable, Sendable {
   let latitude: Double
   let longitude: Double
   let locationName: String?
+  let ecotypeGuess: Ecotype?
   let groupSize: Int?
   let behaviorNotes: String?
   let observerEmail: String
+  let localIdentification: LocalIdentificationSuggestion?
 
   init?(payload: SubmissionPayload) {
     guard let observerEmail = payload.observerEmail else { return nil }
@@ -100,8 +105,42 @@ private struct SubmitSightingRequest: Encodable, Sendable {
     latitude = payload.latitude
     longitude = payload.longitude
     locationName = payload.locationName
+    ecotypeGuess = payload.ecotypeGuess
     groupSize = payload.groupSize
     behaviorNotes = payload.notes
     self.observerEmail = observerEmail
+    localIdentification = payload.localIdentification
+  }
+}
+
+private struct SubmitSightingResponse: Decodable, Sendable {
+  let id: String
+  let photoUploadToken: String
+
+  enum CodingKeys: String, CodingKey {
+    case ok
+    case id
+    case identificationSuggestionId
+    case photoUploadToken
+  }
+
+  init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    guard try values.decode(Bool.self, forKey: .ok) else {
+      throw DecodingError.dataCorruptedError(
+        forKey: .ok, in: values, debugDescription: "Expected ok=true")
+    }
+    guard values.contains(.identificationSuggestionId) else {
+      throw DecodingError.keyNotFound(
+        CodingKeys.identificationSuggestionId,
+        .init(
+          codingPath: decoder.codingPath,
+          debugDescription: "Missing identificationSuggestionId"
+        )
+      )
+    }
+    id = try values.decode(String.self, forKey: .id)
+    _ = try values.decodeIfPresent(String.self, forKey: .identificationSuggestionId)
+    photoUploadToken = try values.decode(String.self, forKey: .photoUploadToken)
   }
 }

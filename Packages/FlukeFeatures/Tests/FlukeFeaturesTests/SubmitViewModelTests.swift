@@ -1,7 +1,7 @@
-import Foundation
 import FlukeFeatures
 import FlukeKit
 import FlukeReleaseB
+import Foundation
 import Testing
 
 @MainActor
@@ -10,7 +10,10 @@ struct SubmitViewModelTests {
   @Test("Offline submit queues once and presents an honest receipt")
   func queuesOffline() async {
     let queue = RecordingSubmissionQueue()
-    let model = SubmitViewModel(service: SubmitService(error: APIError.offline), queue: queue)
+    let invalidator = RecordingSubmissionInvalidator()
+    let model = SubmitViewModel(
+      service: SubmitService(error: APIError.offline), queue: queue, invalidator: invalidator
+    )
     model.email = "observer@example.com"
     model.photos = [.fixture]
 
@@ -20,6 +23,7 @@ struct SubmitViewModelTests {
     #expect(model.state == .queued)
     #expect(model.dismissal == .allowed)
     #expect(await queue.enqueuedCount == 1)
+    #expect(await invalidator.count == 0)
   }
 
   @Test("A dirty form requires explicit discard")
@@ -73,9 +77,10 @@ struct SubmitViewModelTests {
     let model = SubmitViewModel(
       service: SubmitService(), queue: RecordingSubmissionQueue(), submissionsEnabled: false
     )
-    model.addPhotos((0..<6).map { index in
-      ProcessedPhoto(bytes: Data([UInt8(index)]), fileName: "\(index).jpg")
-    })
+    model.addPhotos(
+      (0..<6).map { index in
+        ProcessedPhoto(bytes: Data([UInt8(index)]), fileName: "\(index).jpg")
+      })
     #expect(model.photos.count == 5)
     #expect(model.disabledMessage?.contains("unavailable") == true)
   }
@@ -84,12 +89,15 @@ struct SubmitViewModelTests {
   func partialQueuesAndDismisses() async {
     let receipt = SubmissionReceipt(id: "created", photoUploadToken: "token")
     let queue = RecordingSubmissionQueue()
+    let invalidator = RecordingSubmissionInvalidator()
     let model = validModel(
-      service: SubmitService(error: SubmissionServiceError.partial(
-        receipt: receipt, failedPhotoIndices: [1]
-      )),
+      service: SubmitService(
+        error: SubmissionServiceError.partial(
+          receipt: receipt, failedPhotoIndices: [1]
+        )),
       queue: queue,
-      photoCount: 2
+      photoCount: 2,
+      invalidator: invalidator
     )
 
     await model.submit()
@@ -98,20 +106,25 @@ struct SubmitViewModelTests {
     #expect(model.dismissal == .allowed)
     #expect(await queue.lastPhotos.count == 1)
     #expect(await queue.lastPayload?.existingReceipt == receipt)
+    #expect(await invalidator.count == 1)
   }
 
   @Test("Partial upload queue failure is explicit and retryable")
   func partialQueueFailure() async {
     let queue = RecordingSubmissionQueue(error: TestFailure.queue)
-    let service = SubmitService(error: SubmissionServiceError.partial(
-      receipt: SubmissionReceipt(id: "created", photoUploadToken: "token"),
-      failedPhotoIndices: [0]
-    ))
-    let model = validModel(service: service, queue: queue)
+    let service = SubmitService(
+      error: SubmissionServiceError.partial(
+        receipt: SubmissionReceipt(id: "created", photoUploadToken: "token"),
+        failedPhotoIndices: [0]
+      ))
+    let invalidator = RecordingSubmissionInvalidator()
+    let model = validModel(service: service, queue: queue, invalidator: invalidator)
 
     await model.submit()
 
-    #expect(model.state == .failed("The sighting was saved, but failed photos could not be queued."))
+    #expect(
+      model.state == .failed("The sighting was saved, but failed photos could not be queued."))
+    #expect(await invalidator.count == 1)
   }
 
   @Test("Generic failure can retry to success")
@@ -131,6 +144,42 @@ struct SubmitViewModelTests {
     #expect(model.failureMessage == nil)
     #expect(model.dismissal == .allowed)
     #expect(await service.callCount == 2)
+    let payloads = await service.payloads
+    #expect(payloads.map(\.clientSubmissionID).count == 2)
+    #expect(Set(payloads.map(\.clientSubmissionID)).count == 1)
+  }
+
+  @Test("Route evidence and nullable ecotype are copied into every retry payload")
+  func preservesRouteEvidence() async throws {
+    let suggestion = try #require(
+      LocalIdentificationSuggestion(
+        catalogID: "J35",
+        similarityScore: 0.82,
+        scoreSemantics: LocalIdentificationSuggestion.requiredScoreSemantics,
+        manifestVersion: "manifest",
+        modelVersion: "model",
+        indexVersion: "index",
+        matchedReferencePhotoIDs: ["ref-2", "ref-1"]
+      ))
+    let service = SequencedSubmitService(results: [
+      .failure(TestFailure.service),
+      .success(SubmissionReceipt(id: "created", photoUploadToken: "token")),
+    ])
+    let model = SubmitViewModel(
+      service: service,
+      queue: RecordingSubmissionQueue(),
+      ecotypeGuess: nil,
+      localIdentification: suggestion
+    )
+    model.email = "observer@example.com"
+    model.photos = [.fixture]
+
+    await model.submit()
+    await model.submit()
+
+    let payloads = await service.payloads
+    #expect(payloads.map(\.localIdentification) == [suggestion, suggestion])
+    #expect(payloads.allSatisfy { $0.ecotypeGuess == nil })
   }
 
   @Test("Validation state identifies the invalid field")
@@ -216,8 +265,10 @@ struct SubmitViewModelTests {
 
   @Test("Coordinate selection clamps latitude and wraps longitude")
   func coordinateSelection() {
-    #expect(SubmissionCoordinate(latitude: 95, longitude: 190) == .init(latitude: 90, longitude: -170))
-    #expect(SubmissionCoordinate(latitude: -95, longitude: -190) == .init(latitude: -90, longitude: 170))
+    #expect(
+      SubmissionCoordinate(latitude: 95, longitude: 190) == .init(latitude: 90, longitude: -170))
+    #expect(
+      SubmissionCoordinate(latitude: -95, longitude: -190) == .init(latitude: -90, longitude: 170))
     let coarse = SubmissionCoordinate(latitude: 48.123_456, longitude: -123.987_654)
     #expect(coarse.latitude == 48.12)
     #expect(coarse.longitude == -123.99)
@@ -227,9 +278,11 @@ struct SubmitViewModelTests {
   func photoFailurePresentation() {
     #expect(PhotoSelectionPresentation.message(for: .loadFailed).contains("selected photo"))
     #expect(PhotoSelectionPresentation.message(for: .processingFailed).contains("JPEG or HEIC"))
-    #expect(PhotoSelectionPresentation.cameraState(for: .denied) == .unavailable(
-      "Camera access is off. You can enable it in Settings or choose a photo instead."
-    ))
+    #expect(
+      PhotoSelectionPresentation.cameraState(for: .denied)
+        == .unavailable(
+          "Camera access is off. You can enable it in Settings or choose a photo instead."
+        ))
     #expect(PhotoSelectionPresentation.cameraState(for: .restricted).isUnavailable)
     #expect(PhotoSelectionPresentation.cameraResult(data: nil) == .failure(.processingFailed))
     #expect(PhotoSelectionPresentation.cameraResult(data: Data([1])) == .success(Data([1])))
@@ -238,13 +291,19 @@ struct SubmitViewModelTests {
   private func validModel(
     service: any SubmissionServiceProtocol,
     queue: any SubmissionQueueProtocol,
-    photoCount: Int = 1
+    photoCount: Int = 1,
+    invalidator: any SubmissionInvalidating = NoopSubmissionInvalidator()
   ) -> SubmitViewModel {
-    let model = SubmitViewModel(service: service, queue: queue)
+    let model = SubmitViewModel(service: service, queue: queue, invalidator: invalidator)
     model.email = "observer@example.com"
     model.photos = Array(repeating: .fixture, count: photoCount)
     return model
   }
+}
+
+private actor RecordingSubmissionInvalidator: SubmissionInvalidating {
+  private(set) var count = 0
+  func ownerSightingsDidChange() { count += 1 }
 }
 
 private enum TestFailure: Error, Sendable { case service, queue }
@@ -253,7 +312,9 @@ private actor SubmitService: SubmissionServiceProtocol {
   let error: (any Error & Sendable)?
   private(set) var payloads: [SubmissionPayload] = []
   init(error: (any Error & Sendable)? = nil) { self.error = error }
-  func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws -> SubmissionReceipt {
+  func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws
+    -> SubmissionReceipt
+  {
     payloads = payloads + [payload]
     if let error { throw error }
     return SubmissionReceipt(id: "sighting", photoUploadToken: "token")
@@ -267,7 +328,9 @@ private actor RecordingSubmissionQueue: SubmissionQueueProtocol {
   private(set) var lastPhotos: [ProcessedPhoto] = []
   init(error: (any Error & Sendable)? = nil) { self.error = error }
   func list() async throws -> [QueuedSubmissionValue] { [] }
-  func enqueue(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws -> QueuedSubmissionValue {
+  func enqueue(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws
+    -> QueuedSubmissionValue
+  {
     if let error { throw error }
     enqueuedCount += 1
     lastPayload = payload
@@ -284,9 +347,13 @@ private actor RecordingSubmissionQueue: SubmissionQueueProtocol {
 private actor SequencedSubmitService: SubmissionServiceProtocol {
   private var results: [Result<SubmissionReceipt, any Error & Sendable>]
   private(set) var callCount = 0
+  private(set) var payloads: [SubmissionPayload] = []
   init(results: [Result<SubmissionReceipt, any Error & Sendable>]) { self.results = results }
-  func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws -> SubmissionReceipt {
+  func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws
+    -> SubmissionReceipt
+  {
     callCount += 1
+    payloads = payloads + [payload]
     return try results.removeFirst().get()
   }
 }
@@ -295,11 +362,13 @@ private actor BlockingSubmitService: SubmissionServiceProtocol {
   private(set) var callCount = 0
   private var submitContinuation: CheckedContinuation<Void, Never>?
   private var waiters: [CheckedContinuation<Void, Never>] = []
-  func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws -> SubmissionReceipt {
+  func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws
+    -> SubmissionReceipt
+  {
     callCount += 1
     let current = waiters
     waiters = []
-    current.forEach { $0.resume() }
+    for continuation in current { continuation.resume() }
     await withCheckedContinuation { submitContinuation = $0 }
     return SubmissionReceipt(id: "created", photoUploadToken: "token")
   }
@@ -307,16 +376,20 @@ private actor BlockingSubmitService: SubmissionServiceProtocol {
     if callCount > 0 { return }
     await withCheckedContinuation { waiters.append($0) }
   }
-  func release() { submitContinuation?.resume(); submitContinuation = nil }
+  func release() {
+    submitContinuation?.resume()
+    submitContinuation = nil
+  }
 }
 
-private extension PhotoCameraState {
-  var isUnavailable: Bool {
+extension PhotoCameraState {
+  fileprivate var isUnavailable: Bool {
     if case .unavailable = self { return true }
     return false
   }
 }
 
-private extension ProcessedPhoto {
-  static let fixture = ProcessedPhoto(bytes: Data(repeating: 1, count: 10), fileName: "photo.jpg")
+extension ProcessedPhoto {
+  fileprivate static let fixture = ProcessedPhoto(
+    bytes: Data(repeating: 1, count: 10), fileName: "photo.jpg")
 }

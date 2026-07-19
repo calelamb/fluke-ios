@@ -1,3 +1,4 @@
+import FlukeKit
 import Foundation
 
 public struct SubmissionDraft: Hashable, Sendable {
@@ -9,6 +10,9 @@ public struct SubmissionDraft: Hashable, Sendable {
   public let locationName: String?
   public let observerEmail: String?
   public let photoCount: Int
+  public let clientSubmissionID: UUID
+  public let ecotypeGuess: Ecotype?
+  public let localIdentification: LocalIdentificationSuggestion?
 
   public init(
     latitude: Double,
@@ -18,7 +22,10 @@ public struct SubmissionDraft: Hashable, Sendable {
     notes: String? = nil,
     locationName: String? = nil,
     observerEmail: String? = nil,
-    photoCount: Int
+    photoCount: Int,
+    clientSubmissionID: UUID = UUID(),
+    ecotypeGuess: Ecotype? = nil,
+    localIdentification: LocalIdentificationSuggestion? = nil
   ) {
     self.latitude = latitude
     self.longitude = longitude
@@ -28,6 +35,9 @@ public struct SubmissionDraft: Hashable, Sendable {
     self.locationName = locationName
     self.observerEmail = observerEmail
     self.photoCount = photoCount
+    self.clientSubmissionID = clientSubmissionID
+    self.ecotypeGuess = ecotypeGuess
+    self.localIdentification = localIdentification
   }
 }
 
@@ -41,6 +51,8 @@ public struct SubmissionPayload: Codable, Hashable, Sendable {
   public let locationName: String?
   public let observerEmail: String?
   public let photoCount: Int
+  public let ecotypeGuess: Ecotype?
+  public let localIdentification: LocalIdentificationSuggestion?
   public let existingReceipt: SubmissionReceipt?
 
   public init(
@@ -53,6 +65,8 @@ public struct SubmissionPayload: Codable, Hashable, Sendable {
     locationName: String?,
     observerEmail: String?,
     photoCount: Int,
+    ecotypeGuess: Ecotype? = nil,
+    localIdentification: LocalIdentificationSuggestion? = nil,
     existingReceipt: SubmissionReceipt? = nil
   ) {
     self.clientSubmissionID = clientSubmissionID
@@ -64,6 +78,8 @@ public struct SubmissionPayload: Codable, Hashable, Sendable {
     self.locationName = locationName
     self.observerEmail = observerEmail
     self.photoCount = photoCount
+    self.ecotypeGuess = ecotypeGuess
+    self.localIdentification = localIdentification
     self.existingReceipt = existingReceipt
   }
 
@@ -78,6 +94,8 @@ public struct SubmissionPayload: Codable, Hashable, Sendable {
       locationName: locationName,
       observerEmail: observerEmail,
       photoCount: photoCount,
+      ecotypeGuess: ecotypeGuess,
+      localIdentification: localIdentification,
       existingReceipt: receipt
     )
   }
@@ -93,6 +111,8 @@ public struct SubmissionPayload: Codable, Hashable, Sendable {
       locationName: locationName,
       observerEmail: nil,
       photoCount: photoCount,
+      ecotypeGuess: ecotypeGuess,
+      localIdentification: localIdentification,
       existingReceipt: existingReceipt
     )
   }
@@ -106,7 +126,29 @@ public struct SubmissionPayload: Codable, Hashable, Sendable {
     case locationName = "location_name"
     case observerEmail = "observer_email"
     case photoCount = "photo_count"
+    case ecotypeGuess = "ecotype_guess"
+    case localIdentification = "local_identification"
     case existingReceipt = "existing_receipt"
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    clientSubmissionID = try values.decode(UUID.self, forKey: .clientSubmissionID)
+    latitude = try values.decode(Double.self, forKey: .latitude)
+    longitude = try values.decode(Double.self, forKey: .longitude)
+    observedAt = try values.decode(Date.self, forKey: .observedAt)
+    groupSize = try values.decode(Int.self, forKey: .groupSize)
+    notes = try values.decodeIfPresent(String.self, forKey: .notes)
+    locationName = try values.decodeIfPresent(String.self, forKey: .locationName)
+    observerEmail = try values.decodeIfPresent(String.self, forKey: .observerEmail)
+    photoCount = try values.decode(Int.self, forKey: .photoCount)
+    ecotypeGuess = try values.decodeIfPresent(Ecotype.self, forKey: .ecotypeGuess)
+    localIdentification =
+      (try? values.decodeIfPresent(
+        LocalIdentificationSuggestion.self,
+        forKey: .localIdentification
+      )) ?? nil
+    existingReceipt = try values.decodeIfPresent(SubmissionReceipt.self, forKey: .existingReceipt)
   }
 }
 
