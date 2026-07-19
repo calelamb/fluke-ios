@@ -2,19 +2,35 @@ import FlukeKit
 import FlukeUI
 import SwiftUI
 
+public struct WhaleProfileRequest: Hashable, Sendable {
+    public let whaleID: String
+    public let revision: Int
+
+    public static func next(
+        whaleID: String,
+        after current: WhaleProfileRequest?
+    ) -> WhaleProfileRequest {
+        WhaleProfileRequest(whaleID: whaleID, revision: (current?.revision ?? 0) + 1)
+    }
+}
+
 public struct WhalesView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel: WhalesViewModel
+    @State private var requestedWhale: Whale?
     private let repository: any WhalesRepositoryProtocol
+    private let profileRequest: WhaleProfileRequest?
     private let openSubmit: () -> Void
     private let openTrace: (Whale) -> Void
 
     public init(
         repository: any WhalesRepositoryProtocol,
+        profileRequest: WhaleProfileRequest? = nil,
         onOpenTrace: @escaping (Whale) -> Void = { _ in },
         onOpenSubmit: @escaping () -> Void = {}
     ) {
         self.repository = repository
+        self.profileRequest = profileRequest
         self.openTrace = onOpenTrace
         openSubmit = onOpenSubmit
         _viewModel = State(initialValue: WhalesViewModel(repository: repository))
@@ -29,8 +45,19 @@ public struct WhalesView: View {
         .background(Color.fog)
         .navigationTitle("Whales")
         .searchable(text: $viewModel.searchText, prompt: "Name, catalog ID, pod, or ecotype")
-        .task { await viewModel.load() }
+        .task(id: profileRequest) {
+            await viewModel.load()
+            requestedWhale = profileRequest.flatMap { viewModel.whale(id: $0.whaleID) }
+        }
         .refreshable { await viewModel.load() }
+        .navigationDestination(item: $requestedWhale) { whale in
+            WhaleProfileView(
+                whale: whale,
+                repository: repository,
+                onOpenTrace: { openTrace(whale) },
+                onOpenSubmit: openSubmit
+            )
+        }
     }
 
     private var filters: some View {

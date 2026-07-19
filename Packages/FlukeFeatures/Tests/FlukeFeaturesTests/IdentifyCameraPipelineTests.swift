@@ -395,8 +395,8 @@ struct IdentifyCameraPipelineTests {
   }
 
   @MainActor
-  @Test("legacy media entry opens live capture without producing a still photo")
-  func legacyMediaEntry() async throws {
+  @Test("media entry opens live capture and exposes the zero-buffer frame stream")
+  func liveMediaEntry() async {
     let authorization = RecordingCameraAuthorization(status: .authorized)
     let session = RecordingCameraSession()
     let coordinator = IdentifyCameraCoordinator(
@@ -404,10 +404,9 @@ struct IdentifyCameraPipelineTests {
       session: session
     )
 
-    let photo = try await coordinator.requestCameraPhoto()
+    await coordinator.openCamera()
     _ = coordinator.frames
 
-    #expect(photo == nil)
     #expect(coordinator.previewSession == nil)
     #expect(coordinator.cameraState == .available)
     #expect(await session.startCount == 1)

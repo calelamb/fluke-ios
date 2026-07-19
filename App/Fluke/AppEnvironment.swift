@@ -1,3 +1,4 @@
+import FlukeFeatures
 import FlukeKit
 import FlukeML
 import FlukeReleaseB
@@ -22,6 +23,7 @@ enum AppConfigurationError: Error, Equatable {
 struct LaunchCapabilities: Equatable, Sendable {
   let accounts: Bool
   let identification: Bool
+  let identificationMode: IdentificationMode
   let submissions: Bool
 }
 
@@ -41,6 +43,7 @@ enum LaunchCapabilityState: Equatable, Sendable {
           LaunchCapabilities(
             accounts: capabilities.accounts,
             identification: capabilities.identification,
+            identificationMode: capabilities.identificationMode,
             submissions: capabilities.submissions
           )
         )
@@ -59,7 +62,6 @@ enum LaunchCapabilityState: Equatable, Sendable {
 
 struct AppEnvironment {
   typealias CapabilitiesFetch = () async throws -> Capabilities
-  typealias IdentifyServiceFactory = @MainActor @Sendable () -> any IdentifyServiceProtocol
   typealias SubmissionObservedAt = @MainActor @Sendable () -> Date
 
   let apiBaseURL: URL
@@ -68,7 +70,8 @@ struct AppEnvironment {
   let configuration: AppBuildConfiguration
   let fetchCapabilities: CapabilitiesFetch
   let historicalSightingsRepository: HistoricalSightingsRepository
-  let identifyServiceFactory: IdentifyServiceFactory
+  let identificationModeCache: IdentificationModeCache
+  let localIdentifierLoader: OnDeviceIdentificationLoader
   let logbookRepository: any LogbookRepositoryProtocol
   let predictionRepository: PredictionRepository
   let sightingsRepository: SightingsRepository
@@ -96,7 +99,8 @@ struct AppEnvironment {
       session: URLSession(configuration: submissionSessionConfiguration()),
       cacheStore: FileBrowseCacheStore(
         directory: FileBrowseCacheStore.liveDirectory()
-      )
+      ),
+      localIdentifierLoad: { try await LocalIdentifier.load(bundle: bundle) }
     )
   }
 
@@ -106,7 +110,10 @@ struct AppEnvironment {
     session: URLSession = .shared,
     capabilitiesFetch: CapabilitiesFetch? = nil,
     submissionObservedAt: @escaping SubmissionObservedAt = Date.init,
-    cacheStore: any BrowseCacheStore = MemoryBrowseCacheStore()
+    cacheStore: any BrowseCacheStore = MemoryBrowseCacheStore(),
+    localIdentifierLoad: @escaping OnDeviceIdentificationLoader.Load = {
+      try await LocalIdentifier.load(bundle: .main)
+    }
   ) throws -> AppEnvironment {
     let apiBaseURL = try validatedAPIBaseURL(
       apiBaseURLString,
@@ -124,7 +131,8 @@ struct AppEnvironment {
         try await client.get("/api/v1/capabilities")
       },
       historicalSightingsRepository: HistoricalSightingsRepository(api: client, cache: cacheStore),
-      identifyServiceFactory: { IdentifyService(api: client) },
+      identificationModeCache: IdentificationModeCache(store: cacheStore),
+      localIdentifierLoader: OnDeviceIdentificationLoader(load: localIdentifierLoad),
       logbookRepository: LogbookRepository(api: client),
       predictionRepository: PredictionRepository(api: client, cache: cacheStore),
       sightingsRepository: SightingsRepository(api: client, cache: cacheStore),
@@ -198,29 +206,126 @@ struct AppEnvironment {
   }
 }
 
-@MainActor
-enum IdentifyComposition {
-  static func resolve(
-    enabled: Bool,
-    factory: AppEnvironment.IdentifyServiceFactory
-  ) -> (any IdentifyServiceProtocol)? {
-    guard enabled else { return nil }
-    return factory()
+actor IdentificationModeCache {
+  private static let key = BrowseCacheKey(resource: "identification-mode", identity: "launch")
+  private static let logger = Logger(
+    subsystem: "app.fluke",
+    category: "identification-mode-cache"
+  )
+  private let store: any BrowseCacheStore
+
+  init(store: any BrowseCacheStore) { self.store = store }
+
+  func load() async -> IdentificationMode? {
+    do {
+      guard
+        let document = try await store.load(IdentificationMode.self, for: Self.key),
+        case .value(.onDevice) = document.payload
+      else { return nil }
+      return .onDevice
+    } catch {
+      Self.logger.error(
+        "Identification mode cache unavailable: \(String(describing: error), privacy: .private)"
+      )
+      return nil
+    }
+  }
+
+  func record(_ mode: IdentificationMode) async {
+    do {
+      guard mode == .onDevice else {
+        try await store.remove(Self.key)
+        return
+      }
+      try await store.replace(
+        BrowseCacheDocument(
+          resource: Self.key.resource,
+          fetchedAt: Date(),
+          payload: .value(mode)
+        ),
+        for: Self.key
+      )
+    } catch {
+      Self.logger.error(
+        "Identification mode cache write failed: \(String(describing: error), privacy: .private)"
+      )
+    }
   }
 }
 
-enum OnDeviceIdentificationComposition {
+enum LocalIdentifierAvailability: Sendable {
+  case available(any LocalIdentifying)
+  case unavailable
+
+  var isUnavailable: Bool {
+    guard case .unavailable = self else { return false }
+    return true
+  }
+}
+
+actor OnDeviceIdentificationLoader {
+  typealias Load = @Sendable () async throws -> any LocalIdentifying
+
   private static let logger = Logger(
     subsystem: "app.fluke",
     category: "on-device-identification"
   )
 
-  static func load(bundle: Bundle = .main) async -> (any LocalIdentifying)? {
-    do {
-      return try await LocalIdentifier.load(bundle: bundle)
-    } catch {
-      logger.error("Local identifier unavailable: \(String(describing: error), privacy: .private)")
-      return nil
+  private let loadIdentifier: Load
+  private var loaded: LocalIdentifierAvailability?
+  private var inFlight: Task<LocalIdentifierAvailability, Never>?
+
+  init(load: @escaping Load) { loadIdentifier = load }
+
+  func load() async -> LocalIdentifierAvailability {
+    if let loaded { return loaded }
+    if let inFlight { return await inFlight.value }
+    let loadIdentifier = self.loadIdentifier
+    let task = Task<LocalIdentifierAvailability, Never> {
+      do {
+        return .available(try await loadIdentifier())
+      } catch {
+        Self.logger.error(
+          "Verified local identifier unavailable: \(String(describing: error), privacy: .private)"
+        )
+        return .unavailable
+      }
     }
+    inFlight = task
+    let result = await task.value
+    loaded = result
+    inFlight = nil
+    return result
+  }
+}
+
+enum IdentificationComposition {
+  static func resolve(
+    capabilities: LaunchCapabilityState,
+    cachedMode: IdentificationMode?,
+    localIdentifier: LocalIdentifierAvailability
+  ) -> IdentifyCapability {
+    switch effectiveMode(capabilities: capabilities, cachedMode: cachedMode) {
+    case .disabled:
+      return .disabled
+    case .server:
+      return .unavailable(.serverUnsupported)
+    case .onDevice:
+      guard case .available(let identifier) = localIdentifier else {
+        return .unavailable(.localArtifactsUnavailable)
+      }
+      return .onDevice(identifier)
+    }
+  }
+
+  static func effectiveMode(
+    capabilities: LaunchCapabilityState,
+    cachedMode: IdentificationMode?
+  ) -> IdentificationMode {
+    guard case .available(let value) = capabilities else {
+      return cachedMode == .onDevice ? .onDevice : .disabled
+    }
+    guard value.identification else { return .disabled }
+    return value.identificationMode
   }
 }

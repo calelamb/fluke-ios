@@ -48,11 +48,14 @@ struct RootScene: View {
   @State private var signInAuthorizationFlow: AppleAuthorizationFlow
   @State private var deletionAuthorizationFlow: AppleAuthorizationFlow
   @State private var capabilities = LaunchCapabilityState.loading
-  @State private var identifyService: (any IdentifyServiceProtocol)?
+  @State private var identifyCapability = IdentifyCapability.disabled
+  @State private var cachedIdentificationMode: IdentificationMode?
+  @State private var localIdentifierAvailability = LocalIdentifierAvailability.unavailable
   @State private var movementNavigation: MovementNavigationModel
   @State private var movementSubmitPresentation = MovementSubmitPresentationRouter()
   @State private var selectedTab = RootTab.sightings
   @State private var requestedTraceWhaleID: String?
+  @State private var profileRequest: WhaleProfileRequest?
   @State private var atlasRouteRevision = 0
   @State private var isAtlasPresented = false
   @State private var isQueueFlushInFlight = false
@@ -112,11 +115,14 @@ struct RootScene: View {
         .tag(RootTab.sightings)
 
         NavigationStack {
-          WhalesView(repository: environment.whalesRepository) { whale in
-            presentAtlas(for: whale.id)
-          } onOpenSubmit: {
-            presentSubmit()
-          }
+          WhalesView(
+            repository: environment.whalesRepository,
+            profileRequest: profileRequest,
+            onOpenTrace: { whale in
+              presentAtlas(for: whale.id)
+            },
+            onOpenSubmit: { presentSubmit() }
+          )
         }
         .flukeNavigationBackground()
         .tabItem { tabLabel(for: .whales) }
@@ -166,7 +172,7 @@ struct RootScene: View {
         Task { await flushQueuedSubmissions() }
       }
       networkMonitor.start(queue: DispatchQueue(label: "app.fluke.Fluke.submission-network"))
-      await refreshCapabilities()
+      await bootstrapCapabilities()
     }
     .onChange(of: scenePhase) { _, phase in
       guard phase == .active else { return }
@@ -268,15 +274,32 @@ struct RootScene: View {
 
     let loaded = await LaunchCapabilityState.load(using: environment.fetchCapabilities)
     capabilities = loaded
-    identifyService = IdentifyComposition.resolve(
-      enabled: loaded.identificationEnabled,
-      factory: environment.identifyServiceFactory
+    let effectiveMode = IdentificationComposition.effectiveMode(
+      capabilities: loaded,
+      cachedMode: cachedIdentificationMode
+    )
+    if case .available = loaded {
+      await environment.identificationModeCache.record(effectiveMode)
+      cachedIdentificationMode = effectiveMode == .onDevice ? .onDevice : nil
+    }
+    identifyCapability = IdentificationComposition.resolve(
+      capabilities: loaded,
+      cachedMode: cachedIdentificationMode,
+      localIdentifier: localIdentifierAvailability
     )
     if accountAvailability == .enabled {
       if !authSession.isAuthenticated { await authSession.restore() }
     } else {
       authSession.expire()
     }
+  }
+
+  private func bootstrapCapabilities() async {
+    async let cachedMode = environment.identificationModeCache.load()
+    async let localIdentifier = environment.localIdentifierLoader.load()
+    cachedIdentificationMode = await cachedMode
+    localIdentifierAvailability = await localIdentifier
+    await refreshCapabilities()
   }
 
   private var movementDestination: Binding<MovementDestination?> {
@@ -329,18 +352,15 @@ struct RootScene: View {
 
   @ViewBuilder
   private var identifyDestination: some View {
-    if let identifyService {
-      FlukeFeatures.IdentifyView(
-        service: identifyService,
-        browseWhales: { selectedTab = .whales },
-        submitSighting: { presentSubmit() }
-      )
-    } else {
-      FlukeFeatures.IdentifyView(
-        browseWhales: { selectedTab = .whales },
-        submitSighting: { presentSubmit() }
-      )
-    }
+    FlukeFeatures.IdentifyView(
+      capability: identifyCapability,
+      browseWhales: { selectedTab = .whales },
+      openWhale: { whaleID in
+        profileRequest = WhaleProfileRequest.next(whaleID: whaleID, after: profileRequest)
+        selectedTab = .whales
+      },
+      submitSighting: { presentSubmit() }
+    )
   }
 
   private var youAuthState: YouAuthState {
@@ -394,13 +414,6 @@ enum SubmissionFlushAnnouncement {
     let uploaded = before - after
     guard before >= 0, after >= 0, uploaded > 0 else { return nil }
     return uploaded == 1 ? "1 queued sighting uploaded" : "\(uploaded) queued sightings uploaded"
-  }
-}
-
-extension LaunchCapabilityState {
-  fileprivate var identificationEnabled: Bool {
-    guard case .available(let value) = self else { return false }
-    return value.identification
   }
 }
 

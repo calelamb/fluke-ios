@@ -1,5 +1,6 @@
+import FlukeFeatures
 import FlukeKit
-import FlukeReleaseB
+import FlukeML
 import Foundation
 import Testing
 
@@ -22,6 +23,7 @@ struct LaunchCapabilityTests {
           LaunchCapabilities(
             accounts: true,
             identification: false,
+            identificationMode: .disabled,
             submissions: true
           )
         )
@@ -54,7 +56,16 @@ struct LaunchCapabilityTests {
       sleep: { await recorder.recordSleep($0) }
     )
 
-    #expect(state == .available(.init(accounts: true, identification: false, submissions: true)))
+    #expect(
+      state == .available(
+        .init(
+          accounts: true,
+          identification: false,
+          identificationMode: .disabled,
+          submissions: true
+        )
+      )
+    )
     #expect(await recorder.fetchCount == 3)
     #expect(await recorder.sleeps == [1, 2])
   }
@@ -97,23 +108,51 @@ struct LaunchCapabilityTests {
           LaunchCapabilities(
             accounts: false,
             identification: true,
+            identificationMode: .server,
             submissions: false
           )
         )
     )
   }
 
-  @Test("Disabled identification never constructs its service")
-  func disabledIdentificationCompositionIsLazy() {
-    let recorder = IdentifyFactoryRecorder()
+  @Test("cached on-device mode survives an offline launch only with a loaded identifier")
+  func cachedOnDeviceResolution() {
+    let identifier = NeverLocalIdentifier()
 
-    let service = IdentifyComposition.resolve(
-      enabled: false,
-      factory: { recorder.makeService() }
+    let available = IdentificationComposition.resolve(
+      capabilities: .unavailable,
+      cachedMode: .onDevice,
+      localIdentifier: .available(identifier)
+    )
+    let missing = IdentificationComposition.resolve(
+      capabilities: .unavailable,
+      cachedMode: .onDevice,
+      localIdentifier: .unavailable
     )
 
-    #expect(service == nil)
-    #expect(recorder.constructionCount == 0)
+    guard case .onDevice = available else {
+      Issue.record("Expected cached on-device identification")
+      return
+    }
+    #expect(missing.unavailableReason == .localArtifactsUnavailable)
+  }
+
+  @Test("server mode is explicitly unsupported in the shipping composition")
+  func serverModeUnsupported() {
+    let capability = IdentificationComposition.resolve(
+      capabilities: .available(
+        .init(
+          accounts: true,
+          identification: true,
+          identificationMode: .server,
+          submissions: true
+        )
+      ),
+      cachedMode: .onDevice,
+      localIdentifier: .available(NeverLocalIdentifier())
+    )
+
+    #expect(capability.unavailableReason == .serverUnsupported)
   }
 }
 
@@ -133,18 +172,8 @@ private actor CapabilityAttemptRecorder {
   func recordSleep(_ nanoseconds: UInt64) { sleeps.append(nanoseconds) }
 }
 
-@MainActor
-private final class IdentifyFactoryRecorder {
-  private(set) var constructionCount = 0
-
-  func makeService() -> any IdentifyServiceProtocol {
-    constructionCount += 1
-    return NeverIdentifyService()
-  }
-}
-
-private struct NeverIdentifyService: IdentifyServiceProtocol {
-  func identify(photo: IdentifyPhoto) async throws -> IdentifyResponse {
+private struct NeverLocalIdentifier: LocalIdentifying {
+  func identify(frame: CameraFrame) async throws -> LocalIdentificationState {
     throw CancellationError()
   }
 }

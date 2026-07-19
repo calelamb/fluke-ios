@@ -1,5 +1,5 @@
 import AVFoundation
-import FlukeReleaseB
+import FlukeML
 import Testing
 
 @testable import FlukeFeatures
@@ -7,14 +7,20 @@ import Testing
 @MainActor
 @Suite("Identify view ownership")
 struct IdentifyViewOwnershipTests {
+  @Test("convenience owner keeps disabled capability fail-closed")
+  func disabledConvenienceOwner() {
+    let owner = IdentifyReadyState(capability: .disabled)
+
+    #expect(owner.model.availability == .disabled)
+  }
+
   @Test("one retained owner wires the model and sheet to the same camera")
   func retainedCameraOwner() async {
     let authorization = OwnershipAuthorization()
     let session = OwnershipSession()
     let camera = IdentifyCameraCoordinator(authorization: authorization, session: session)
     let owner = IdentifyReadyState(
-      online: true,
-      service: OwnershipIdentifyService(),
+      capability: .onDevice(OwnershipLocalIdentifier()),
       camera: camera
     )
 
@@ -41,8 +47,8 @@ private actor OwnershipSession: IdentifyCameraSessionProviding {
   func stop() {}
 }
 
-private struct OwnershipIdentifyService: IdentifyServiceProtocol {
-  func identify(photo: IdentifyPhoto) async throws -> IdentifyResponse {
+private struct OwnershipLocalIdentifier: LocalIdentifying {
+  func identify(frame: CameraFrame) async throws -> LocalIdentificationState {
     throw CancellationError()
   }
 }

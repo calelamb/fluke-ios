@@ -1,64 +1,86 @@
-import FlukeReleaseB
 import FlukeUI
 import SwiftUI
 
 public struct IdentifyResultsView: View {
-  public let matches: [IdentifyMatch]
+  public let result: IdentifyResult
   public let disclaimer: String
-  public let feedbackEnabled: Bool
+  public let openWhale: (String) -> Void
 
-  public init(matches: [IdentifyMatch], disclaimer: String, feedbackEnabled: Bool) {
-    self.matches = matches
+  public init(
+    result: IdentifyResult,
+    disclaimer: String,
+    openWhale: @escaping (String) -> Void
+  ) {
+    self.result = result
     self.disclaimer = disclaimer
-    self.feedbackEnabled = feedbackEnabled
+    self.openWhale = openWhale
   }
 
   public var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      EditorialHeading(level: .section, text: "Possible visual matches")
-      ScrollView(.horizontal) {
-        LazyHStack(spacing: 12) {
-          ForEach(Array(matches.enumerated()), id: \.offset) { index, match in
-            matchCard(match, position: index + 1)
-          }
-        }
-        .scrollTargetLayout()
+    VStack(alignment: .leading, spacing: 18) {
+      if let prominent = result.prominent {
+        prominentCard(prominent)
       }
-      .scrollTargetBehavior(.viewAligned)
-      .accessibilityLabel("Possible visual matches")
-
+      if !result.provisional.isEmpty {
+        provisionalMatches
+      }
       Label(disclaimer, systemImage: "eye.trianglebadge.exclamationmark")
         .font(.callout.weight(.semibold))
         .foregroundStyle(Color.deep)
-        .accessibilityAddTraits(.isStaticText)
-
-      Button("Wrong match") {}
-        .buttonStyle(FlukeButtonStyle.secondary)
-        .disabled(!feedbackEnabled)
-        .accessibilityHint("Feedback will be available after the review service launches")
+      artifactDisclosure
     }
   }
 
-  private func matchCard(_ match: IdentifyMatch, position: Int) -> some View {
+  private func prominentCard(_ match: IdentifyResultMatch) -> some View {
     FlukeCard {
-      VStack(alignment: .leading, spacing: 8) {
-        Text("POSSIBILITY \(position)")
+      VStack(alignment: .leading, spacing: 10) {
+        Text("STABILIZED VISUAL MATCH")
           .font(.flukeLabel)
           .foregroundStyle(Color.tide)
-        Text(match.name ?? match.catalogId)
-          .font(.flukeDisplaySmall)
-        Text(match.name == nil ? "Catalog \(match.catalogId)" : match.catalogId)
-          .font(.subheadline.monospaced())
-          .foregroundStyle(Color.deep)
-        Text("\(Int((match.score * 100).rounded()))% visual similarity")
-          .font(.headline)
-          .foregroundStyle(Color.ember)
-        Text(match.explanation)
-          .font(.flukeBody)
-          .foregroundStyle(Color.deep)
+        Text(match.catalogID).font(.flukeDisplaySmall)
+        scoreText(match.score)
+        Button("Open whale \(match.catalogID)") { openWhale(match.whaleID) }
+          .buttonStyle(FlukeButtonStyle.primary)
       }
-      .frame(width: 236, alignment: .leading)
     }
-    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("identify.result.stabilized")
+  }
+
+  private var provisionalMatches: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      EditorialHeading(level: .section, text: "Provisional top matches")
+      ScrollView(.horizontal) {
+        LazyHStack(spacing: 12) {
+          ForEach(result.provisional) { match in
+            FlukeCard {
+              VStack(alignment: .leading, spacing: 8) {
+                Text("RANK \(match.rank)").font(.flukeLabel).foregroundStyle(Color.tide)
+                Text(match.catalogID).font(.flukeDisplaySmall)
+                scoreText(match.score)
+                Text("References: \(match.referencePhotoIDs.joined(separator: ", "))")
+                  .font(.caption.monospaced())
+                  .foregroundStyle(Color.deep)
+              }
+              .frame(width: 236, alignment: .leading)
+            }
+          }
+        }
+      }
+    }
+    .accessibilityIdentifier("identify.results.provisional")
+  }
+
+  private func scoreText(_ score: Float) -> some View {
+    Text("Similarity score \(score.formatted(.number.precision(.fractionLength(3))))")
+      .font(.headline)
+      .foregroundStyle(Color.ember)
+  }
+
+  private var artifactDisclosure: some View {
+    Text(
+      "Model \(result.artifact.modelVersion) · Index \(result.artifact.indexVersion) · Manifest \(result.artifact.manifestVersion)"
+    )
+    .font(.caption.monospaced())
+    .foregroundStyle(Color.deep)
   }
 }

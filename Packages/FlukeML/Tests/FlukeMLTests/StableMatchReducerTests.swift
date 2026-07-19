@@ -124,6 +124,9 @@ struct StableMatchReducerTests {
     let third = try await identifier.identify(frame: frame)
 
     #expect(first.matches.count == 3)
+    #expect(first.artifact.manifestVersion == catalog.manifest.manifestVersion)
+    #expect(first.artifact.modelVersion == catalog.manifest.modelVersion)
+    #expect(first.artifact.indexVersion == catalog.manifest.indexVersion)
     #expect(first.prominent == nil)
     #expect(second.prominent == nil)
     #expect(third.prominent?.catalogID == first.matches.first?.catalogID)

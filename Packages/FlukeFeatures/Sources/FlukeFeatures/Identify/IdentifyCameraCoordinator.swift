@@ -1,6 +1,5 @@
 import AVFoundation
 import FlukeML
-import FlukeReleaseB
 import Foundation
 import Observation
 
@@ -14,6 +13,7 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
     session?.frames ?? AsyncStream { $0.finish() }
   }
   var previewSession: AVCaptureSession? { session?.previewSession }
+  var isCameraPresented: Bool { isPresented }
 
   private let authorization: any IdentifyCameraAuthorizationProviding
   private let makeSession: () -> any IdentifyCameraSessionProviding
@@ -59,10 +59,7 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
     }
   }
 
-  func requestCameraPhoto() async throws -> IdentifyPhoto? {
-    await open()
-    return nil
-  }
+  func openCamera() async { await open() }
 
   func open() async {
     guard !isSessionActive else { return }

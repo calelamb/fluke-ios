@@ -76,6 +76,10 @@ public final class WhalesViewModel {
             }
     }
 
+    public func whale(id: String) -> Whale? {
+        state.value?.first { $0.id == id }
+    }
+
     public var serverCatalogIsEmpty: Bool {
         if case .empty = state { return true }
         return false

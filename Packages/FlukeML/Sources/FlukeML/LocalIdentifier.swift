@@ -34,13 +34,31 @@ public protocol LocalIdentifying: Sendable {
   func identify(frame: CameraFrame) async throws -> LocalIdentificationState
 }
 
+public struct LocalIdentificationArtifact: Equatable, Sendable {
+  public let manifestVersion: String
+  public let modelVersion: String
+  public let indexVersion: String
+
+  public init(manifestVersion: String, modelVersion: String, indexVersion: String) {
+    self.manifestVersion = manifestVersion
+    self.modelVersion = modelVersion
+    self.indexVersion = indexVersion
+  }
+}
+
 public struct LocalIdentificationState: Equatable, Sendable {
   public let matches: [LocalMatch]
   public let prominent: LocalMatch?
+  public let artifact: LocalIdentificationArtifact
 
-  public init(matches: [LocalMatch], prominent: LocalMatch?) {
+  public init(
+    matches: [LocalMatch],
+    prominent: LocalMatch?,
+    artifact: LocalIdentificationArtifact
+  ) {
     self.matches = matches
     self.prominent = prominent
+    self.artifact = artifact
   }
 }
 
@@ -52,6 +70,7 @@ public actor LocalIdentifier: LocalIdentifying {
   private let embedder: any EmbeddingProviding
   private let searcher: ExactCosineSearcher
   private let reducer: StableMatchReducer
+  private let artifact: LocalIdentificationArtifact
   private var state: StableMatchState
 
   public init(embedder: any EmbeddingProviding, catalog: ReferenceCatalog) {
@@ -62,6 +81,11 @@ public actor LocalIdentifier: LocalIdentifying {
       marginThreshold: catalog.manifest.marginThreshold,
       requiredWins: Self.requiredWins,
       windowSize: Self.windowSize
+    )
+    artifact = LocalIdentificationArtifact(
+      manifestVersion: catalog.manifest.manifestVersion,
+      modelVersion: catalog.manifest.modelVersion,
+      indexVersion: catalog.manifest.indexVersion
     )
     state = reducer.initialState
   }
@@ -83,6 +107,10 @@ public actor LocalIdentifier: LocalIdentifying {
     }
     let updatedState = reducer.reduce(state: state, candidate: eligible)
     state = updatedState
-    return LocalIdentificationState(matches: matches, prominent: updatedState.prominent)
+    return LocalIdentificationState(
+      matches: matches,
+      prominent: updatedState.prominent,
+      artifact: artifact
+    )
   }
 }

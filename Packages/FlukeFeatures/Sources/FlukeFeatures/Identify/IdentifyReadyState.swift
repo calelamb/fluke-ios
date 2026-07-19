@@ -1,4 +1,3 @@
-import FlukeReleaseB
 import Observation
 
 @MainActor
@@ -7,28 +6,12 @@ final class IdentifyReadyState {
   let camera: IdentifyCameraCoordinator
   let model: IdentifyViewModel
 
-  convenience init(
-    online: Bool,
-    service: any IdentifyServiceProtocol
-  ) {
-    self.init(
-      online: online,
-      service: service,
-      camera: IdentifyCameraCoordinator()
-    )
+  convenience init(capability: IdentifyCapability) {
+    self.init(capability: capability, camera: IdentifyCameraCoordinator())
   }
 
-  init(
-    online: Bool,
-    service: any IdentifyServiceProtocol,
-    camera: IdentifyCameraCoordinator
-  ) {
+  init(capability: IdentifyCapability, camera: IdentifyCameraCoordinator) {
     self.camera = camera
-    model = IdentifyViewModel(
-      capability: true,
-      online: online,
-      media: camera,
-      service: service
-    )
+    model = IdentifyViewModel(capability: capability, media: camera)
   }
 }

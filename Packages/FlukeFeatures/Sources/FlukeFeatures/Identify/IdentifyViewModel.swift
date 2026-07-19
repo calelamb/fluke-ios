@@ -1,106 +1,181 @@
-import FlukeKit
-import FlukeReleaseB
+import FlukeML
 import Foundation
 import Observation
 
+public enum IdentifyUnavailableReason: Equatable, Sendable {
+  case localArtifactsUnavailable
+  case serverUnsupported
+}
+
+public enum IdentifyCapability: Sendable {
+  case disabled
+  case onDevice(any LocalIdentifying)
+  case unavailable(IdentifyUnavailableReason)
+}
+
+extension IdentifyCapability {
+  public var unavailableReason: IdentifyUnavailableReason? {
+    guard case .unavailable(let reason) = self else { return nil }
+    return reason
+  }
+}
+
 public enum IdentifyAvailability: Equatable, Sendable {
   case disabled
-  case training
-  case needsInternet
+  case unavailable(IdentifyUnavailableReason)
   case ready
+}
+
+public enum IdentifyPresentation: Equatable, Sendable {
+  case idle
+  case analyzing
+  case provisional
+  case stabilized
+  case unknown
+  case poorQuality
+  case unavailable
+}
+
+public struct IdentifyResultMatch: Equatable, Sendable, Identifiable {
+  public var id: String { whaleID }
+  public let whaleID: String
+  public let catalogID: String
+  public let score: Float
+  public let rank: Int
+  public let referencePhotoIDs: [String]
+}
+
+public struct IdentifyResult: Equatable, Sendable {
+  public let provisional: [IdentifyResultMatch]
+  public let prominent: IdentifyResultMatch?
+  public let artifact: LocalIdentificationArtifact
 }
 
 @MainActor
 public protocol IdentifyMediaProviding: AnyObject {
   var cameraState: PhotoCameraState { get }
-  func requestCameraPhoto() async throws -> IdentifyPhoto?
+  var frames: AsyncStream<CameraFrame> { get }
+  var isCameraPresented: Bool { get }
+  func openCamera() async
 }
 
 @MainActor
 @Observable
 public final class IdentifyViewModel {
-  public static let trainingMessage =
-    "Photo identification is still in training. We are building a rights-cleared reference catalog before we compare your photo. Browse the whale catalog or submit a sighting in the meantime."
-
   public private(set) var availability: IdentifyAvailability
-  public private(set) var matches: [IdentifyMatch] = []
-  public private(set) var errorMessage: String?
+  public private(set) var presentation = IdentifyPresentation.idle
+  public private(set) var result: IdentifyResult?
   public private(set) var isIdentifying = false
 
-  public let disclaimer = "Visual similarity, not a confirmed ID"
-  public let isWrongMatchFeedbackEnabled = false
+  public let disclaimer = "Uncalibrated visual similarity, not a confirmed ID"
 
-  private let capability: Bool
+  private let capability: IdentifyCapability
   private let media: any IdentifyMediaProviding
-  private let service: any IdentifyServiceProtocol
+  private var inferenceTask: Task<Void, Never>?
 
-  public init(
-    capability: Bool,
-    online: Bool,
-    media: any IdentifyMediaProviding,
-    service: any IdentifyServiceProtocol
-  ) {
+  public init(capability: IdentifyCapability, media: any IdentifyMediaProviding) {
     self.capability = capability
     self.media = media
-    self.service = service
-    availability = capability ? (online ? .ready : .needsInternet) : .training
-  }
-
-  public var unavailableMessage: String? {
-    switch availability {
-    case .disabled, .training: Self.trainingMessage
-    case .needsInternet:
-      "Photo identification needs an internet connection. Browse whales or try again when you are online."
-    case .ready: nil
-    }
+    availability =
+      switch capability {
+      case .disabled: .disabled
+      case .unavailable(let reason): .unavailable(reason)
+      case .onDevice: .ready
+      }
   }
 
   public var cameraState: PhotoCameraState { media.cameraState }
 
+  public var unavailableMessage: String? {
+    switch availability {
+    case .disabled:
+      "On-device identification is not enabled for this release."
+    case .unavailable(.localArtifactsUnavailable):
+      "On-device identification is unavailable because its verified model catalog could not load."
+    case .unavailable(.serverUnsupported):
+      "Server identification is not supported in this app."
+    case .ready:
+      nil
+    }
+  }
+
   public func openCamera() async {
-    guard capability, availability != .needsInternet, !isIdentifying else { return }
+    guard case .onDevice(let identifier) = capability, !media.isCameraPresented else { return }
     guard case .available = media.cameraState else { return }
-    do {
-      guard let photo = try await media.requestCameraPhoto() else { return }
-      await identify(photo: photo)
-    } catch is CancellationError {
-      resetAfterCancellation()
-    } catch {
-      errorMessage = "Fluke could not open the camera. Please try a photo from your library."
+    result = nil
+    presentation = .analyzing
+    await media.openCamera()
+    guard media.isCameraPresented else {
+      presentation = .idle
+      return
+    }
+    consumeFrames(using: identifier)
+  }
+
+  public func cameraDidStop() {
+    inferenceTask?.cancel()
+    inferenceTask = nil
+    isIdentifying = false
+    if result == nil { presentation = .idle }
+  }
+
+  private func consumeFrames(using identifier: any LocalIdentifying) {
+    inferenceTask?.cancel()
+    let frames = media.frames
+    inferenceTask = Task { [weak self] in
+      for await frame in frames {
+        guard !Task.isCancelled else { break }
+        self?.isIdentifying = true
+        do {
+          let state = try await identifier.identify(frame: frame)
+          guard !Task.isCancelled else { break }
+          self?.apply(state)
+        } catch is CancellationError {
+          break
+        } catch {
+          guard !Task.isCancelled else { break }
+          self?.apply(error)
+        }
+        self?.isIdentifying = false
+      }
+      self?.isIdentifying = false
     }
   }
 
-  public func identify(photo: IdentifyPhoto) async {
-    guard capability, availability != .needsInternet, !isIdentifying else { return }
-    isIdentifying = true
-    errorMessage = nil
-    defer { isIdentifying = false }
-    do {
-      let response = try await service.identify(photo: photo)
-      matches = response.matches
-      availability = .ready
-    } catch is CancellationError {
-      resetAfterCancellation()
-    } catch IdentifyServiceError.training {
-      matches = []
-      availability = .training
-    } catch APIError.offline {
-      matches = []
-      availability = .needsInternet
-    } catch {
-      matches = []
-      errorMessage = "Fluke could not compare this photo. Please try again."
+  private func apply(_ state: LocalIdentificationState) {
+    let provisional = state.matches.map(Self.presentationMatch)
+    let prominent = state.prominent.map(Self.presentationMatch)
+    result = IdentifyResult(
+      provisional: provisional,
+      prominent: prominent,
+      artifact: state.artifact
+    )
+    if prominent != nil {
+      presentation = .stabilized
+    } else if provisional.isEmpty {
+      presentation = .unknown
+    } else {
+      presentation = .provisional
     }
   }
 
-  public func reportInvalidPhoto() {
-    matches = []
-    errorMessage = "Choose a valid JPEG photo with a clearly visible dorsal fin."
+  private func apply(_ error: any Error) {
+    result = nil
+    switch error {
+    case LocalIdentifierError.invalidPixelBuffer, LocalIdentifierError.preprocessingFailed:
+      presentation = .poorQuality
+    default:
+      presentation = .unavailable
+    }
   }
 
-  private func resetAfterCancellation() {
-    matches = []
-    errorMessage = nil
-    availability = capability ? .ready : .training
+  private static func presentationMatch(_ match: LocalMatch) -> IdentifyResultMatch {
+    IdentifyResultMatch(
+      whaleID: match.whaleID,
+      catalogID: match.catalogID,
+      score: match.score,
+      rank: match.rank,
+      referencePhotoIDs: match.matchedReferencePhotoIDs
+    )
   }
 }

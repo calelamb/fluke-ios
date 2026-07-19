@@ -1,3 +1,5 @@
+import FlukeKit
+import FlukeML
 import Foundation
 import Testing
 
@@ -102,11 +104,62 @@ struct AppEnvironmentTests {
     let bundle = try Self.bundleWithoutCatalog()
     defer { try? FileManager.default.removeItem(at: bundle.bundleURL) }
 
-    let identifier = await OnDeviceIdentificationComposition.load(bundle: bundle)
+    let loader = OnDeviceIdentificationLoader { try await LocalIdentifier.load(bundle: bundle) }
+    let identifier = await loader.load()
 
-    #expect(identifier == nil)
+    #expect(identifier.isUnavailable)
     #expect(environment.apiBaseURL == URL(string: "https://api.fluke.test"))
     #expect(environment.configuration == .release)
+  }
+
+  @Test("on-device mode cache persists only the validated local mode")
+  func identificationModeCache() async {
+    let cache = IdentificationModeCache(store: MemoryBrowseCacheStore())
+
+    await cache.record(.onDevice)
+    #expect(await cache.load() == .onDevice)
+
+    await cache.record(.server)
+    #expect(await cache.load() == nil)
+  }
+
+  @Test("on-device mode survives relaunch through the validated file cache")
+  func identificationModeSurvivesRelaunch() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let first = IdentificationModeCache(store: FileBrowseCacheStore(directory: directory))
+    await first.record(.onDevice)
+
+    let relaunched = IdentificationModeCache(store: FileBrowseCacheStore(directory: directory))
+
+    #expect(await relaunched.load() == .onDevice)
+  }
+
+  @Test("an unapproved catalog leaves the one-shot loader unavailable")
+  func unapprovedCatalogFailsClosed() async {
+    let loader = OnDeviceIdentificationLoader {
+      throw IdentifierArtifactError.incompatibleArtifact("rights")
+    }
+
+    #expect(await loader.load().isUnavailable)
+    #expect(await loader.load().isUnavailable)
+  }
+
+  @Test("concurrent local identifier requests share one artifact load")
+  func localIdentifierLoadsOnce() async {
+    let recorder = IdentifierLoadRecorder()
+    let loader = OnDeviceIdentificationLoader { try await recorder.load() }
+    let tasks = (0..<8).map { _ in Task { await loader.load() } }
+    await recorder.waitUntilRequested()
+    for _ in 0..<20 { await Task.yield() }
+
+    #expect(await recorder.count == 1)
+    await recorder.resume()
+    for task in tasks { _ = await task.value }
+    _ = await loader.load()
+
+    #expect(await recorder.count == 1)
   }
 
   private static func bundleWithoutCatalog() throws -> Bundle {
@@ -127,5 +180,38 @@ struct AppEnvironmentTests {
     )
     try data.write(to: directory.appendingPathComponent("Info.plist"))
     return try #require(Bundle(url: directory))
+  }
+}
+
+private actor IdentifierLoadRecorder {
+  private(set) var count = 0
+  private var continuations: [CheckedContinuation<any LocalIdentifying, any Error>] = []
+  private var requestWaiters: [CheckedContinuation<Void, Never>] = []
+
+  func load() async throws -> any LocalIdentifying {
+    count += 1
+    let ready = requestWaiters
+    requestWaiters = []
+    for waiter in ready { waiter.resume() }
+    return try await withCheckedThrowingContinuation { continuations.append($0) }
+  }
+
+  func waitUntilRequested() async {
+    guard count == 0 else { return }
+    await withCheckedContinuation { requestWaiters.append($0) }
+  }
+
+  func resume() {
+    let pending = continuations
+    continuations = []
+    for continuation in pending {
+      continuation.resume(returning: AppNeverLocalIdentifier())
+    }
+  }
+}
+
+private struct AppNeverLocalIdentifier: LocalIdentifying {
+  func identify(frame: CameraFrame) async throws -> LocalIdentificationState {
+    throw CancellationError()
   }
 }
