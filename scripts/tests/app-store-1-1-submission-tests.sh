@@ -3,97 +3,48 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-verifier="$repo_root/scripts/verify-app-store-1-1-submission.sh"
-package_root="$repo_root/AppStore/1.1"
-test_root="$(mktemp -d "${TMPDIR:-/tmp}/fluke-app-store-1-1-tests.XXXXXX")"
-trap 'rm -rf "$test_root"' EXIT
-failures=0
+python3 - "$repo_root" <<'PY'
+from __future__ import annotations
 
-expect_failure() {
-  local name="$1"
-  local expected="$2"
-  shift 2
-  local output
-  if output="$("$@" 2>&1)"; then
-    printf 'FAIL: %s unexpectedly succeeded\n' "$name" >&2
-    failures=$((failures + 1))
-  elif [[ "$output" != *"$expected"* ]]; then
-    printf 'FAIL: %s missing error %q; got %s\n' "$name" "$expected" "$output" >&2
-    failures=$((failures + 1))
-  fi
-}
-
-expect_success() {
-  local name="$1"
-  shift
-  local output
-  if ! output="$("$@" 2>&1)"; then
-    printf 'FAIL: %s failed: %s\n' "$name" "$output" >&2
-    failures=$((failures + 1))
-  fi
-}
-
-test -x "$verifier" || {
-  echo "FAIL: missing executable App Store 1.1 verifier" >&2
-  exit 1
-}
-test -d "$package_root" || {
-  echo "FAIL: missing App Store 1.1 package" >&2
-  exit 1
-}
-
-expect_failure "checked-in draft has no fabricated screenshots" \
-  "requires 1-10 accepted opaque 6.9-inch screenshots" \
-  "$verifier" "$package_root"
-
-valid="$test_root/valid"
-cp -R "$package_root" "$valid"
-mkdir -p "$valid/en-US/screenshots/6.9-inch"
-# This existing image is copied only into the temporary test root to exercise
-# dimensions and opacity. It is not treated as 1.1 content or submission evidence.
-cp "$repo_root/AppStore/1.0/en-US/screenshots/6.9-inch/01-sightings.png" \
-  "$valid/en-US/screenshots/6.9-inch/01-sightings.png"
-build_settings="$test_root/build-settings.txt"
-cat > "$build_settings" <<'SETTINGS'
-    TARGET_NAME = Fluke
-    PRODUCT_BUNDLE_IDENTIFIER = app.fluke.Fluke
-    MARKETING_VERSION = 1.1
-    CURRENT_PROJECT_VERSION = 2
-SETTINGS
-export FLUKE_APP_STORE_TESTING=true
-
-release_dir="$test_root/mobile-release"
-mkdir -p "$release_dir/FlukeEmbedder.mlpackage/Data" "$release_dir/catalog"
-printf 'model artifact fixture\n' > "$release_dir/FlukeEmbedder.mlpackage/Data/model.bin"
-printf '{"catalog":"fixture"}\n' > "$release_dir/catalog/manifest.json"
-printf '{"individuals":[]}\n' > "$release_dir/catalog/metadata.json"
-printf 'vector fixture\n' > "$release_dir/catalog/references.f16"
-shipping_resources="$test_root/shipping-resources"
-mkdir -p "$shipping_resources/Models" "$shipping_resources/IdentifierCatalog"
-cp -R "$release_dir/FlukeEmbedder.mlpackage" "$shipping_resources/Models/FlukeEmbedder.mlpackage"
-cp "$release_dir/catalog/manifest.json" "$release_dir/catalog/metadata.json" \
-  "$release_dir/catalog/references.f16" "$shipping_resources/IdentifierCatalog/"
-membership_fixture="$test_root/project-membership.txt"
-cat > "$membership_fixture" <<'MEMBERSHIP'
-TARGET_NAME=Fluke
-SYNCHRONIZED_RESOURCE_ROOT=App/Fluke
-RESOURCE=Models/FlukeEmbedder.mlpackage
-RESOURCE=IdentifierCatalog/manifest.json
-RESOURCE=IdentifierCatalog/metadata.json
-RESOURCE=IdentifierCatalog/references.f16
-MEMBERSHIP
-catalog="$release_dir/mobile-release-report.json"
-python3 - "$release_dir" "$catalog" <<'PY'
 import hashlib
+import importlib.machinery
 import json
-import pathlib
+import os
+from pathlib import Path
+import plistlib
+import shutil
+import subprocess
 import sys
+import tempfile
 
-release = pathlib.Path(sys.argv[1])
+repo = Path(sys.argv[1])
+verifier_path = repo / "scripts/verify-app-store-1-1-submission.sh"
+sys.dont_write_bytecode = True
+module = importlib.machinery.SourceFileLoader("app_store_1_1_verifier", str(verifier_path)).load_module()
+failures = []
+
+def check(name, action, expected=None):
+    try:
+        action()
+    except Exception as error:
+        if expected is None:
+            failures.append(f"{name}: unexpected failure: {error}")
+        elif expected not in str(error):
+            failures.append(f"{name}: expected {expected!r}, got {error!r}")
+    else:
+        if expected is not None:
+            failures.append(f"{name}: unexpectedly succeeded")
+
+def write(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(data, bytes):
+        path.write_bytes(data)
+    else:
+        path.write_text(data, encoding="utf-8")
 
 def package_digest(root):
     digest = hashlib.sha256(b"fluke-coreml-package-v1\0")
-    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+    for path in sorted(root.rglob("*"), key=lambda value: value.relative_to(root).as_posix()):
         relative = path.relative_to(root).as_posix().encode()
         digest.update(b"D" if path.is_dir() else b"F")
         digest.update(len(relative).to_bytes(8, "big"))
@@ -102,552 +53,255 @@ def package_digest(root):
             digest.update(path.read_bytes())
     return digest.hexdigest()
 
-model_digest = package_digest(release / "FlukeEmbedder.mlpackage")
-catalog_digest = hashlib.sha256((release / "catalog/manifest.json").read_bytes()).hexdigest()
-boundary_details = {
-    "input_paths": "all fixed release inputs and exact directory layouts are safe",
-    "package": "exact export schema, identity, package tree, interface, and audited tools verified",
-    "catalog": "complete Task 3 published catalog contract verified",
-    "digests": "package, vectors, metadata, and rights digests match exactly",
-    "rights": "written model and exact-source mobile redistribution rights verified",
-    "embedding_shape": "8 paired float32 embeddings have shape (N, 384)",
-    "embedding_norm": "all parity embeddings are finite and L2 normalized",
-    "required_reports": "all six exact-schema, digest-bound evaluation reports are present",
-}
-gates = [
-    {"name": "model_package_digest", "passed": True, "observed": model_digest,
-     "requirement": "valid lowercase SHA256 release identity", "detail": "digest is bound"},
-    {"name": "catalog_manifest_digest", "passed": True, "observed": catalog_digest,
-     "requirement": "valid lowercase SHA256 release identity", "detail": "digest is bound"},
-]
-gates.extend({"name": name, "passed": True, "observed": True,
-              "requirement": "validation must pass", "detail": detail}
-             for name, detail in boundary_details.items())
-def count_gate(name, observed):
-    return {"name": name, "passed": True, "observed": observed,
-            "requirement": "positive integer sample count", "detail": "sample count is meaningful"}
+def make_release(root):
+    package = root / "FlukeEmbedder.mlpackage"
+    write(package / "Data/model.bin", b"model")
+    write(root / "catalog/manifest.json", b'{"catalog":1}\n')
+    write(root / "catalog/metadata.json", b'{"individuals":[]}\n')
+    write(root / "catalog/references.f16", b"vectors")
+    return {
+        "model": package_digest(package),
+        "catalog": hashlib.sha256((root / "catalog/manifest.json").read_bytes()).hexdigest(),
+    }
 
-def metric_gate(name, observed, comparison, threshold):
-    return {"name": name, "passed": True, "observed": observed,
-            "requirement": f"finite value {comparison} {threshold}", "detail": "threshold met"}
+def make_archive(root, release, identity):
+    app = root / "Products/Applications/Fluke.app"
+    app.mkdir(parents=True)
+    archive_info = {
+        "ApplicationProperties": {
+            "ApplicationPath": "Applications/Fluke.app",
+            "CFBundleIdentifier": "app.fluke.Fluke",
+            "CFBundleShortVersionString": "1.1",
+            "CFBundleVersion": "2",
+        }
+    }
+    app_info = {
+        "CFBundleIdentifier": "app.fluke.Fluke",
+        "CFBundleShortVersionString": "1.1",
+        "CFBundleVersion": "2",
+    }
+    for path, value in ((root / "Info.plist", archive_info), (app / "Info.plist", app_info),
+                        (root / "FlukeBuildIdentity.plist", identity)):
+        with path.open("wb") as output:
+            plistlib.dump(value, output)
+    for name in ("manifest.json", "metadata.json", "references.f16"):
+        destination = app / "IdentifierCatalog" / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(release / "catalog" / name, destination)
+    write(app / "FlukeEmbedder.mlmodelc/model.mil", b"compiled")
+    return app
 
-gates.extend((
-    count_gate("parity_samples", 8),
-    metric_gate("parity_cosine", 0.9995, ">=", 0.999),
-    count_gate("closed_set_samples", 20),
-    metric_gate("top_1", 0.7, ">=", 0.65),
-    metric_gate("top_3", 0.85, ">=", 0.8),
-    count_gate("open_set_samples", 30),
-    metric_gate("false_accept", 0.04, "<=", 0.05),
-))
-report = {
-    "catalogManifestSha256": catalog_digest,
-    "gates": gates,
-    "modelPackageSha256": model_digest,
-    "ready": True,
-    "schemaVersion": 1,
-    "thresholds": {
-        "false_accept": 0.05,
-        "parity_cosine": 0.999,
-        "top_1": 0.65,
-        "top_3": 0.8,
-    },
-}
-with open(sys.argv[2], "w", encoding="utf-8") as output:
-    json.dump(report, output)
+def project_fixture(version, build, second_exception=False):
+    exception = ""
+    if second_exception:
+        exception = """E2 /* hidden */ = {
+  isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+  membershipExceptions = ( IdentifierCatalog/references.f16, );
+  target = AAA /* Fluke */;
+};"""
+    return f"""
+AAA /* Fluke */ = {{
+  isa = PBXNativeTarget;
+  buildConfigurationList = BEEF /* Build configuration list for PBXNativeTarget \"Fluke\" */;
+  buildPhases = ( EEEE /* Resources */, );
+  fileSystemSynchronizedGroups = ( D00D /* Fluke */, );
+}};
+D00D /* Fluke */ = {{
+  isa = PBXFileSystemSynchronizedRootGroup;
+  path = Fluke;
+}};
+{exception}
+CAFE /* Release */ = {{
+  isa = XCBuildConfiguration;
+  buildSettings = {{ CURRENT_PROJECT_VERSION = {build}; MARKETING_VERSION = {version}; PRODUCT_BUNDLE_IDENTIFIER = {module.BUNDLE_ID}; }};
+  name = Release;
+}};
+BEEF /* Build configuration list for PBXNativeTarget "Fluke" */ = {{
+  isa = XCConfigurationList;
+  buildConfigurations = ( CAFE /* Release */, );
+}};
+EEEE /* Resources */ = {{
+  isa = PBXResourcesBuildPhase;
+}};
+"""
+
+with tempfile.TemporaryDirectory(prefix="fluke-app-store-tests.") as temporary:
+    root = Path(temporary)
+
+    check("production parser has exactly three immutable inputs",
+          lambda: module.parse_arguments(["model", "release", "archive"]))
+    check("fixture flags are not accepted",
+          lambda: module.parse_arguments(["--build-settings-fixture", "x"]), "usage")
+    os.environ["FLUKE_APP_STORE_TESTING"] = "true"
+    check("fixture environment cannot unlock production parser",
+          lambda: module.parse_arguments(["--shipping-resources-fixture", "x"]), "usage")
+    del os.environ["FLUKE_APP_STORE_TESTING"]
+
+    environment = module.sanitized_environment()
+    if "XCODE_XCCONFIG_FILE" in environment or environment.get("PATH") != "/usr/bin:/bin":
+        failures.append("sanitized environment retains ambient Xcode or PATH overrides")
+    fake_bin = root / "fake-bin"
+    fake_uv = fake_bin / "uv"
+    write(fake_uv, "#!/bin/sh\nexit 0\n")
+    fake_uv.chmod(0o755)
+    original_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = f"{fake_bin}:{original_path}"
+    check("PATH-spoofed uv is rejected by executable digest",
+          module._find_uv, "pinned release-tool identity")
+    os.environ["PATH"] = original_path
+
+    safe = root / "safe.json"
+    write(safe, '{"ok":true}\n')
+    check("regular JSON is readable", lambda: module.read_json_no_follow(safe, "test JSON"))
+    linked_json = root / "linked.json"
+    linked_json.symlink_to(safe)
+    check("symlinked package JSON is rejected",
+          lambda: module.read_json_no_follow(linked_json, "test JSON"), "symbolic link")
+    linked_schema = root / "schema.json"
+    linked_schema.symlink_to(safe)
+    check("symlinked package schema is rejected",
+          lambda: module.read_json_no_follow(linked_schema, "test schema"), "symbolic link")
+
+    check("checked-in package remains blocked without fabricated screenshots",
+          lambda: module.validate_package(repo), "requires 1-10 accepted opaque 6.9-inch screenshots")
+    direct = subprocess.run(
+        [str(verifier_path), "/nonexistent/model", "/nonexistent/release", "/nonexistent/archive"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if direct.returncode != 1 or "requires 1-10 accepted opaque 6.9-inch screenshots" not in direct.stderr:
+        failures.append("Python verifier is not directly executable under its historical .sh name")
+
+    screenshot = root / "screen.png"
+    shutil.copyfile(repo / "AppStore/1.0/en-US/screenshots/6.9-inch/01-sightings.png", screenshot)
+    denylist = module.screenshot_digest_denylist(repo / "AppStore/1.0")
+    check("1.0 screenshot digest reuse is rejected",
+          lambda: module.validate_screenshot_path(screenshot, denylist), "reuses a 1.0 screenshot")
+    linked_screenshot = root / "linked-screen.png"
+    linked_screenshot.symlink_to(screenshot)
+    check("symlinked screenshot is rejected",
+          lambda: module.validate_screenshot_path(linked_screenshot, set()), "symbolic link")
+
+    release = root / "release"
+    digests = make_release(release)
+    identity = {
+        "schemaVersion": 1,
+        "sourceCommit": "1" * 40,
+        "sourceTree": "2" * 40,
+        "modelSourceCommit": module.MODEL_SOURCE_COMMIT,
+        "modelSourceTree": module.MODEL_SOURCE_TREE,
+        "marketingVersion": "1.1",
+        "buildNumber": "2",
+        "modelPackageSha256": digests["model"],
+        "catalogManifestSha256": digests["catalog"],
+    }
+    archive = root / "Fluke.xcarchive"
+    app = make_archive(archive, release, identity)
+    check("archive structure binds catalog and build identity",
+          lambda: module.validate_archive(
+              archive, release, digests, "1" * 40, "2" * 40,
+              compiled_model_validator=lambda _: None,
+          ))
+    check("compiled model validator loads Core ML rather than trusting membership",
+          lambda: module.validate_compiled_model(app / "FlukeEmbedder.mlmodelc"),
+          "compiled FlukeEmbedder model load/interface/prediction failed")
+
+    source_only = root / "source-only.xcarchive"
+    shutil.copytree(archive, source_only)
+    shutil.rmtree(source_only / "Products/Applications/Fluke.app/FlukeEmbedder.mlmodelc")
+    write(source_only / "Products/Applications/Fluke.app/Models/FlukeEmbedder.mlpackage/Manifest.json", "{}")
+    check("source model membership cannot replace compiled archive model",
+          lambda: module.validate_archive(
+              source_only, release, digests, "1" * 40, "2" * 40,
+              compiled_model_validator=lambda _: None,
+          ), "compiled FlukeEmbedder.mlmodelc")
+
+    linked_catalog_archive = root / "linked-catalog.xcarchive"
+    shutil.copytree(archive, linked_catalog_archive)
+    linked_catalog = linked_catalog_archive / "Products/Applications/Fluke.app/IdentifierCatalog/manifest.json"
+    linked_catalog.unlink()
+    linked_catalog.symlink_to(release / "catalog/manifest.json")
+    check("symlinked archived catalog is rejected",
+          lambda: module.validate_archive(
+              linked_catalog_archive, release, digests, "1" * 40, "2" * 40,
+              compiled_model_validator=lambda _: None,
+          ), "symbolic link")
+
+    linked_model_archive = root / "linked-model.xcarchive"
+    shutil.copytree(archive, linked_model_archive)
+    linked_model = linked_model_archive / "Products/Applications/Fluke.app/FlukeEmbedder.mlmodelc"
+    shutil.rmtree(linked_model)
+    linked_model.symlink_to(app / "FlukeEmbedder.mlmodelc", target_is_directory=True)
+    check("symlinked compiled model is rejected",
+          lambda: module.validate_archive(
+              linked_model_archive, release, digests, "1" * 40, "2" * 40,
+              compiled_model_validator=lambda _: None,
+          ), "symbolic link")
+
+    wrong_identity = root / "wrong-identity.xcarchive"
+    shutil.copytree(archive, wrong_identity)
+    with (wrong_identity / "FlukeBuildIdentity.plist").open("rb") as source:
+        changed = plistlib.load(source)
+    changed["sourceCommit"] = "f" * 40
+    with (wrong_identity / "FlukeBuildIdentity.plist").open("wb") as output:
+        plistlib.dump(changed, output)
+    check("archive source identity is exact",
+          lambda: module.validate_archive(
+              wrong_identity, release, digests, "1" * 40, "2" * 40,
+              compiled_model_validator=lambda _: None,
+          ), "sourceCommit")
+
+    pbx = root / "project.pbxproj"
+    write(pbx, project_fixture(version="1.1", build="2"))
+    check("direct Fluke Release settings are accepted", lambda: module.validate_project(pbx))
+    write(pbx, project_fixture(version="1.0", build="1"))
+    check("direct Fluke Release version is pinned",
+          lambda: module.validate_project(pbx), "MARKETING_VERSION")
+    write(pbx, project_fixture(version="1.1", build="2", second_exception=True))
+    check("a second synchronized exception set cannot hide catalog resources",
+          lambda: module.validate_project(pbx), "membership exception")
+    check("checked-in Fluke Release target remains blocked at 1.0 build 1",
+          lambda: module.validate_project(repo / "App/Fluke.xcodeproj/project.pbxproj"),
+          "MARKETING_VERSION")
+
+    linked_release = root / "linked-release"
+    linked_release.symlink_to(release, target_is_directory=True)
+    check("symlinked release directory is rejected",
+          lambda: module.validate_model_checkout_and_release(root, linked_release), "symbolic link")
+
+    model_checkout = repo.parents[2] / "fluke-model/.worktrees/on-device-coreml-release"
+    if model_checkout.is_dir():
+        check("reviewed model checkout provenance is accepted",
+              lambda: module.validate_model_checkout_and_release(model_checkout, release))
+        dirty_checkout = root / "dirty-model-checkout"
+        subprocess.run(
+            ["/usr/bin/git", "clone", "--quiet", "--shared", str(model_checkout), str(dirty_checkout)],
+            check=True,
+        )
+        write(dirty_checkout / "src/untracked-verifier-input.py", "untracked\n")
+        check("dirty relevant model checkout is rejected",
+              lambda: module.validate_model_checkout_and_release(dirty_checkout, release),
+              "dirty or untracked verifier inputs")
+        with tempfile.TemporaryDirectory(prefix=".appstore-model-test.", dir=repo) as model_temporary:
+            hand_authored = Path(model_temporary)
+            write(hand_authored / "mobile-release-report.json", json.dumps({"ready": True}))
+            def reject_hand_authored_report():
+                try:
+                    module.run_mobile_release_verifier(model_checkout, hand_authored)
+                except module.VerificationError:
+                    regenerated = json.loads((hand_authored / "mobile-release-report.json").read_text())
+                    if regenerated.get("schemaVersion") != 1 or regenerated.get("ready") is not False or len(regenerated.get("gates", [])) < 17:
+                        raise AssertionError("authoritative verifier did not replace the hand-authored report")
+                    raise
+            check("hand-authored report without underlying evidence fails fresh verifier",
+                  reject_hand_authored_report,
+                  "fresh mobile release verification failed")
+    else:
+        failures.append(f"reviewed model checkout not found at {model_checkout}")
+
+if failures:
+    print("\n".join(f"FAIL: {failure}" for failure in failures), file=sys.stderr)
+    raise SystemExit(1)
+print("App Store 1.1 submission verifier tests passed")
 PY
-
-expect_success "staged JSON and gates accept a temporary geometry-opacity fixture" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$valid"
-
-expect_failure "catalog proof is mandatory" \
-  "mobile release directory is required" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" "$valid"
-
-not_ready="$test_root/not-ready"
-cp -R "$release_dir" "$not_ready"
-python3 - "$not_ready/mobile-release-report.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as source:
-    value = json.load(source)
-value["ready"] = False
-with open(sys.argv[1], "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "catalog proof must report ready true" \
-  "ready must be true" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$not_ready" "$valid"
-
-bad_digest="$test_root/bad-digest"
-cp -R "$release_dir" "$bad_digest"
-python3 - "$bad_digest/mobile-release-report.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as source:
-    value = json.load(source)
-value["catalogManifestSha256"] = "not-a-digest"
-with open(sys.argv[1], "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "catalog proof requires real lowercase SHA-256 identities" \
-  "catalogManifestSha256 must be a lowercase SHA-256" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$bad_digest" "$valid"
-
-missing_gate="$test_root/missing-gate"
-cp -R "$release_dir" "$missing_gate"
-python3 - "$missing_gate/mobile-release-report.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as source:
-    value = json.load(source)
-value["gates"] = value["gates"][:-1]
-with open(sys.argv[1], "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "catalog proof requires the exact mobile release gate set" \
-  "gate-name set is incomplete or unexpected" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$missing_gate" "$valid"
-
-wrong_threshold="$test_root/wrong-threshold"
-cp -R "$release_dir" "$wrong_threshold"
-python3 - "$wrong_threshold/mobile-release-report.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as source:
-    value = json.load(source)
-value["thresholds"]["top_1"] = 0.5
-with open(sys.argv[1], "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "catalog proof requires exact mobile release thresholds" \
-  "thresholds do not match the mobile release contract" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$wrong_threshold" "$valid"
-
-missing_observed="$test_root/missing-observed"
-cp -R "$release_dir" "$missing_observed"
-python3 - "$missing_observed/mobile-release-report.json" <<'PY'
-import json, sys
-path = sys.argv[1]
-value = json.load(open(path, encoding="utf-8"))
-del value["gates"][10]["observed"]
-json.dump(value, open(path, "w", encoding="utf-8"))
-PY
-expect_failure "catalog proof requires every exact producer field" \
-  "fields do not match the exact schema" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$missing_observed" "$valid"
-
-fabricated_metric="$test_root/fabricated-metric"
-cp -R "$release_dir" "$fabricated_metric"
-python3 - "$fabricated_metric/mobile-release-report.json" <<'PY'
-import json, sys
-path = sys.argv[1]
-value = json.load(open(path, encoding="utf-8"))
-next(gate for gate in value["gates"] if gate["name"] == "top_1")["observed"] = 0.1
-json.dump(value, open(path, "w", encoding="utf-8"))
-PY
-expect_failure "catalog proof rejects fabricated passing metric observations" \
-  "top_1 observation does not satisfy its exact gate" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$fabricated_metric" "$valid"
-
-fabricated_detail="$test_root/fabricated-detail"
-cp -R "$release_dir" "$fabricated_detail"
-python3 - "$fabricated_detail/mobile-release-report.json" <<'PY'
-import json, sys
-path = sys.argv[1]
-value = json.load(open(path, encoding="utf-8"))
-next(gate for gate in value["gates"] if gate["name"] == "rights")["detail"] = "trust me"
-json.dump(value, open(path, "w", encoding="utf-8"))
-PY
-expect_failure "catalog proof rejects fabricated validation details" \
-  "rights evidence does not match the producer contract" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$fabricated_detail" "$valid"
-
-digest_gate_mismatch="$test_root/digest-gate-mismatch"
-cp -R "$release_dir" "$digest_gate_mismatch"
-python3 - "$digest_gate_mismatch/mobile-release-report.json" <<'PY'
-import json, sys
-path = sys.argv[1]
-value = json.load(open(path, encoding="utf-8"))
-next(gate for gate in value["gates"] if gate["name"] == "model_package_digest")["observed"] = "f" * 64
-json.dump(value, open(path, "w", encoding="utf-8"))
-PY
-expect_failure "catalog proof binds digest-gate observations to report identity" \
-  "model_package_digest observed digest must equal modelPackageSha256" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$digest_gate_mismatch" "$valid"
-
-artifact_mismatch="$test_root/artifact-mismatch"
-cp -R "$release_dir" "$artifact_mismatch"
-printf 'tampered\n' >> "$artifact_mismatch/FlukeEmbedder.mlpackage/Data/model.bin"
-expect_failure "catalog proof binds the report to actual release artifacts" \
-  "modelPackageSha256 does not match the actual mobile release package" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$artifact_mismatch" "$valid"
-
-expect_failure "test-only build settings cannot bypass production verification" \
-  "restricted to FLUKE_APP_STORE_TESTING=true" \
-  env -u FLUKE_APP_STORE_TESTING "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$valid"
-
-expect_failure "shipping target must be version 1.1 build 2" \
-  "shipping Fluke target MARKETING_VERSION must equal 1.1" \
-  "$verifier" --mobile-release-directory "$release_dir" "$valid"
-
-missing_shipping_catalog="$test_root/missing-shipping-catalog"
-cp -R "$shipping_resources" "$missing_shipping_catalog"
-rm "$missing_shipping_catalog/IdentifierCatalog/metadata.json"
-expect_failure "shipping app must contain the exact production catalog resources" \
-  "shipping IdentifierCatalog resource is missing: metadata.json" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$missing_shipping_catalog" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$valid"
-
-mismatched_shipping_catalog="$test_root/mismatched-shipping-catalog"
-cp -R "$shipping_resources" "$mismatched_shipping_catalog"
-printf 'tampered\n' >> "$mismatched_shipping_catalog/IdentifierCatalog/references.f16"
-expect_failure "shipping catalog bytes must match the verified release" \
-  "shipping IdentifierCatalog resource does not match verified release: references.f16" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$mismatched_shipping_catalog" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$valid"
-
-missing_membership="$test_root/missing-membership.txt"
-sed '/IdentifierCatalog\/references.f16/d' "$membership_fixture" > "$missing_membership"
-expect_failure "shipping target membership must cover every identification resource" \
-  "project membership fixture does not include every shipping identification resource" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$missing_membership" --mobile-release-directory "$release_dir" "$valid"
-
-production_resource_release="$test_root/production-resource-release"
-cp -R "$release_dir" "$production_resource_release"
-rm -R "$production_resource_release/FlukeEmbedder.mlpackage"
-cp -R "$repo_root/App/Fluke/Models/FlukeEmbedder.mlpackage" "$production_resource_release/FlukeEmbedder.mlpackage"
-python3 - "$production_resource_release" <<'PY'
-import hashlib, json, pathlib, sys
-root = pathlib.Path(sys.argv[1])
-package = root / "FlukeEmbedder.mlpackage"
-digest = hashlib.sha256(b"fluke-coreml-package-v1\0")
-for path in sorted(package.rglob("*"), key=lambda item: item.relative_to(package).as_posix()):
-    relative = path.relative_to(package).as_posix().encode()
-    digest.update(b"D" if path.is_dir() else b"F")
-    digest.update(len(relative).to_bytes(8, "big"))
-    digest.update(relative)
-    if path.is_file():
-        digest.update(path.read_bytes())
-value = json.load(open(root / "mobile-release-report.json", encoding="utf-8"))
-value["modelPackageSha256"] = digest.hexdigest()
-next(gate for gate in value["gates"] if gate["name"] == "model_package_digest")["observed"] = digest.hexdigest()
-json.dump(value, open(root / "mobile-release-report.json", "w", encoding="utf-8"))
-PY
-expect_failure "production app remains blocked until IdentifierCatalog is staged" \
-  "shipping IdentifierCatalog resource is missing: manifest.json" \
-  "$verifier" --build-settings-fixture "$build_settings" --mobile-release-directory "$production_resource_release" "$valid"
-
-bad_url="$test_root/bad-url"
-cp -R "$valid" "$bad_url"
-python3 - "$bad_url/en-US/metadata.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-value["supportURL"] = "https://example.invalid/support"
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "metadata requires the live support URL" \
-  "supportURL must equal https://fluke-pnw.vercel.app/support" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$bad_url"
-
-stale_processing_copy="$test_root/stale-processing-copy"
-cp -R "$valid" "$stale_processing_copy"
-python3 - "$stale_processing_copy/en-US/metadata.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-for key in ("description", "promotionalText", "whatsNew", "reviewNotes"):
-    value[key] = value[key].replace("Camera frames", "Camera input").replace("camera frames", "camera input")
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "metadata retains truthful local-processing copy" \
-  "metadata is missing required truthful copy: camera frames" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$stale_processing_copy"
-
-stale_camera_copy="$test_root/stale-camera-copy"
-cp -R "$valid" "$stale_camera_copy"
-python3 - "$stale_camera_copy/en-US/metadata.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-for key in ("description", "promotionalText", "whatsNew", "reviewNotes"):
-    value[key] = value[key].replace("live camera", "selected photo").replace("live-camera", "photo")
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "metadata describes the shipping live-camera pipeline" \
-  "metadata is missing required truthful copy: live camera" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$stale_camera_copy"
-
-stale_fluke_matching="$test_root/stale-fluke-matching"
-cp -R "$valid" "$stale_fluke_matching"
-python3 - "$stale_fluke_matching/en-US/metadata.json" <<'PY'
-import json, sys
-path = sys.argv[1]
-value = json.load(open(path, encoding="utf-8"))
-value["promotionalText"] = value["promotionalText"].replace("dorsal-fin matching for orca individuals", "fluke matching")
-json.dump(value, open(path, "w", encoding="utf-8"))
-PY
-expect_failure "metadata rejects anatomically misleading fluke-matching copy" \
-  "metadata contains stale selected-photo identification copy: fluke matching" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$stale_fluke_matching"
-
-tracking="$test_root/tracking"
-cp -R "$valid" "$tracking"
-python3 - "$tracking/app-privacy.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-value["tracking"] = True
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "privacy declaration rejects tracking" \
-  "$.tracking must equal False" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$tracking"
-
-analytics="$test_root/analytics"
-cp -R "$valid" "$analytics"
-python3 - "$analytics/app-privacy.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-value["analytics"] = True
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "privacy declaration rejects analytics" \
-  "$.analytics must equal False" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$analytics"
-
-extra_transmission="$test_root/extra-transmission"
-cp -R "$valid" "$extra_transmission"
-python3 - "$extra_transmission/app-privacy.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-value["transmittedOnlyOnExplicitSightingSubmission"].append("device-id")
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "privacy declaration permits only explicit submission fields" \
-  "$.transmittedOnlyOnExplicitSightingSubmission must equal" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$extra_transmission"
-
-missing_local_processing="$test_root/missing-local-processing"
-cp -R "$valid" "$missing_local_processing"
-python3 - "$missing_local_processing/app-privacy.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-value["localOnlyProcessing"].remove("embeddings")
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "privacy declaration retains every local-only artifact" \
-  "$.localOnlyProcessing must equal" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$missing_local_processing"
-
-underdeclared_privacy="$test_root/underdeclared-privacy"
-cp -R "$valid" "$underdeclared_privacy"
-python3 - "$underdeclared_privacy/app-privacy.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-value["collectedData"] = [entry for entry in value["collectedData"] if entry["dataType"] != "user-id"]
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "privacy declaration cannot underdeclare the six-category shipping manifest" \
-  "$.collectedData has too few items" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$underdeclared_privacy"
-
-missing_account_email="$test_root/missing-account-email"
-cp -R "$valid" "$missing_account_email"
-python3 - "$missing_account_email/app-privacy.json" <<'PY'
-import json, sys
-path = sys.argv[1]
-value = json.load(open(path, encoding="utf-8"))
-value["transmittedOnOptionalAccountUse"].remove("account-email")
-json.dump(value, open(path, "w", encoding="utf-8"))
-PY
-expect_failure "privacy separately discloses optional account email" \
-  "$.transmittedOnOptionalAccountUse must equal" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$missing_account_email"
-
-missing_auth_flow="$test_root/missing-auth-flow"
-cp -R "$valid" "$missing_auth_flow"
-python3 - "$missing_auth_flow/app-privacy.json" <<'PY'
-import json, sys
-path = sys.argv[1]
-value = json.load(open(path, encoding="utf-8"))
-del value["transmittedForAppleAuthentication"]
-json.dump(value, open(path, "w", encoding="utf-8"))
-PY
-expect_failure "privacy separately discloses Apple credential flow" \
-  "$.transmittedForAppleAuthentication is required" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$missing_auth_flow"
-
-wrong_build="$test_root/wrong-build"
-cp -R "$valid" "$wrong_build"
-python3 - "$wrong_build/en-US/metadata.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-value["build"] = 3
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "metadata pins version 1.1 build 2" \
-  "$.build must equal 2" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$wrong_build"
-
-over_limit="$test_root/over-limit"
-cp -R "$valid" "$over_limit"
-python3 - "$over_limit/en-US/metadata.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-value["subtitle"] = "x" * 31
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "metadata enforces App Store field limits" \
-  "$.subtitle exceeds 30 characters" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$over_limit"
-
-missing_schema_field="$test_root/missing-schema-field"
-cp -R "$valid" "$missing_schema_field"
-python3 - "$missing_schema_field/en-US/metadata.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-del value["locale"]
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "metadata is schema complete" \
-  "$.locale is required" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$missing_schema_field"
-
-submitted="$test_root/submitted"
-cp -R "$valid" "$submitted"
-python3 - "$submitted/review-submission.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-value["status"] = "submitted"
-value["submitted"] = True
-value["appStoreConnect"]["submissionId"] = "synthetic-id"
-value["submittedAt"] = "2026-07-19T00:00:00Z"
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "receipt remains a null-ID unsubmitted draft" \
-  "$.status must equal draft" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$submitted"
-
-receipt_id="$test_root/receipt-id"
-cp -R "$valid" "$receipt_id"
-python3 - "$receipt_id/review-submission.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-value["appStoreConnect"]["submissionId"] = "synthetic-id"
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "draft receipt keeps every App Store Connect ID null" \
-  "$.appStoreConnect.submissionId must be null" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$receipt_id"
-
-receipt_timestamp="$test_root/receipt-timestamp"
-cp -R "$valid" "$receipt_timestamp"
-python3 - "$receipt_timestamp/review-submission.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-value["acceptedAt"] = "2026-07-19T00:00:00Z"
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "draft receipt keeps every App Store Connect timestamp null" \
-  "$.acceptedAt must be null" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$receipt_timestamp"
-
-wrong_export="$test_root/wrong-export"
-cp -R "$valid" "$wrong_export"
-python3 - "$wrong_export/review-submission.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    value = json.load(source)
-value["exportCompliance"]["basis"] = "custom-cryptography"
-with open(path, "w", encoding="utf-8") as output:
-    json.dump(value, output)
-PY
-expect_failure "export compliance stays standard exempt HTTPS" \
-  "$.exportCompliance.basis must equal standard-https" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$wrong_export"
-
-missing_screenshots="$test_root/missing-screenshots"
-cp -R "$package_root" "$missing_screenshots"
-expect_failure "screenshots fail closed while absent" \
-  "requires 1-10 accepted opaque 6.9-inch screenshots" \
-  "$verifier" --build-settings-fixture "$build_settings" --shipping-resources-fixture "$shipping_resources" --project-membership-fixture "$membership_fixture" --mobile-release-directory "$release_dir" "$missing_screenshots"
-
-if ((failures > 0)); then
-  printf '%d App Store 1.1 submission verifier test(s) failed\n' "$failures" >&2
-  exit 1
-fi
-
-echo "App Store 1.1 submission verifier tests passed"
