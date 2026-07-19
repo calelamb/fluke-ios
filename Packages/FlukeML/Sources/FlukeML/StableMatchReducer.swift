@@ -45,16 +45,42 @@ public struct StableMatchReducer: Sendable {
     let safeCandidate = candidate.flatMap { $0.score.isFinite ? $0 : nil }
     let retained = state.history.suffix(max(0, windowSize - 1))
     let history = Array(retained) + [safeCandidate]
-    let identifiers = history.compactMap(\.self).map(\.catalogID)
-    let wins = identifiers.reduce([String: Int]()) { counts, identifier in
-      var updated = counts
-      updated[identifier, default: 0] += 1
-      return updated
-    }
-    let winner = wins.first { $0.value >= requiredWins }?.key
+    let winner = rankedWinner(in: history)
     let prominent = winner.flatMap { identifier in
       history.reversed().compactMap(\.self).first { $0.catalogID == identifier }
     }
     return StableMatchState(history: history, prominent: prominent)
   }
+
+  private func rankedWinner(in history: [LocalMatch?]) -> String? {
+    let standings = history.enumerated().reduce([String: Standing]()) { standings, entry in
+      guard let match = entry.element else { return standings }
+      let previous = standings[match.catalogID]
+      var updated = standings
+      updated[match.catalogID] = Standing(
+        catalogID: match.catalogID,
+        wins: (previous?.wins ?? 0) + 1,
+        mostRecentIndex: entry.offset
+      )
+      return updated
+    }
+    return standings.values
+      .filter { $0.wins >= requiredWins }
+      .sorted(by: Self.isPreferred)
+      .first?.catalogID
+  }
+
+  private static func isPreferred(_ lhs: Standing, _ rhs: Standing) -> Bool {
+    if lhs.wins != rhs.wins { return lhs.wins > rhs.wins }
+    if lhs.mostRecentIndex != rhs.mostRecentIndex {
+      return lhs.mostRecentIndex > rhs.mostRecentIndex
+    }
+    return lhs.catalogID < rhs.catalogID
+  }
+}
+
+private struct Standing: Sendable {
+  let catalogID: String
+  let wins: Int
+  let mostRecentIndex: Int
 }

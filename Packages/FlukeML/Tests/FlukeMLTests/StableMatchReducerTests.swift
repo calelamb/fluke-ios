@@ -81,6 +81,26 @@ struct StableMatchReducerTests {
     #expect(updated.history.last??.catalogID == "new")
   }
 
+  @Test("equal win counts resolve to the most recently observed catalog")
+  func equalWinsPreferMostRecentOccurrence() {
+    let reducer = StableMatchReducer(
+      scoreThreshold: 0.72,
+      marginThreshold: 0.08,
+      requiredWins: 2,
+      windowSize: 4
+    )
+
+    let recentB = ["A", "B", "A", "B"].reduce(reducer.initialState) {
+      reducer.reduce(state: $0, candidate: Self.candidate($1))
+    }
+    let recentA = ["B", "A", "B", "A"].reduce(reducer.initialState) {
+      reducer.reduce(state: $0, candidate: Self.candidate($1))
+    }
+
+    #expect(recentB.prominent?.catalogID == "B")
+    #expect(recentA.prominent?.catalogID == "A")
+  }
+
   @Test("identifier embeds, searches, thresholds, and stabilizes through one actor")
   func localIdentifierPipeline() async throws {
     let fixture = try FixtureCatalog()
