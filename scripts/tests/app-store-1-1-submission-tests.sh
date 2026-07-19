@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import py_compile
 import shutil
 import subprocess
 import sys
@@ -142,6 +143,29 @@ with tempfile.TemporaryDirectory(prefix="fluke-app-store-tests.") as temporary:
     environment = module.sanitized_environment()
     if "XCODE_XCCONFIG_FILE" in environment or environment.get("PATH") != "/usr/bin:/bin":
         failures.append("sanitized environment retains ambient Xcode or PATH overrides")
+
+    bytecode_source = root / "bytecode-source"
+    bytecode_cache = root / "trusted-bytecode-cache"
+    bytecode_marker = root / "poisoned-pyc-ran"
+    write(bytecode_source / "victim.py", f"from pathlib import Path\nPath({str(bytecode_marker)!r}).touch()\n")
+    py_compile.compile(
+        str(bytecode_source / "victim.py"),
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    )
+    write(bytecode_source / "victim.py", "VALUE = 'trusted-source'\n")
+    check("fresh bytecode prefix environment is available",
+          lambda: module.verifier_environment(bytecode_cache))
+    try:
+        bytecode_environment = module.verifier_environment(bytecode_cache)
+        bytecode_environment["PYTHONPATH"] = str(bytecode_source)
+        bytecode_probe = subprocess.run(
+            ["/usr/bin/python3", "-c", "import victim; print(victim.VALUE)"],
+            capture_output=True, text=True, env=bytecode_environment, check=False,
+        )
+        if bytecode_probe.returncode != 0 or bytecode_marker.exists() or bytecode_probe.stdout.strip() != "trusted-source":
+            failures.append("poisoned valid-header source pyc executed outside a fresh trusted prefix")
+    except Exception:
+        pass
     fake_bin = root / "fake-bin"
     fake_uv = fake_bin / "uv"
     write(fake_uv, "#!/bin/sh\nexit 0\n")
@@ -221,6 +245,36 @@ with tempfile.TemporaryDirectory(prefix="fluke-app-store-tests.") as temporary:
     }
     archive = root / "Fluke.xcarchive"
     app = make_archive(archive, release, identity)
+    valid_codesign = """Authority=Apple Distribution: Cale Lamb (86RBV2JZ8F)
+Authority=Apple Worldwide Developer Relations Certification Authority
+Authority=Apple Root CA
+TeamIdentifier=86RBV2JZ8F
+"""
+    valid_entitlements = {
+        "application-identifier": "86RBV2JZ8F.app.fluke.Fluke",
+        "com.apple.developer.team-identifier": "86RBV2JZ8F",
+        "get-task-allow": False,
+    }
+    valid_profile = {
+        "TeamIdentifier": ["86RBV2JZ8F"],
+        "ApplicationIdentifierPrefix": ["86RBV2JZ8F"],
+        "Entitlements": valid_entitlements,
+        "ProvisionsAllDevices": False,
+    }
+    check("captured Apple Distribution signing evidence is accepted",
+          lambda: module.validate_signing_evidence(valid_codesign, valid_entitlements, valid_profile))
+    development_codesign = valid_codesign.replace("Apple Distribution:", "Apple Development:")
+    development_entitlements = {**valid_entitlements, "get-task-allow": True}
+    development_profile = {**valid_profile, "Entitlements": development_entitlements}
+    check("development-signed app with forged archive identity is rejected",
+          lambda: module.validate_signing_evidence(
+              development_codesign, development_entitlements, development_profile
+          ), "Apple Distribution")
+    wrong_team_codesign = valid_codesign.replace("86RBV2JZ8F", "AAAAAAAAAA")
+    check("other-team distribution signature is rejected",
+          lambda: module.validate_signing_evidence(
+              wrong_team_codesign, valid_entitlements, valid_profile
+          ), "team")
     check("archive structure binds catalog and build identity",
           lambda: module.validate_archive(
               archive, release, digests, "1" * 40, "2" * 40,
@@ -235,10 +289,7 @@ with tempfile.TemporaryDirectory(prefix="fluke-app-store-tests.") as temporary:
     with (unsigned / "Info.plist").open("wb") as output:
         plistlib.dump(unsigned_info, output)
     check("unsigned archive is rejected before attestation trust",
-          lambda: module.validate_archive(
-              unsigned, release, digests, "1" * 40, "2" * 40,
-              compiled_model_validator=lambda _: None,
-          ), "Apple Distribution")
+          lambda: module.validate_signing_evidence("", {}, {}), "Apple Distribution")
 
     forged_root_identity = root / "forged-root-identity.xcarchive"
     shutil.copytree(archive, forged_root_identity)
@@ -359,6 +410,16 @@ with tempfile.TemporaryDirectory(prefix="fluke-app-store-tests.") as temporary:
         poison_python.chmod(0o755)
         uv = module._find_uv()
         model_python = module._find_model_python(uv)
+        check("complete managed Python distribution matches pinned tree digest",
+              lambda: module.authenticate_model_python(model_python))
+        fake_distribution = root / "mutated-python"
+        fake_python = fake_distribution / "bin/python3.11"
+        write(fake_python, b"launcher")
+        fake_python.chmod(0o755)
+        write(fake_distribution / "lib/python3.11/os.py", "MUTATED = True\n")
+        check("managed Python sibling stdlib mutation is rejected",
+              lambda: module.authenticate_model_python(fake_python),
+              "distribution tree")
         isolated_smoke = subprocess.run(
             [
                 str(uv), "--no-cache", "--no-config", "run", "--isolated", "--no-project",
@@ -376,9 +437,19 @@ with tempfile.TemporaryDirectory(prefix="fluke-app-store-tests.") as temporary:
         with tempfile.TemporaryDirectory(prefix=".appstore-model-test.", dir=repo) as model_temporary:
             hand_authored = Path(model_temporary)
             write(hand_authored / "mobile-release-report.json", json.dumps({"ready": True}))
-            check("hand-authored report without underlying evidence fails fresh verifier",
-                  lambda: module.validate_release_report(hand_authored),
-                  "fields do not match the exact schema")
+            def authoritative_overwrite():
+                try:
+                    module.run_mobile_release_verifier(model_checkout, hand_authored)
+                except module.VerificationError as error:
+                    regenerated = json.loads((hand_authored / "mobile-release-report.json").read_text())
+                    if regenerated.get("ready") is not False or regenerated.get("schemaVersion") != 1:
+                        raise AssertionError("actual locked verifier did not overwrite ready:true")
+                    if "fresh mobile release verification failed" not in str(error):
+                        raise
+                    return
+                raise AssertionError("evidence-free release unexpectedly passed")
+            check("actual locked model verifier overwrites preexisting ready:true report",
+                  authoritative_overwrite)
     else:
         failures.append(f"reviewed model checkout not found at {model_checkout}")
 

@@ -25,6 +25,7 @@ MODEL_PYPROJECT_SHA256 = "70fb5c14ecd6a67f43d3023d82b6cfbd3408c5d94415a1ba0681f8
 UV_EXECUTABLE_SHA256 = "51f0ae3c531a124727fa39e16e8599f2e371e427822a4aa92ebf667b52548b43"
 MODEL_PYTHON_VERSION = "3.11.15"
 MODEL_PYTHON_SHA256 = "4c78423e7d5986362ac04df40edb18cdd1174f9818d653402e3abbd2a5bbf793"
+MODEL_PYTHON_TREE_SHA256 = "8115357d8d2ad864ef1dc2c90b838df90f3e6b040f9992ff3c8986d0e5470d5f"
 VERSION = "1.1"
 BUILD = "2"
 BUNDLE_ID = "app.fluke.Fluke"
@@ -42,7 +43,6 @@ class _ArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         raise VerificationError(f"usage: MODEL_CHECKOUT RELEASE_DIRECTORY ARCHIVE ({message})")
 
-
 def parse_arguments(arguments: Optional[list[str]] = None) -> argparse.Namespace:
     parser = _ArgumentParser(
         description="Verify App Store 1.1 against a reviewed model checkout and real archive"
@@ -51,7 +51,6 @@ def parse_arguments(arguments: Optional[list[str]] = None) -> argparse.Namespace
     parser.add_argument("release_directory", type=Path)
     parser.add_argument("archive", type=Path)
     return parser.parse_args(arguments)
-
 
 def sanitized_environment() -> dict[str, str]:
     """Return the small fixed environment used for all release subprocesses."""
@@ -63,6 +62,17 @@ def sanitized_environment() -> dict[str, str]:
         "UV_NO_CONFIG": "1",
     }
 
+def verifier_environment(bytecode_prefix: Path) -> dict[str, str]:
+    """Isolate all Python bytecode reads and writes from reviewed source trees."""
+    _reject_symlink_components(bytecode_prefix, "trusted bytecode prefix")
+    bytecode_prefix.mkdir(parents=True, exist_ok=False)
+    if any(bytecode_prefix.iterdir()):
+        raise VerificationError("trusted bytecode prefix must start empty")
+    return {
+        **sanitized_environment(),
+        "PYTHONPYCACHEPREFIX": str(bytecode_prefix),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
 
 def _reject_symlink_components(path: Path, label: str) -> None:
     absolute = path.absolute()
@@ -74,7 +84,6 @@ def _reject_symlink_components(path: Path, label: str) -> None:
         except OSError as error:
             raise VerificationError(f"cannot inspect {label}: {error}") from error
 
-
 def _require_regular(path: Path, label: str) -> None:
     _reject_symlink_components(path, label)
     try:
@@ -83,7 +92,6 @@ def _require_regular(path: Path, label: str) -> None:
         raise VerificationError(f"{label} is missing: {error}") from error
     if not stat.S_ISREG(mode):
         raise VerificationError(f"{label} must be a regular file")
-
 
 def read_bytes_no_follow(path: Path, label: str) -> bytes:
     _require_regular(path, label)
@@ -102,13 +110,11 @@ def read_bytes_no_follow(path: Path, label: str) -> bytes:
     finally:
         os.close(descriptor)
 
-
 def read_json_no_follow(path: Path, label: str) -> object:
     try:
         return json.loads(read_bytes_no_follow(path, label).decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as error:
         raise VerificationError(f"invalid {label}: {error}") from error
-
 
 def read_plist_no_follow(path: Path, label: str) -> dict[str, object]:
     try:
@@ -118,7 +124,6 @@ def read_plist_no_follow(path: Path, label: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise VerificationError(f"invalid {label}: expected a dictionary")
     return value
-
 
 def _sha256_file(path: Path, label: str) -> str:
     _require_regular(path, label)
@@ -132,7 +137,6 @@ def _sha256_file(path: Path, label: str) -> str:
     finally:
         os.close(descriptor)
     return digest.hexdigest()
-
 
 def _package_tree_sha256(package: Path, label: str) -> str:
     _reject_symlink_components(package, label)
@@ -164,7 +168,6 @@ def _package_tree_sha256(package: Path, label: str) -> str:
                 os.close(descriptor)
     return digest.hexdigest()
 
-
 def screenshot_digest_denylist(app_store_1_0: Path) -> set[str]:
     screenshot_root = app_store_1_0 / "en-US/screenshots"
     if not screenshot_root.exists():
@@ -175,7 +178,6 @@ def screenshot_digest_denylist(app_store_1_0: Path) -> set[str]:
         if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg"}
     }
 
-
 def validate_screenshot_path(path: Path, denylist: set[str]) -> None:
     _require_regular(path, "App Store 1.1 screenshot")
     if os.lstat(path).st_size > MAX_SCREENSHOT_BYTES:
@@ -183,7 +185,6 @@ def validate_screenshot_path(path: Path, denylist: set[str]) -> None:
     digest = _sha256_file(path, "App Store 1.1 screenshot")
     if digest in denylist:
         raise VerificationError(f"App Store 1.1 screenshot reuses a 1.0 screenshot: {path.name}")
-
 
 def _validate_screenshot_geometry(path: Path) -> None:
     command = ["/usr/bin/sips", "-g", "pixelWidth", "-g", "pixelHeight", "-g", "hasAlpha", str(path)]
@@ -200,14 +201,12 @@ def _validate_screenshot_geometry(path: Path) -> None:
     if not alpha or alpha.group(1) != "no":
         raise VerificationError(f"screenshot must be opaque: {path.name}")
 
-
 def _type_matches(value: object, expected: str) -> bool:
     return {
         "array": isinstance(value, list), "boolean": isinstance(value, bool),
         "integer": isinstance(value, int) and not isinstance(value, bool),
         "null": value is None, "object": isinstance(value, dict), "string": isinstance(value, str),
     }.get(expected, False)
-
 
 def _validate_schema(value: object, schema: dict[str, object], path: str = "$") -> None:
     if "const" in schema and value != schema["const"]:
@@ -243,7 +242,6 @@ def _validate_schema(value: object, schema: dict[str, object], path: str = "$") 
             raise VerificationError(f"{path} is too short")
         if len(value) > schema.get("maxLength", len(value)):
             raise VerificationError(f"{path} exceeds {schema['maxLength']} characters")
-
 
 def validate_package(repo_root: Path) -> None:
     package = repo_root / "AppStore/1.1"
@@ -317,7 +315,6 @@ def validate_package(repo_root: Path) -> None:
         validate_screenshot_path(screenshot, denylist)
         _validate_screenshot_geometry(screenshot)
 
-
 def _run_git(checkout: Path, arguments: list[str]) -> str:
     result = subprocess.run(
         ["/usr/bin/git", "-C", str(checkout), *arguments], capture_output=True, text=True,
@@ -326,7 +323,6 @@ def _run_git(checkout: Path, arguments: list[str]) -> str:
     if result.returncode != 0:
         raise VerificationError(f"git provenance check failed: {result.stderr.strip()}")
     return result.stdout.strip()
-
 
 def validate_model_checkout_and_release(checkout: Path, release: Path) -> None:
     _reject_symlink_components(checkout, "fluke-model checkout")
@@ -350,7 +346,6 @@ def validate_model_checkout_and_release(checkout: Path, release: Path) -> None:
         if _sha256_file(checkout / relative, f"fluke-model {relative}") != digest:
             raise VerificationError(f"fluke-model {relative} does not match reviewed provenance")
 
-
 def _find_uv() -> Path:
     discovered = shutil.which("uv")
     if discovered is None:
@@ -361,7 +356,6 @@ def _find_uv() -> Path:
     if _sha256_file(candidate, "uv executable") != UV_EXECUTABLE_SHA256:
         raise VerificationError("uv executable does not match the pinned release-tool identity")
     return candidate
-
 
 def _find_model_python(uv: Path) -> Path:
     command = [
@@ -378,8 +372,52 @@ def _find_model_python(uv: Path) -> Path:
         raise VerificationError("model Python must resolve to a regular executable")
     if _sha256_file(candidate, "model Python executable") != MODEL_PYTHON_SHA256:
         raise VerificationError("model Python executable does not match the pinned identity")
+    authenticate_model_python(candidate)
     return candidate
 
+def _managed_python_tree_sha256(root: Path) -> str:
+    _reject_symlink_components(root, "managed Python distribution")
+    if not root.is_dir():
+        raise VerificationError("managed Python distribution root is missing")
+    digest = hashlib.sha256(b"fluke-managed-python-v1\0")
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        if path.is_symlink():
+            entry_type = b"L"
+            data = os.readlink(path).encode("utf-8")
+            data_size = len(data)
+        elif path.is_dir():
+            entry_type = b"D"
+            data = b""
+            data_size = 0
+        elif path.is_file():
+            entry_type = b"F"
+            data = None
+            data_size = os.lstat(path).st_size
+        else:
+            raise VerificationError("managed Python distribution contains a non-regular entry")
+        digest.update(entry_type)
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        digest.update(data_size.to_bytes(8, "big"))
+        if data is not None:
+            digest.update(data)
+        else:
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(path, flags)
+            try:
+                with os.fdopen(descriptor, "rb", closefd=False) as source:
+                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            finally:
+                os.close(descriptor)
+    return digest.hexdigest()
+
+def authenticate_model_python(interpreter: Path) -> None:
+    _require_regular(interpreter, "model Python executable")
+    distribution = interpreter.parent.parent
+    if _managed_python_tree_sha256(distribution) != MODEL_PYTHON_TREE_SHA256:
+        raise VerificationError("managed Python distribution tree does not match pinned identity")
 
 def mobile_release_command(checkout: Path, release: Path, uv: Path) -> list[str]:
     model_python = _find_model_python(uv)
@@ -390,18 +428,20 @@ def mobile_release_command(checkout: Path, release: Path, uv: Path) -> list[str]
         "--release-dir", str(release), "--report", str(release / REPORT_NAME),
     ]
 
-
 def run_mobile_release_verifier(checkout: Path, release: Path) -> None:
     report = release / REPORT_NAME
     _reject_symlink_components(report, "mobile release report")
     command = mobile_release_command(checkout, release, _find_uv())
-    result = subprocess.run(command, capture_output=True, text=True, env=sanitized_environment(), check=False)
+    with tempfile.TemporaryDirectory(prefix="fluke-trusted-bytecode-parent.") as temporary:
+        environment = verifier_environment(Path(temporary) / "pycache")
+        result = subprocess.run(
+            command, capture_output=True, text=True, env=environment, check=False
+        )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
         raise VerificationError(f"fresh mobile release verification failed: {detail}")
     if not report.is_file() or report.is_symlink():
         raise VerificationError("fresh mobile release verifier did not produce a regular report")
-
 
 def validate_release_report(release: Path) -> dict[str, str]:
     report = read_json_no_follow(release / REPORT_NAME, "fresh mobile release report")
@@ -434,13 +474,11 @@ def validate_release_report(release: Path) -> dict[str, str]:
         raise VerificationError("fresh mobile release digest gates do not bind report identity")
     return {"model": model_digest, "catalog": catalog_digest}
 
-
 def _object_block(project: str, identifier: str, comment: str) -> str:
     match = re.search(rf"(?ms)^\s*{re.escape(identifier)} /\* {re.escape(comment)} \*/ = \{{(.*?)^\s*\}};", project)
     if not match:
         raise VerificationError(f"project object is missing: {comment}")
     return match.group(1)
-
 
 def validate_project(project_path: Path) -> None:
     project = read_bytes_no_follow(project_path, "Xcode project").decode("utf-8")
@@ -467,7 +505,6 @@ def validate_project(project_path: Path) -> None:
     if "PBXFileSystemSynchronizedRootGroup" not in project or "/* Resources */" not in target_match.group(2):
         raise VerificationError("Fluke synchronized resource membership is not established")
 
-
 def validate_xcode_build_settings(repo_root: Path) -> None:
     command = [
         "/usr/bin/xcodebuild", "-project", str(repo_root / "App/Fluke.xcodeproj"), "-scheme", "Fluke",
@@ -493,7 +530,6 @@ def validate_xcode_build_settings(repo_root: Path) -> None:
     if values != expected:
         raise VerificationError(f"sanitized xcodebuild settings do not match shipping contract: {values}")
 
-
 def _archive_app(archive: Path) -> tuple[Path, dict[str, object], dict[str, object]]:
     _reject_symlink_components(archive, "App Store archive")
     if not archive.is_dir():
@@ -505,13 +541,6 @@ def _archive_app(archive: Path) -> tuple[Path, dict[str, object], dict[str, obje
         or properties.get("ApplicationPath") != "Applications/Fluke.app"
     ):
         raise VerificationError("archive application path must be Applications/Fluke.app")
-    signing_identity = properties.get("SigningIdentity")
-    if (
-        not isinstance(signing_identity, str)
-        or not signing_identity.startswith("Apple Distribution:")
-        or not signing_identity.endswith(" (86RBV2JZ8F)")
-    ):
-        raise VerificationError("archive must use an Apple Distribution identity for team 86RBV2JZ8F")
     app = archive / "Products/Applications/Fluke.app"
     _reject_symlink_components(app, "archived Fluke app")
     if not app.is_dir():
@@ -527,6 +556,81 @@ def _archive_app(archive: Path) -> tuple[Path, dict[str, object], dict[str, obje
             raise VerificationError(f"archive and app {key} must equal {value}")
     return app, archive_info, app_info
 
+def validate_signing_evidence(
+    codesign_detail: str,
+    signed_entitlements: dict[str, object],
+    provisioning_profile: dict[str, object],
+) -> None:
+    authorities = re.findall(r"(?m)^Authority=(.+)$", codesign_detail)
+    if (
+        not authorities
+        or not authorities[0].startswith("Apple Distribution:")
+        or not authorities[0].endswith(" (86RBV2JZ8F)")
+    ):
+        raise VerificationError("app signature must use Apple Distribution for the expected team")
+    if "Apple Worldwide Developer Relations Certification Authority" not in authorities:
+        raise VerificationError("app signature certificate chain is missing Apple WWDR authority")
+    if "Apple Root CA" not in authorities:
+        raise VerificationError("app signature certificate chain is missing Apple Root CA")
+    if "TeamIdentifier=86RBV2JZ8F" not in codesign_detail:
+        raise VerificationError("app signature team identifier does not match the expected team")
+    expected_application = "86RBV2JZ8F.app.fluke.Fluke"
+    entitlement_checks = {
+        "application-identifier": expected_application,
+        "com.apple.developer.team-identifier": "86RBV2JZ8F",
+        "get-task-allow": False,
+    }
+    if any(signed_entitlements.get(key) != value for key, value in entitlement_checks.items()):
+        raise VerificationError("signed app entitlements are not distribution-safe")
+    profile_entitlements = provisioning_profile.get("Entitlements")
+    if not isinstance(profile_entitlements, dict):
+        raise VerificationError("distribution provisioning entitlements are missing")
+    if provisioning_profile.get("TeamIdentifier") != ["86RBV2JZ8F"]:
+        raise VerificationError("distribution provisioning profile team does not match")
+    if provisioning_profile.get("ApplicationIdentifierPrefix") != ["86RBV2JZ8F"]:
+        raise VerificationError("distribution provisioning profile prefix does not match")
+    if any(profile_entitlements.get(key) != value for key, value in entitlement_checks.items()):
+        raise VerificationError("distribution provisioning profile permits development access")
+    if provisioning_profile.get("ProvisionsAllDevices") is True:
+        raise VerificationError("enterprise provisioning is not accepted for App Store submission")
+
+def validate_archive_signature(archive: Path) -> None:
+    app, _, _ = _archive_app(archive)
+    environment = sanitized_environment()
+    verify = subprocess.run(
+        ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)],
+        capture_output=True, text=True, env=environment, check=False,
+    )
+    if verify.returncode != 0:
+        raise VerificationError("archived app failed cryptographic code-signature verification")
+    detail = subprocess.run(
+        ["/usr/bin/codesign", "-d", "--verbose=4", str(app)],
+        capture_output=True, text=True, env=environment, check=False,
+    )
+    if detail.returncode != 0:
+        raise VerificationError("archived app signing certificate evidence is unavailable")
+    entitlements = subprocess.run(
+        ["/usr/bin/codesign", "-d", "--entitlements", ":-", str(app)],
+        capture_output=True, env=environment, check=False,
+    )
+    if entitlements.returncode != 0:
+        raise VerificationError("archived app signed entitlements are unavailable")
+    profile_path = app / "embedded.mobileprovision"
+    _require_regular(profile_path, "distribution provisioning profile")
+    profile = subprocess.run(
+        ["/usr/bin/security", "cms", "-D", "-i", str(profile_path)],
+        capture_output=True, env=environment, check=False,
+    )
+    if profile.returncode != 0:
+        raise VerificationError("distribution provisioning profile cannot be authenticated")
+    try:
+        signed_payload = plistlib.loads(entitlements.stdout)
+        profile_payload = plistlib.loads(profile.stdout)
+    except plistlib.InvalidFileException as error:
+        raise VerificationError(f"invalid cryptographic signing evidence: {error}") from error
+    if not isinstance(signed_payload, dict) or not isinstance(profile_payload, dict):
+        raise VerificationError("cryptographic signing evidence must contain dictionaries")
+    validate_signing_evidence(detail.stderr, signed_payload, profile_payload)
 
 def validate_archive(
     archive: Path,
@@ -578,7 +682,6 @@ def validate_archive(
         raise VerificationError(f"archive build identity mismatch: {mismatch}")
     compiled_model_validator(compiled[0])
 
-
 def validate_compiled_model(model: Path) -> None:
     swift = r'''
 import CoreML
@@ -620,7 +723,6 @@ else { throw NSError(domain: "FlukeModelPrediction", code: 3) }
     if result.returncode != 0:
         raise VerificationError(f"compiled FlukeEmbedder model load/interface/prediction failed: {result.stderr.strip()}")
 
-
 def _ios_source_identity(repo_root: Path) -> tuple[str, str]:
     commit = _run_git(repo_root, ["rev-parse", "HEAD"])
     tree = _run_git(repo_root, ["rev-parse", "HEAD^{tree}"])
@@ -628,7 +730,6 @@ def _ios_source_identity(repo_root: Path) -> tuple[str, str]:
     if _run_git(repo_root, ["status", "--porcelain", "--untracked-files=all", "--", *relevant]):
         raise VerificationError("iOS release checkout has dirty or untracked submission inputs")
     return commit, tree
-
 
 def _run_existing_archive_validators(repo_root: Path, archive: Path) -> None:
     commands = (
@@ -640,7 +741,6 @@ def _run_existing_archive_validators(repo_root: Path, archive: Path) -> None:
         if result.returncode != 0:
             raise VerificationError(f"existing archive validator failed: {result.stderr.strip() or result.stdout.strip()}")
 
-
 def verify_submission(repo_root: Path, model_checkout: Path, release: Path, archive: Path) -> None:
     validate_package(repo_root)
     validate_project(repo_root / "App/Fluke.xcodeproj/project.pbxproj")
@@ -649,12 +749,12 @@ def verify_submission(repo_root: Path, model_checkout: Path, release: Path, arch
     run_mobile_release_verifier(model_checkout, release)
     digests = validate_release_report(release)
     source_commit, source_tree = _ios_source_identity(repo_root)
+    validate_archive_signature(archive)
     _run_existing_archive_validators(repo_root, archive)
     validate_archive(
         archive, release, digests, source_commit, source_tree,
         compiled_model_validator=validate_compiled_model,
     )
-
 
 def main(arguments: Optional[list[str]] = None) -> int:
     args = parse_arguments(arguments)
