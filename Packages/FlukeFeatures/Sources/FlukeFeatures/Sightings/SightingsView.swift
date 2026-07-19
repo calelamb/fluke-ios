@@ -1,13 +1,16 @@
 import FlukeKit
+import FlukeReleaseB
 import FlukeUI
 import Observation
 import SwiftUI
 
 public struct SightingsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: SightingsViewModel
     @State private var movementRouter = SightingMovementPresentationRouter()
     private let openWhaleMovement: ((String) -> Void)?
+    private let feedPoller: FeedPollingActor?
 
     public init(
         repository: any SightingsRepositoryProtocol,
@@ -15,6 +18,20 @@ public struct SightingsView: View {
     ) {
         _viewModel = State(initialValue: SightingsViewModel(repository: repository))
         openWhaleMovement = onOpenWhaleMovement
+        feedPoller = nil
+    }
+
+    public init(
+        feedRepository: any SightingFeedRepositoryProtocol,
+        onOpenWhaleMovement: ((String) -> Void)? = nil
+    ) {
+        let model = SightingsViewModel(feedRepository: feedRepository)
+        _viewModel = State(initialValue: model)
+        openWhaleMovement = onOpenWhaleMovement
+        feedPoller = FeedPollingActor(refresh: { [weak model] in
+            guard let model else { return }
+            try await model.pollRefresh()
+        })
     }
 
     public var body: some View {
@@ -32,6 +49,21 @@ public struct SightingsView: View {
         .navigationTitle("Sightings")
         .task { await viewModel.load() }
         .refreshable { await viewModel.load() }
+        .onAppear {
+            guard let feedPoller else { return }
+            Task {
+                await feedPoller.setVisible(true)
+                await feedPoller.setForeground(scenePhase == .active)
+            }
+        }
+        .onDisappear {
+            guard let feedPoller else { return }
+            Task { await feedPoller.setVisible(false) }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard let feedPoller else { return }
+            Task { await feedPoller.setForeground(phase == .active) }
+        }
         .sheet(item: $viewModel.selectedItem, onDismiss: openPendingMovement) { item in
             SightingDetailView(item: item, onOpenWhaleMovement: detailMovementAction)
                 .presentationDetents([.medium, .large])
@@ -120,6 +152,14 @@ public struct SightingsView: View {
 
     @ViewBuilder
     private var statusViews: some View {
+        if viewModel.feedState != nil {
+            Text(freshnessLabel)
+                .font(.flukeLabel)
+                .foregroundStyle(viewModel.freshness == .live ? Color.tide : Color.deep)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .accessibilityLabel("Sightings freshness: \(freshnessLabel)")
+        }
         ForEach(Array(viewModel.notices.enumerated()), id: \.offset) { _, notice in
             switch notice {
             case .offline:
@@ -130,6 +170,19 @@ public struct SightingsView: View {
         }
         if let failure = viewModel.primaryFailure, !viewModel.items.isEmpty {
             BrowseStatusView(kind: .failure(failure)) { Task { await viewModel.retry() } }
+        }
+    }
+
+    private var freshnessLabel: String {
+        switch viewModel.freshness {
+        case .live:
+            return "Live"
+        case .recent(let age):
+            guard let age else { return "Recent" }
+            if age < 60 { return "Recent · updated \(age)s ago" }
+            if age < 3_600 { return "Recent · updated \(age / 60)m ago" }
+            if age < 86_400 { return "Recent · updated \(age / 3_600)h ago" }
+            return "Recent · updated \(age / 86_400)d ago"
         }
     }
 }

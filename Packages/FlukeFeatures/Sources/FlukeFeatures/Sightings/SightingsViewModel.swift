@@ -1,4 +1,5 @@
 import FlukeKit
+import FlukeReleaseB
 import Foundation
 import Observation
 
@@ -16,6 +17,8 @@ public final class SightingsViewModel {
         public enum Payload: Hashable, Sendable {
             case fluke(Sighting)
             case external(ExternalSighting)
+            case feedInternal(InternalFeedSighting)
+            case feedExternal(ExternalFeedSighting)
         }
 
         public let id: String
@@ -51,17 +54,38 @@ public final class SightingsViewModel {
 
     public private(set) var approvedState: BrowseViewState<[Sighting]> = .idle
     public private(set) var externalState: BrowseViewState<[ExternalSighting]> = .idle
+    public private(set) var feedState: SightingFeedState?
+    public private(set) var feedFailure: BrowseFailure?
+    public private(set) var freshness: SightingFeedFreshness = .recent(lastSuccessAge: nil)
     public var mode: Mode = .list
     public var selectedItem: DisplayItem?
 
-    private let repository: any SightingsRepositoryProtocol
+    private let repository: (any SightingsRepositoryProtocol)?
+    private let feedRepository: (any SightingFeedRepositoryProtocol)?
+    private let now: @Sendable () -> Date
     private var loadGeneration = 0
 
     public init(repository: any SightingsRepositoryProtocol) {
         self.repository = repository
+        feedRepository = nil
+        now = { Date() }
+    }
+
+    public init(
+        feedRepository: any SightingFeedRepositoryProtocol,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        repository = nil
+        self.feedRepository = feedRepository
+        self.now = now
     }
 
     public func load() async {
+        if let feedRepository {
+            await loadFeed(from: feedRepository, initial: feedState == nil)
+            return
+        }
+        guard let repository else { return }
         loadGeneration += 1
         let generation = loadGeneration
         approvedState = approvedState.beginRefresh()
@@ -79,7 +103,23 @@ public final class SightingsViewModel {
         await load()
     }
 
+    public func pollRefresh() async throws {
+        guard let feedRepository else { return }
+        loadGeneration += 1
+        let generation = loadGeneration
+        do {
+            let state = try await feedRepository.refresh()
+            guard generation == loadGeneration else { return }
+            applyFeedState(state)
+        } catch {
+            guard generation == loadGeneration else { throw error }
+            recordFeedFailure()
+            throw error
+        }
+    }
+
     public var items: [DisplayItem] {
+        if let feedState { return feedState.items.compactMap(Self.displayItem) }
         let approved = (approvedState.value ?? []).map { sighting in
             DisplayItem(
                 id: "fluke:\(sighting.id)",
@@ -117,24 +157,84 @@ public final class SightingsViewModel {
     }
 
     public var isLoading: Bool {
-        approvedState.isLoading || externalState.isLoading
+        if feedRepository != nil { return feedState == nil && feedFailure == nil }
+        return approvedState.isLoading || externalState.isLoading
     }
 
     public var hasConfirmedEmptyFeed: Bool {
-        isConfirmedEmpty(approvedState) && isConfirmedEmpty(externalState)
+        if feedRepository != nil { return feedState?.items.isEmpty == true }
+        return isConfirmedEmpty(approvedState) && isConfirmedEmpty(externalState)
     }
 
     public var primaryFailure: BrowseFailure? {
-        approvedState.failure ?? externalState.failure
+        if feedRepository != nil { return feedFailure }
+        return approvedState.failure ?? externalState.failure
     }
 
     public var notices: [BrowseNotice] {
-        [approvedState.notice, externalState.notice].compactMap { $0 }
+        if feedRepository != nil { return [] }
+        return [approvedState.notice, externalState.notice].compactMap { $0 }
     }
 
     private func isConfirmedEmpty<Value>(_ state: BrowseViewState<Value>) -> Bool {
         if case .empty = state { return true }
         return false
+    }
+
+    private func loadFeed(
+        from repository: any SightingFeedRepositoryProtocol,
+        initial: Bool
+    ) async {
+        loadGeneration += 1
+        let generation = loadGeneration
+        do {
+            let state = try await (initial ? repository.load() : repository.refresh())
+            guard generation == loadGeneration else { return }
+            applyFeedState(state)
+        } catch {
+            guard generation == loadGeneration else { return }
+            recordFeedFailure()
+        }
+    }
+
+    private func applyFeedState(_ state: SightingFeedState) {
+        feedState = state
+        feedFailure = nil
+        freshness = SightingFeedFreshness(providers: state.providers, now: now())
+    }
+
+    private func recordFeedFailure() {
+        feedFailure = BrowseFailure(
+            code: "SIGHTING_FEED_FAILED",
+            message: "Recent sightings could not be refreshed.",
+            retryable: true,
+            requestId: nil
+        )
+    }
+
+    private static func displayItem(_ item: SightingFeedItem) -> DisplayItem? {
+        switch item {
+        case .internal(let sighting):
+            return DisplayItem(
+                id: sighting.id, observedAt: sighting.observedAt,
+                latitude: sighting.latitude, longitude: sighting.longitude,
+                locationName: sighting.locationName, ecotype: sighting.ecotypeGuess,
+                groupSize: sighting.groupSize,
+                whaleCatalogIDs: sighting.identifiedWhales.map(\.catalogId),
+                notes: sighting.behaviorNotes, sourceLabel: "Fluke",
+                payload: .feedInternal(sighting)
+            )
+        case .external(let sighting):
+            return DisplayItem(
+                id: sighting.id, observedAt: sighting.observedAt,
+                latitude: sighting.latitude, longitude: sighting.longitude,
+                locationName: nil, ecotype: sighting.ecotypeGuess,
+                groupSize: sighting.groupSize, whaleCatalogIDs: [], notes: sighting.notes,
+                sourceLabel: sighting.attribution, payload: .feedExternal(sighting)
+            )
+        case .removed:
+            return nil
+        }
     }
 
     private static func loadApproved(

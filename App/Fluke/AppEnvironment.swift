@@ -75,6 +75,7 @@ struct AppEnvironment {
   let logbookRepository: any LogbookRepositoryProtocol
   let predictionRepository: PredictionRepository
   let sightingsRepository: SightingsRepository
+  let sightingFeedRepository: SightingFeedRepository
   let sessionHintStore: any SessionHintStore
   let submissionQueue: SubmissionQueue
   let submissionObservedAt: SubmissionObservedAt
@@ -137,6 +138,7 @@ struct AppEnvironment {
       logbookRepository: LogbookRepository(api: client),
       predictionRepository: PredictionRepository(api: client, cache: cacheStore),
       sightingsRepository: SightingsRepository(api: client, cache: cacheStore),
+      sightingFeedRepository: SightingFeedRepository(api: client, cache: cacheStore),
       sessionHintStore: KeychainSessionHintStore(),
       submissionQueue: submissionQueue,
       submissionObservedAt: submissionObservedAt,

@@ -10,6 +10,18 @@ public enum JSONRetryPolicy: Sendable {
   case never
 }
 
+public struct ConditionalGETResponse<Value: Sendable>: Sendable {
+  public let value: Value?
+  public let entityTag: String?
+  public let isNotModified: Bool
+
+  public init(value: Value?, entityTag: String?, isNotModified: Bool) {
+    self.value = value
+    self.entityTag = entityTag
+    self.isNotModified = isNotModified
+  }
+}
+
 public struct APIClient: Sendable {
   public static let defaultRequestTimeout: Duration = .seconds(15)
 
@@ -70,6 +82,50 @@ public struct APIClient: Sendable {
 
   public func get<T: Decodable>(_ apiRequest: APIRequest) async throws -> T {
     try await send(method: "GET", request: apiRequest, mutation: nil)
+  }
+
+  public func conditionalGet<T: Decodable & Sendable>(
+    _ apiRequest: APIRequest,
+    entityTag: String?
+  ) async throws -> ConditionalGETResponse<T> {
+    if let entityTag, !Self.isValidEntityTag(entityTag) { throw APIError.invalidRequest }
+    let request = try makeURLRequest(
+      method: "GET",
+      apiRequest: apiRequest,
+      mutation: nil,
+      headers: entityTag.map { ["If-None-Match": $0] } ?? [:]
+    )
+    let data: Data
+    let response: HTTPURLResponse
+    do {
+      (data, response) = try await transportData(for: request, retriesTransientFailure: false)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let error as APIError {
+      throw error
+    } catch let error as URLError where error.code == .notConnectedToInternet {
+      throw APIError.offline
+    } catch let error as URLError where error.code == .timedOut {
+      throw APIError.timeout
+    } catch {
+      throw APIError.transport
+    }
+    let returnedTag = response.value(forHTTPHeaderField: "ETag")
+    if let returnedTag, !Self.isValidEntityTag(returnedTag) { throw APIError.malformedResponse }
+    if response.statusCode == 304 {
+      guard data.isEmpty else { throw APIError.malformedResponse }
+      return ConditionalGETResponse(value: nil, entityTag: returnedTag ?? entityTag, isNotModified: true)
+    }
+    guard (200...299).contains(response.statusCode) else {
+      if response.statusCode == 401 { throw APIError.unauthorized }
+      throw decodeRemoteError(status: response.statusCode, data: data)
+    }
+    do {
+      let value = try JSONDecoder.fluke.decode(T.self, from: data)
+      return ConditionalGETResponse(value: value, entityTag: returnedTag, isNotModified: false)
+    } catch {
+      throw APIError.decoding(String(describing: T.self))
+    }
   }
 
   public func post<Request: Encodable & Sendable, Response: Decodable>(
@@ -318,13 +374,15 @@ public struct APIClient: Sendable {
   private func makeURLRequest(
     method: String,
     apiRequest: APIRequest,
-    mutation: MutationRequest?
+    mutation: MutationRequest?,
+    headers: [String: String] = [:]
   ) throws -> URLRequest {
     let url = try apiRequest.url(relativeTo: baseURL)
     var request = URLRequest(url: url)
     request.httpMethod = method
     request.timeoutInterval = requestTimeout.timeInterval
     request.setValue("application/json", forHTTPHeaderField: "Accept")
+    for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
     if let mutation {
       request.setValue(mutation.contentType, forHTTPHeaderField: "Content-Type")
       for (key, value) in mutation.headers {
@@ -334,6 +392,11 @@ public struct APIClient: Sendable {
     }
     applyCookies(to: &request)
     return request
+  }
+
+  private static func isValidEntityTag(_ value: String) -> Bool {
+    !value.isEmpty && value.count <= 1_024
+      && value.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
   }
 
   private func transportData(

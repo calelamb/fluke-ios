@@ -91,7 +91,7 @@ struct RootScene: View {
       TabView(selection: $selectedTab) {
         NavigationStack {
           SightingsView(
-            repository: environment.sightingsRepository,
+            feedRepository: environment.sightingFeedRepository,
             onOpenWhaleMovement: presentMovement
           )
           .toolbar {
