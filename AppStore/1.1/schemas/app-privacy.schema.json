@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "version", "build", "tracking", "analytics", "dataSharedWithThirdParties", "localOnlyProcessing", "transmittedOnlyOnExplicitSightingSubmission", "transmittedOnOptionalAccountUse", "collectedData", "networkDisclosure"],
+  "required": ["schemaVersion", "version", "build", "tracking", "analytics", "dataSharedWithThirdParties", "localOnlyProcessing", "transmittedOnlyOnExplicitSightingSubmission", "transmittedOnOptionalAccountUse", "transmittedForAppleAuthentication", "collectedData", "networkDisclosure"],
   "properties": {
     "schemaVersion": {"const": 1},
     "version": {"const": "1.1"},
@@ -12,7 +12,8 @@
     "dataSharedWithThirdParties": {"const": false},
     "localOnlyProcessing": {"const": ["camera-frames", "photo-crops", "embeddings", "match-candidates", "identifier-caches", "submission-drafts"]},
     "transmittedOnlyOnExplicitSightingSubmission": {"const": ["contact-email", "chosen-location", "submitted-content", "attached-photo"]},
-    "transmittedOnOptionalAccountUse": {"const": ["name", "user-id"]},
+    "transmittedOnOptionalAccountUse": {"const": ["name", "account-email", "user-id"]},
+    "transmittedForAppleAuthentication": {"const": ["apple-identity-token", "apple-authorization-code"]},
     "collectedData": {
       "type": "array",
       "minItems": 6,
@@ -29,6 +30,6 @@
         }
       }
     },
-    "networkDisclosure": {"const": "Explicit sighting submission sends the contact email, user-chosen location and content, and attached photo. Optional account use also sends Name and User ID. Identification camera frames and derived matching artifacts stay on device."}
+    "networkDisclosure": {"const": "Explicit sighting submission sends its contact email, user-chosen location and content, and attached photo. Optional account use separately sends Name, account email, and User ID. Sign in with Apple separately sends the Apple identity token and one-use authorization code for authentication. Identification camera frames and derived matching artifacts stay on device."}
   }
 }

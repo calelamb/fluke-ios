@@ -4,15 +4,42 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_root="$repo_root/AppStore/1.1"
-catalog_verification=""
+mobile_release_directory=""
+build_settings_fixture=""
+shipping_resources_fixture=""
+project_membership_fixture=""
 
-if [[ "${1:-}" == "--catalog-verification" ]]; then
-  (($# >= 2)) || { echo "--catalog-verification requires a path" >&2; exit 2; }
-  catalog_verification="$2"
-  shift 2
-fi
+while (($# > 0)); do
+  case "$1" in
+    --mobile-release-directory)
+      (($# >= 2)) || { echo "--mobile-release-directory requires a path" >&2; exit 2; }
+      mobile_release_directory="$2"
+      shift 2
+      ;;
+    --build-settings-fixture)
+      (($# >= 2)) || { echo "--build-settings-fixture requires a path" >&2; exit 2; }
+      build_settings_fixture="$2"
+      shift 2
+      ;;
+    --shipping-resources-fixture)
+      (($# >= 2)) || { echo "--shipping-resources-fixture requires a path" >&2; exit 2; }
+      shipping_resources_fixture="$2"
+      shift 2
+      ;;
+    --project-membership-fixture)
+      (($# >= 2)) || { echo "--project-membership-fixture requires a path" >&2; exit 2; }
+      project_membership_fixture="$2"
+      shift 2
+      ;;
+    --*)
+      printf 'unknown option: %s\n' "$1" >&2
+      exit 2
+      ;;
+    *) break ;;
+  esac
+done
 if (($# > 1)); then
-  echo "Usage: $0 [--catalog-verification FILE] [PACKAGE_ROOT]" >&2
+  echo "Usage: $0 [--mobile-release-directory DIR] [test-only fixture options] [PACKAGE_ROOT]" >&2
   exit 2
 fi
 if (($# == 1)); then package_root="$1"; fi
@@ -115,14 +142,15 @@ copy = " ".join((metadata["description"], metadata["promotionalText"], metadata[
 for required in (
     "camera frames", "photo crops", "embeddings", "match candidates", "caches", "drafts",
     "stay on device", "no analytics or tracking", "explicit sighting submission",
-    "chosen location", "attached photo", "optional account", "name and user id", "live camera",
+    "chosen location", "attached photo", "optional account", "live camera",
+    "account email", "identity token", "authorization code", "dorsal fin", "orca individual",
     "without capture or upload", "ready:true",
 ):
     if required not in copy:
         raise SystemExit(f"metadata is missing required truthful copy: {required}")
 if "https://fluke-api.onrender.com" not in metadata["reviewNotes"]:
     raise SystemExit("reviewNotes must name the exact live Fluke API URL")
-for forbidden in ("choose a fluke photo", "choose a photo for matching"):
+for forbidden in ("choose a fluke photo", "choose a photo for matching", "fluke matching", "at a fluke"):
     if forbidden in copy:
         raise SystemExit(f"metadata contains stale selected-photo identification copy: {forbidden}")
 
@@ -182,26 +210,67 @@ for screenshot in "${screenshots[@]}"; do
   }
 done
 
-[[ -n "$catalog_verification" ]] || {
-  echo "production catalog verifier output is required before identification can be claimed" >&2
-  exit 1
-}
-test -f "$catalog_verification" || {
-  echo "production catalog verifier output does not exist" >&2
-  exit 1
-}
-python3 - "$catalog_verification" <<'PY'
-import json
+if [[ -n "$build_settings_fixture" ]]; then
+  [[ "${FLUKE_APP_STORE_TESTING:-}" == "true" ]] || {
+    echo "--build-settings-fixture is restricted to FLUKE_APP_STORE_TESTING=true" >&2
+    exit 1
+  }
+  test -f "$build_settings_fixture" || { echo "build settings fixture does not exist" >&2; exit 1; }
+  build_settings="$build_settings_fixture"
+else
+  build_settings="$(mktemp "${TMPDIR:-/tmp}/fluke-build-settings.XXXXXX")"
+  trap 'rm -f "$build_settings"' EXIT
+  xcodebuild -project "$repo_root/App/Fluke.xcodeproj" -scheme Fluke -configuration Release -showBuildSettings > "$build_settings"
+fi
+python3 - "$build_settings" <<'PY'
 import re
 import sys
 
+values = {}
+for line in open(sys.argv[1], encoding="utf-8"):
+    match = re.match(r"\s*(TARGET_NAME|PRODUCT_BUNDLE_IDENTIFIER|MARKETING_VERSION|CURRENT_PROJECT_VERSION)\s*=\s*(.*?)\s*$", line)
+    if match:
+        values[match.group(1)] = match.group(2)
+expected = {
+    "TARGET_NAME": "Fluke",
+    "PRODUCT_BUNDLE_IDENTIFIER": "app.fluke.Fluke",
+    "MARKETING_VERSION": "1.1",
+    "CURRENT_PROJECT_VERSION": "2",
+}
+for key, expected_value in expected.items():
+    if values.get(key) != expected_value:
+        raise SystemExit(f"shipping Fluke target {key} must equal {expected_value}; observed {values.get(key)!r}")
+PY
+
+[[ -n "$mobile_release_directory" ]] || {
+  echo "mobile release directory is required before identification can be claimed" >&2
+  exit 1
+}
+test -d "$mobile_release_directory" || {
+  echo "mobile release directory does not exist" >&2
+  exit 1
+}
+python3 - "$mobile_release_directory" <<'PY'
+import hashlib
+import json
+import math
+from pathlib import Path
+import re
+import sys
+
+root = Path(sys.argv[1])
+report_path = root / "mobile-release-report.json"
+if root.is_symlink() or not root.is_dir() or report_path.is_symlink():
+    raise SystemExit("mobile release directory or report is missing or unsafe")
 try:
-    with open(sys.argv[1], encoding="utf-8") as source:
+    with report_path.open(encoding="utf-8") as source:
         result = json.load(source)
 except (OSError, json.JSONDecodeError) as error:
     raise SystemExit(f"invalid production catalog verifier output: {error}")
 if not isinstance(result, dict):
     raise SystemExit("production catalog verifier output must be an object")
+if set(result) != {"schemaVersion", "modelPackageSha256", "catalogManifestSha256", "ready", "thresholds", "gates"}:
+    raise SystemExit("production catalog verifier top-level fields do not match the exact schema")
 if result.get("schemaVersion") != 1:
     raise SystemExit("production catalog verifier schemaVersion must be 1")
 if result.get("ready") is not True:
@@ -227,11 +296,226 @@ expected_gate_names = {
 gates = result.get("gates")
 if not isinstance(gates, list):
     raise SystemExit("production catalog verifier gates must be an array")
+expected_order = (
+    "model_package_digest", "catalog_manifest_digest", "input_paths", "package", "catalog",
+    "digests", "rights", "embedding_shape", "embedding_norm", "required_reports",
+    "parity_samples", "parity_cosine", "closed_set_samples", "top_1", "top_3",
+    "open_set_samples", "false_accept",
+)
 names = [gate.get("name") for gate in gates if isinstance(gate, dict)]
-if len(names) != len(expected_gate_names) or set(names) != expected_gate_names:
+if tuple(names) != expected_order or set(names) != expected_gate_names:
     raise SystemExit("production catalog verifier gate-name set is incomplete or unexpected")
-if any(gate.get("passed") is not True for gate in gates):
-    raise SystemExit("every production catalog verifier gate must pass")
+for gate in gates:
+    if set(gate) != {"name", "passed", "observed", "requirement", "detail"}:
+        raise SystemExit(f"production catalog verifier gate {gate.get('name')!r} fields do not match the exact schema")
+    if gate["passed"] is not True:
+        raise SystemExit("every production catalog verifier gate must pass")
+
+gate_by_name = {gate["name"]: gate for gate in gates}
+for name, digest_key in (("model_package_digest", "modelPackageSha256"), ("catalog_manifest_digest", "catalogManifestSha256")):
+    gate = gate_by_name[name]
+    if gate["observed"] != result[digest_key]:
+        raise SystemExit(f"production catalog verifier {name} observed digest must equal {digest_key}")
+    if gate["requirement"] != "valid lowercase SHA256 release identity" or gate["detail"] != "digest is bound":
+        raise SystemExit(f"production catalog verifier {name} evidence text does not match the producer contract")
+
+boundary_details = {
+    "input_paths": "all fixed release inputs and exact directory layouts are safe",
+    "package": "exact export schema, identity, package tree, interface, and audited tools verified",
+    "catalog": "complete Task 3 published catalog contract verified",
+    "digests": "package, vectors, metadata, and rights digests match exactly",
+    "rights": "written model and exact-source mobile redistribution rights verified",
+    "embedding_norm": "all parity embeddings are finite and L2 normalized",
+    "required_reports": "all six exact-schema, digest-bound evaluation reports are present",
+}
+for name, detail in boundary_details.items():
+    gate = gate_by_name[name]
+    if gate["observed"] is not True or gate["requirement"] != "validation must pass" or gate["detail"] != detail:
+        raise SystemExit(f"production catalog verifier {name} evidence does not match the producer contract")
+
+for name in ("parity_samples", "closed_set_samples", "open_set_samples"):
+    gate = gate_by_name[name]
+    if isinstance(gate["observed"], bool) or not isinstance(gate["observed"], int) or gate["observed"] <= 0:
+        raise SystemExit(f"production catalog verifier {name} observed must be a positive integer")
+    if gate["requirement"] != "positive integer sample count" or gate["detail"] != "sample count is meaningful":
+        raise SystemExit(f"production catalog verifier {name} evidence text does not match the producer contract")
+
+shape = gate_by_name["embedding_shape"]
+expected_shape_detail = f"{gate_by_name['parity_samples']['observed']} paired float32 embeddings have shape (N, 384)"
+if shape["observed"] is not True or shape["requirement"] != "validation must pass" or shape["detail"] != expected_shape_detail:
+    raise SystemExit("production catalog verifier embedding_shape evidence does not match parity_samples")
+
+metric_contract = {
+    "parity_cosine": (">=", 0.999), "top_1": (">=", 0.65),
+    "top_3": (">=", 0.8), "false_accept": ("<=", 0.05),
+}
+for name, (comparison, threshold) in metric_contract.items():
+    gate = gate_by_name[name]
+    observed = gate["observed"]
+    valid_number = isinstance(observed, (int, float)) and not isinstance(observed, bool) and math.isfinite(observed)
+    threshold_met = valid_number and (observed <= threshold if comparison == "<=" else observed >= threshold)
+    if not threshold_met or gate["requirement"] != f"finite value {comparison} {threshold}" or gate["detail"] != "threshold met":
+        raise SystemExit(f"production catalog verifier {name} observation does not satisfy its exact gate")
+
+def package_tree_digest(package):
+    if package.is_symlink() or not package.is_dir():
+        raise SystemExit("mobile release Core ML package is missing or unsafe")
+    entries = sorted(package.rglob("*"), key=lambda path: path.relative_to(package).as_posix())
+    if not entries:
+        raise SystemExit("mobile release Core ML package must not be empty")
+    digest = hashlib.sha256(b"fluke-coreml-package-v1\0")
+    for path in entries:
+        if path.is_symlink():
+            raise SystemExit("mobile release Core ML package contains a symlink")
+        relative = path.relative_to(package).as_posix().encode("utf-8")
+        digest.update(b"D" if path.is_dir() else b"F")
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        if path.is_file():
+            with path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        elif not path.is_dir():
+            raise SystemExit("mobile release Core ML package contains a non-regular entry")
+    return digest.hexdigest()
+
+model_digest = package_tree_digest(root / "FlukeEmbedder.mlpackage")
+catalog_path = root / "catalog" / "manifest.json"
+if catalog_path.is_symlink() or not catalog_path.is_file():
+    raise SystemExit("mobile release catalog manifest is missing or unsafe")
+catalog_digest = hashlib.sha256(catalog_path.read_bytes()).hexdigest()
+if model_digest != result["modelPackageSha256"]:
+    raise SystemExit("production report modelPackageSha256 does not match the actual mobile release package")
+if catalog_digest != result["catalogManifestSha256"]:
+    raise SystemExit("production report catalogManifestSha256 does not match the actual mobile release catalog manifest")
+PY
+
+if [[ -n "$shipping_resources_fixture" || -n "$project_membership_fixture" ]]; then
+  [[ "${FLUKE_APP_STORE_TESTING:-}" == "true" ]] || {
+    echo "shipping resource fixtures are restricted to FLUKE_APP_STORE_TESTING=true" >&2
+    exit 1
+  }
+  [[ -n "$shipping_resources_fixture" && -n "$project_membership_fixture" ]] || {
+    echo "shipping resource and project membership fixtures must be supplied together" >&2
+    exit 1
+  }
+  shipping_resources="$shipping_resources_fixture"
+  project_membership="$project_membership_fixture"
+  membership_mode="fixture"
+else
+  shipping_resources="$repo_root/App/Fluke"
+  project_membership="$repo_root/App/Fluke.xcodeproj/project.pbxproj"
+  membership_mode="project"
+fi
+
+python3 - "$mobile_release_directory" "$shipping_resources" "$project_membership" "$membership_mode" <<'PY'
+import hashlib
+from pathlib import Path
+import re
+import sys
+
+release = Path(sys.argv[1])
+shipping = Path(sys.argv[2])
+membership_path = Path(sys.argv[3])
+mode = sys.argv[4]
+
+def reject_symlink_path(path, boundary, label):
+    relative = path.relative_to(boundary)
+    current = boundary
+    if boundary.is_symlink():
+        raise SystemExit(f"{label} path contains a symlink")
+    for component in relative.parts:
+        current = current / component
+        if current.is_symlink():
+            raise SystemExit(f"{label} path contains a symlink")
+
+def file_digest(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.digest()
+
+def package_tree_digest(package):
+    if package.is_symlink() or not package.is_dir():
+        raise SystemExit(f"shipping model package is missing: {package}")
+    entries = sorted(package.rglob("*"), key=lambda path: path.relative_to(package).as_posix())
+    if not entries:
+        raise SystemExit("shipping model package must not be empty")
+    digest = hashlib.sha256(b"fluke-coreml-package-v1\0")
+    for path in entries:
+        if path.is_symlink():
+            raise SystemExit("shipping model package contains a symlink")
+        relative = path.relative_to(package).as_posix().encode("utf-8")
+        digest.update(b"D" if path.is_dir() else b"F")
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        if path.is_file():
+            with path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        elif not path.is_dir():
+            raise SystemExit("shipping model package contains a non-regular entry")
+    return digest.hexdigest()
+
+release_model = release / "FlukeEmbedder.mlpackage"
+shipping_model = shipping / "Models/FlukeEmbedder.mlpackage"
+reject_symlink_path(release_model, release, "verified model")
+reject_symlink_path(shipping_model, shipping, "shipping model")
+if package_tree_digest(release_model) != package_tree_digest(shipping_model):
+    raise SystemExit("shipping model package does not match the verified mobile release package")
+
+catalog_files = ("manifest.json", "metadata.json", "references.f16")
+for filename in catalog_files:
+    source = release / "catalog" / filename
+    destination = shipping / "IdentifierCatalog" / filename
+    reject_symlink_path(source, release, "verified catalog")
+    reject_symlink_path(destination, shipping, "shipping catalog")
+    if source.is_symlink() or not source.is_file():
+        raise SystemExit(f"verified mobile release catalog file is missing: {filename}")
+    if destination.is_symlink() or not destination.is_file():
+        raise SystemExit(f"shipping IdentifierCatalog resource is missing: {filename}")
+    if file_digest(source) != file_digest(destination):
+        raise SystemExit(f"shipping IdentifierCatalog resource does not match verified release: {filename}")
+
+try:
+    membership = membership_path.read_text(encoding="utf-8")
+except OSError as error:
+    raise SystemExit(f"cannot inspect shipping project resource membership: {error}")
+resource_paths = (
+    "Models/FlukeEmbedder.mlpackage",
+    "IdentifierCatalog/manifest.json",
+    "IdentifierCatalog/metadata.json",
+    "IdentifierCatalog/references.f16",
+)
+if mode == "fixture":
+    required_lines = {"TARGET_NAME=Fluke", "SYNCHRONIZED_RESOURCE_ROOT=App/Fluke", *(f"RESOURCE={path}" for path in resource_paths)}
+    if len(membership.splitlines()) != len(required_lines) or set(membership.splitlines()) != required_lines:
+        raise SystemExit("project membership fixture does not include every shipping identification resource")
+else:
+    root_match = re.search(
+        r"(?ms)^\s*([A-F0-9]+) /\* Fluke \*/ = \{\s*isa = PBXFileSystemSynchronizedRootGroup;.*?\s+path = Fluke;.*?^\s*\};",
+        membership,
+    )
+    target_match = re.search(
+        r"(?ms)^\s*[A-F0-9]+ /\* Fluke \*/ = \{\s*isa = PBXNativeTarget;(.*?)^\s*\};",
+        membership,
+    )
+    resource_phase = None if target_match is None else re.search(r"([A-F0-9]+) /\* Resources \*/", target_match.group(1))
+    synchronized_contract = bool(
+        root_match
+        and target_match
+        and root_match.group(1) in target_match.group(1)
+        and "fileSystemSynchronizedGroups" in target_match.group(1)
+        and resource_phase
+        and re.search(
+            rf"(?ms)^\s*{resource_phase.group(1)} /\* Resources \*/ = \{{\s*isa = PBXResourcesBuildPhase;",
+            membership,
+        )
+    )
+    excluded = any(path in membership.split("membershipExceptions = (", 1)[-1].split(");", 1)[0] for path in resource_paths)
+    if not synchronized_contract or excluded:
+        raise SystemExit("Fluke target does not prove synchronized project membership for identification resources")
 PY
 
 printf 'App Store 1.1 submission package is valid for version 1.1 build 2\n'
