@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "version": "1.1",
+  "build": 2,
+  "tracking": false,
+  "analytics": false,
+  "dataSharedWithThirdParties": false,
+  "localOnlyProcessing": ["camera-frames", "photo-crops", "embeddings", "match-candidates", "identifier-caches", "submission-drafts"],
+  "transmittedOnlyOnExplicitSightingSubmission": ["contact-email", "chosen-location", "submitted-content", "attached-photo"],
+  "transmittedOnOptionalAccountUse": ["name", "user-id"],
+  "collectedData": [
+    {"dataType": "email-address", "linkedToUser": true, "purpose": "app-functionality", "tracking": false},
+    {"dataType": "name", "linkedToUser": true, "purpose": "app-functionality", "tracking": false},
+    {"dataType": "photos-or-videos", "linkedToUser": true, "purpose": "app-functionality", "tracking": false},
+    {"dataType": "coarse-location", "linkedToUser": true, "purpose": "app-functionality", "tracking": false},
+    {"dataType": "user-id", "linkedToUser": true, "purpose": "app-functionality", "tracking": false},
+    {"dataType": "other-user-content", "linkedToUser": true, "purpose": "app-functionality", "tracking": false}
+  ],
+  "networkDisclosure": "Explicit sighting submission sends the contact email, user-chosen location and content, and attached photo. Optional account use also sends Name and User ID. Identification camera frames and derived matching artifacts stay on device."
+}

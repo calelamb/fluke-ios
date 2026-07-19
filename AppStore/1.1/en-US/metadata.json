@@ -1,0 +1,19 @@
+{
+  "locale": "en-US",
+  "version": "1.1",
+  "build": 2,
+  "name": "Fluke: PNW Orca Atlas",
+  "subtitle": "Private on-device matching",
+  "description": "Explore sourced killer whale sightings, individual whale profiles, and historical context across the Pacific Northwest.\n\nON-DEVICE IDENTIFICATION\nPoint the live camera at a fluke to compare against a certified rights-cleared catalog. Frames are analyzed locally as they arrive; matching does not capture or upload them. Camera frames, photo crops, embeddings, match candidates, caches, and drafts stay on your device. Identification is enabled for this release only after the production catalog verifier reports ready:true.\n\nSIGHTINGS\nBrowse attributed public observations. Explicit submission sends the contact email, selected location and content, and attached photo to Fluke for moderation. Queued drafts remain on device until Submit is tapped. Optional account use sends Name and User ID for Sign in with Apple.\n\nWHALES AND ATLAS\nSearch the catalog, read evidence-backed profiles, and explore historical ranges and movement context. Confidence and source attribution stay visible.\n\nFluke has no advertising, analytics, or tracking. It is an independent reference project, not an emergency alert service. Never approach or pursue wildlife; follow current official viewing regulations.",
+  "keywords": "orca,killer whales,fluke,identification,sightings,Salish Sea,catalog,atlas,field guide",
+  "promotionalText": "Use private live-camera fluke matching on device, explore sourced PNW sightings, and follow catalog evidence without analytics or tracking.",
+  "whatsNew": "Version 1.1 adds gated live-camera fluke matching against a certified production catalog. Frames are analyzed without capture or upload; crops, embeddings, candidates, caches, and drafts stay on device. Explicit sighting submissions send their contact email, chosen location and content, and attached photo. Optional accounts send Name and User ID.",
+  "supportURL": "https://fluke-pnw.vercel.app/support",
+  "privacyURL": "https://fluke-pnw.vercel.app/privacy",
+  "marketingURL": "https://fluke-pnw.vercel.app",
+  "copyright": "2026 Cale Lamb",
+  "primaryCategory": "Reference",
+  "secondaryCategory": "Education",
+  "contentRightsUsesThirdPartyContent": true,
+  "reviewNotes": "Version 1.1 build 2 must not be submitted until the exact fluke-model mobile release report supplied to the package verifier reports ready:true. In Identify, live camera frames are analyzed locally without capture or upload. Photo crops, embeddings, match candidates, caches, and drafts stay on device. Fluke has no analytics or tracking. Explicit sighting submission sends its contact email, user-chosen location and content, and attached photo for moderation. Optional account use sends Name and User ID for Sign in with Apple.\n\nSuggested review path:\n1. Browse Sightings and Whales.\n2. Open Identify and point the live camera at a permitted test target to review local candidates from the certified catalog.\n3. Draft a sighting and verify no network submission occurs until Submit is tapped.\n4. Submit only test content suitable for moderation.\n\nLive API: https://fluke-api.onrender.com\nSupport: https://fluke-pnw.vercel.app/support\nPrivacy: https://fluke-pnw.vercel.app/privacy"
+}

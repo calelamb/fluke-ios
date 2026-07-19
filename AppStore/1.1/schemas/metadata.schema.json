@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["locale", "version", "build", "name", "subtitle", "description", "keywords", "promotionalText", "whatsNew", "supportURL", "privacyURL", "marketingURL", "copyright", "primaryCategory", "secondaryCategory", "contentRightsUsesThirdPartyContent", "reviewNotes"],
+  "properties": {
+    "locale": {"const": "en-US"},
+    "version": {"const": "1.1"},
+    "build": {"const": 2},
+    "name": {"type": "string", "minLength": 1, "maxLength": 30},
+    "subtitle": {"type": "string", "minLength": 1, "maxLength": 30},
+    "description": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "keywords": {"type": "string", "minLength": 1, "maxLength": 100},
+    "promotionalText": {"type": "string", "minLength": 1, "maxLength": 170},
+    "whatsNew": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "supportURL": {"const": "https://fluke-pnw.vercel.app/support"},
+    "privacyURL": {"const": "https://fluke-pnw.vercel.app/privacy"},
+    "marketingURL": {"const": "https://fluke-pnw.vercel.app"},
+    "copyright": {"type": "string", "minLength": 1},
+    "primaryCategory": {"const": "Reference"},
+    "secondaryCategory": {"const": "Education"},
+    "contentRightsUsesThirdPartyContent": {"const": true},
+    "reviewNotes": {"type": "string", "minLength": 1, "maxLength": 4000}
+  }
+}

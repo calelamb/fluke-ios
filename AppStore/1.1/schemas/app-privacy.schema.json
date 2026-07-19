@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "version", "build", "tracking", "analytics", "dataSharedWithThirdParties", "localOnlyProcessing", "transmittedOnlyOnExplicitSightingSubmission", "transmittedOnOptionalAccountUse", "collectedData", "networkDisclosure"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "version": {"const": "1.1"},
+    "build": {"const": 2},
+    "tracking": {"const": false},
+    "analytics": {"const": false},
+    "dataSharedWithThirdParties": {"const": false},
+    "localOnlyProcessing": {"const": ["camera-frames", "photo-crops", "embeddings", "match-candidates", "identifier-caches", "submission-drafts"]},
+    "transmittedOnlyOnExplicitSightingSubmission": {"const": ["contact-email", "chosen-location", "submitted-content", "attached-photo"]},
+    "transmittedOnOptionalAccountUse": {"const": ["name", "user-id"]},
+    "collectedData": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["dataType", "linkedToUser", "purpose", "tracking"],
+        "properties": {
+          "dataType": {"enum": ["email-address", "name", "photos-or-videos", "coarse-location", "user-id", "other-user-content"]},
+          "linkedToUser": {"const": true},
+          "purpose": {"const": "app-functionality"},
+          "tracking": {"const": false}
+        }
+      }
+    },
+    "networkDisclosure": {"const": "Explicit sighting submission sends the contact email, user-chosen location and content, and attached photo. Optional account use also sends Name and User ID. Identification camera frames and derived matching artifacts stay on device."}
+  }
+}
