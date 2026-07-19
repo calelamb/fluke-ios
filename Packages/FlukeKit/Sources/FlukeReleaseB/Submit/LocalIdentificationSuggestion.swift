@@ -39,18 +39,31 @@ public struct LocalIdentificationSuggestion: Codable, Hashable, Sendable {
   }
 
   public init(from decoder: any Decoder) throws {
-    let values = try decoder.container(keyedBy: CodingKeys.self)
-    guard let value = Self(
-      catalogID: try values.decode(String.self, forKey: .catalogID),
-      similarityScore: try values.decode(Double.self, forKey: .similarityScore),
-      scoreSemantics: try values.decode(String.self, forKey: .scoreSemantics),
-      manifestVersion: try values.decode(String.self, forKey: .manifestVersion),
-      modelVersion: try values.decode(String.self, forKey: .modelVersion),
-      indexVersion: try values.decode(String.self, forKey: .indexVersion),
-      matchedReferencePhotoIDs: try values.decode([String].self, forKey: .matchedReferencePhotoIDs)
-    ) else {
+    let dynamic = try decoder.container(keyedBy: LocalSuggestionDynamicCodingKey.self)
+    guard Set(dynamic.allKeys.map(\.stringValue)) == Set(CodingKeys.allCases.map(\.stringValue))
+    else {
       throw DecodingError.dataCorrupted(
-        .init(codingPath: decoder.codingPath, debugDescription: "Invalid local identification evidence")
+        .init(
+          codingPath: decoder.codingPath,
+          debugDescription: "Unexpected local identification evidence keys")
+      )
+    }
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    guard
+      let value = Self(
+        catalogID: try values.decode(String.self, forKey: .catalogID),
+        similarityScore: try values.decode(Double.self, forKey: .similarityScore),
+        scoreSemantics: try values.decode(String.self, forKey: .scoreSemantics),
+        manifestVersion: try values.decode(String.self, forKey: .manifestVersion),
+        modelVersion: try values.decode(String.self, forKey: .modelVersion),
+        indexVersion: try values.decode(String.self, forKey: .indexVersion),
+        matchedReferencePhotoIDs: try values.decode(
+          [String].self, forKey: .matchedReferencePhotoIDs)
+      )
+    else {
+      throw DecodingError.dataCorrupted(
+        .init(
+          codingPath: decoder.codingPath, debugDescription: "Invalid local identification evidence")
       )
     }
     self = value
@@ -61,7 +74,7 @@ public struct LocalIdentificationSuggestion: Codable, Hashable, Sendable {
       && value.contains(where: { !$0.isWhitespace })
   }
 
-  enum CodingKeys: String, CodingKey {
+  enum CodingKeys: String, CodingKey, CaseIterable {
     case catalogID = "catalogId"
     case similarityScore
     case scoreSemantics
@@ -70,4 +83,12 @@ public struct LocalIdentificationSuggestion: Codable, Hashable, Sendable {
     case indexVersion
     case matchedReferencePhotoIDs = "matchedReferencePhotoIds"
   }
+}
+
+private struct LocalSuggestionDynamicCodingKey: CodingKey {
+  let stringValue: String
+  let intValue: Int? = nil
+
+  init?(stringValue: String) { self.stringValue = stringValue }
+  init?(intValue: Int) { nil }
 }
