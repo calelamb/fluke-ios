@@ -1,7 +1,9 @@
 import FlukeKit
+import FlukeML
 import FlukeReleaseB
 import Foundation
 import Network
+import OSLog
 
 enum AppBuildConfiguration: String, CaseIterable {
   case debug
@@ -204,5 +206,21 @@ enum IdentifyComposition {
   ) -> (any IdentifyServiceProtocol)? {
     guard enabled else { return nil }
     return factory()
+  }
+}
+
+enum OnDeviceIdentificationComposition {
+  private static let logger = Logger(
+    subsystem: "app.fluke",
+    category: "on-device-identification"
+  )
+
+  static func load(bundle: Bundle = .main) async -> (any LocalIdentifying)? {
+    do {
+      return try await LocalIdentifier.load(bundle: bundle)
+    } catch {
+      logger.error("Local identifier unavailable: \(String(describing: error), privacy: .private)")
+      return nil
+    }
   }
 }
