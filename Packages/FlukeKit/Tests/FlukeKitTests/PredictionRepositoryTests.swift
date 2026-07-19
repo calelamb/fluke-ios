@@ -15,11 +15,11 @@ final class PredictionRepositoryTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        MockURLProtocol.handler = nil
+        MockURLProtocol.reset()
     }
 
     func test_fetch_decodesPredictionForWhale() async throws {
-        MockURLProtocol.handler = { req in
+        MockURLProtocol.install { req in
             XCTAssertEqual(req.url?.path, "/api/v1/predict")
             XCTAssertEqual(req.url?.query, "whaleId=wh_a&horizon=24h")
             let body = """
@@ -42,7 +42,7 @@ final class PredictionRepositoryTests: XCTestCase {
     }
 
     func test_fetch_returnsNilOn404() async throws {
-        MockURLProtocol.handler = { req in
+        MockURLProtocol.install { req in
             (
                 HTTPURLResponse(url: req.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!,
                 #"{"error":"not found"}"#.data(using: .utf8)!
@@ -53,7 +53,7 @@ final class PredictionRepositoryTests: XCTestCase {
     }
 
     func test_fetch_includesPodInQueryString() async throws {
-        MockURLProtocol.handler = { req in
+        MockURLProtocol.install { req in
             XCTAssertEqual(req.url?.query, "pod=BIGGS&horizon=30d")
             let body = """
             {"cells":[],"confidence":0.0,"modelVersion":"markov-v1","computedAt":"2026-05-01T18:00:00.000Z"}

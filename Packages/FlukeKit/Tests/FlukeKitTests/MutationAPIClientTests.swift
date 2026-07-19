@@ -309,9 +309,9 @@ struct MutationCookieTests {
         .secure: "TRUE",
       ]))
     client.cookieStorage.setCookie(cookie)
-    defer { MockURLProtocol.handler = nil }
+    defer { MockURLProtocol.reset() }
 
-    MockURLProtocol.handler = { request in
+    MockURLProtocol.install { request in
       #expect(
         request.value(forHTTPHeaderField: "Cookie")?
           .contains("fluke_session=cookie-value") == true

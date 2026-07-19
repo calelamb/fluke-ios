@@ -17,14 +17,14 @@ final class APIClientTests: XCTestCase {
   }
 
   override func tearDown() async throws {
-    MockURLProtocol.handler = nil
+    MockURLProtocol.reset()
     client = nil
   }
 
   func test_get_decodesPaginatedWhaleResponse() async throws {
     let body = try FixtureLoader.data(named: "whales")
 
-    MockURLProtocol.handler = { request in
+    MockURLProtocol.install { request in
       XCTAssertEqual(request.url?.path, "/api/v1/whales")
       return (
         HTTPURLResponse(
@@ -44,7 +44,7 @@ final class APIClientTests: XCTestCase {
   }
 
   func test_get_throwsUnauthorizedOn401() async {
-    MockURLProtocol.handler = { request in
+    MockURLProtocol.install { request in
       (
         HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!,
         Data()
@@ -62,7 +62,7 @@ final class APIClientTests: XCTestCase {
   }
 
   func test_get_throwsServerOn500() async {
-    MockURLProtocol.handler = { request in
+    MockURLProtocol.install { request in
       (
         HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!,
         "boom".data(using: .utf8)!
@@ -96,7 +96,7 @@ final class APIClientTests: XCTestCase {
     ])!
     client.cookieStorage.setCookie(cookie)
 
-    MockURLProtocol.handler = { request in
+    MockURLProtocol.install { request in
       let cookieHeader = request.value(forHTTPHeaderField: "Cookie") ?? ""
       XCTAssertTrue(cookieHeader.contains("fluke_admin=abc123"))
       return (
