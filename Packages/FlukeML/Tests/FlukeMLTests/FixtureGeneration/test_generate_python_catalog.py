@@ -26,17 +26,25 @@ class FixtureGeneratorProvenanceTests(unittest.TestCase):
             module.parent.mkdir(parents=True)
             module.write_text("", encoding="utf-8")
             results = (
-                subprocess.CompletedProcess([], 0, generator.PRODUCER_COMMIT + "\n", ""),
-                subprocess.CompletedProcess([], 0, " M src/fluke_model/mobile_catalog.py\n", ""),
+                subprocess.CompletedProcess(
+                    [], 0, generator.PRODUCER_COMMIT + "\n", ""
+                ),
+                subprocess.CompletedProcess(
+                    [], 0, " M src/fluke_model/mobile_catalog.py\n", ""
+                ),
             )
-            with mock.patch.object(generator.shutil, "which", return_value="git"), mock.patch.object(
-                generator.subprocess, "run", side_effect=results
+            with (
+                mock.patch.object(generator.shutil, "which", return_value="git"),
+                mock.patch.object(generator.subprocess, "run", side_effect=results),
             ):
                 with self.assertRaisesRegex(RuntimeError, "must be clean"):
                     generator._verify_producer(root)
 
     def test_verified_source_wins_over_ambient_pythonpath(self) -> None:
-        with tempfile.TemporaryDirectory() as verified_directory, tempfile.TemporaryDirectory() as ambient_directory:
+        with (
+            tempfile.TemporaryDirectory() as verified_directory,
+            tempfile.TemporaryDirectory() as ambient_directory,
+        ):
             verified = Path(verified_directory)
             ambient = Path(ambient_directory)
             for root, marker in ((verified, "verified"), (ambient, "ambient")):
