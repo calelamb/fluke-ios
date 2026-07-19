@@ -6,17 +6,18 @@ import os
 /// `(HTTPURLResponse, Data)` per request URL.
 final class MockURLProtocol: URLProtocol {
   typealias Handler = @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
-  private static let handler = OSAllocatedUnfairLock<Handler?>(initialState: nil)
+  fileprivate static let tokenHeader = "X-Fluke-Mock-Session"
+  private static let handlers = OSAllocatedUnfairLock<[UUID: Handler]>(initialState: [:])
 
-  static func install(_ newHandler: @escaping Handler) {
-    handler.withLock { storedHandler in
-      storedHandler = newHandler
+  fileprivate static func install(_ newHandler: @escaping Handler, for token: UUID) {
+    handlers.withLock { storedHandlers in
+      storedHandlers = storedHandlers.merging([token: newHandler]) { _, new in new }
     }
   }
 
-  static func reset() {
-    handler.withLock { storedHandler in
-      storedHandler = nil
+  fileprivate static func reset(token: UUID) {
+    handlers.withLock { storedHandlers in
+      storedHandlers = storedHandlers.filter { $0.key != token }
     }
   }
 
@@ -24,7 +25,11 @@ final class MockURLProtocol: URLProtocol {
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
   override func startLoading() {
-    guard let handler = Self.handler.withLock({ $0 }) else {
+    guard
+      let rawToken = request.value(forHTTPHeaderField: Self.tokenHeader),
+      let token = UUID(uuidString: rawToken),
+      let handler = Self.handlers.withLock({ $0[token] })
+    else {
       client?.urlProtocol(self, didFailWithError: URLError(.unknown))
       return
     }
@@ -39,6 +44,32 @@ final class MockURLProtocol: URLProtocol {
   }
 
   override func stopLoading() {}
+}
+
+final class MockURLProtocolSession {
+  private let token: UUID
+  let configuration: URLSessionConfiguration
+
+  init() {
+    let token = UUID()
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MockURLProtocol.self]
+    configuration.httpAdditionalHeaders = [MockURLProtocol.tokenHeader: token.uuidString]
+    self.token = token
+    self.configuration = configuration
+  }
+
+  func install(_ handler: @escaping MockURLProtocol.Handler) {
+    MockURLProtocol.install(handler, for: token)
+  }
+
+  func reset() {
+    MockURLProtocol.reset(token: token)
+  }
+
+  deinit {
+    reset()
+  }
 }
 
 final class MockRequestCounter: Sendable {

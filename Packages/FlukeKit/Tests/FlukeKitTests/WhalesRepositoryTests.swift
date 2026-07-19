@@ -5,22 +5,23 @@ final class WhalesRepositoryTests: XCTestCase {
 
     private var apiClient: APIClient!
     private var repo: WhalesRepository!
+    private var mockSession: MockURLProtocolSession!
 
     override func setUp() async throws {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let session = URLSession(configuration: config)
+        mockSession = MockURLProtocolSession()
+        let session = URLSession(configuration: mockSession.configuration)
         apiClient = APIClient(baseURL: URL(string: "http://localhost:4000")!, session: session)
         repo = WhalesRepository(api: apiClient)
     }
 
     override func tearDown() async throws {
-        MockURLProtocol.reset()
+        mockSession.reset()
+        mockSession = nil
     }
 
     func test_fetchAll_consumesEveryPageAndEncodesOpaqueCursor() async throws {
         let requestCount = MockRequestCounter()
-        MockURLProtocol.install { req in
+        mockSession.install { req in
             XCTAssertEqual(req.url?.path, "/api/v1/whales")
             let count = requestCount.increment()
             let isFirstPage = count == 1
@@ -57,7 +58,7 @@ final class WhalesRepositoryTests: XCTestCase {
     }
 
     func test_fetchAll_rejectsHasMoreWithoutCursor() async {
-        MockURLProtocol.install { req in
+        mockSession.install { req in
             let body = #"{"items":[],"page":{"hasMore":true,"nextCursor":null}}"#.data(using: .utf8)!
             return (
                 HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
@@ -71,7 +72,7 @@ final class WhalesRepositoryTests: XCTestCase {
     }
 
     func test_fetchAll_rejectsTerminalPageWithCursorInsteadOfReturningItems() async {
-        MockURLProtocol.install { req in
+        mockSession.install { req in
             let body = """
             {
               "items":[{
@@ -96,7 +97,7 @@ final class WhalesRepositoryTests: XCTestCase {
     }
 
     func test_fetchAll_rejectsRepeatedCursor() async {
-        MockURLProtocol.install { req in
+        mockSession.install { req in
             let body = #"{"items":[],"page":{"hasMore":true,"nextCursor":"same"}}"#.data(using: .utf8)!
             return (
                 HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
@@ -111,7 +112,7 @@ final class WhalesRepositoryTests: XCTestCase {
 
     func test_fetchAll_rejectsResponsesBeyondMaximumPageCount() async {
         let requestCount = MockRequestCounter()
-        MockURLProtocol.install { req in
+        mockSession.install { req in
             let count = requestCount.increment()
             let body = """
             {"items":[],"page":{"hasMore":true,"nextCursor":"cursor-\(count)"}}
@@ -130,7 +131,7 @@ final class WhalesRepositoryTests: XCTestCase {
 
     func test_find_decodesWhaleProfile() async throws {
         let body = try FixtureLoader.data(named: "whale-detail")
-        MockURLProtocol.install { req in
+        mockSession.install { req in
             XCTAssertEqual(req.url?.path, "/api/v1/whales/fixture-whale-alpha")
             return (
                 HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
@@ -144,7 +145,7 @@ final class WhalesRepositoryTests: XCTestCase {
     }
 
     func test_fetchTrack_unwrapsPointsFromWhaleTrackResponse() async throws {
-        MockURLProtocol.install { req in
+        mockSession.install { req in
             XCTAssertEqual(req.url?.path, "/api/v1/whales/wh_a/track")
             let body = """
             {

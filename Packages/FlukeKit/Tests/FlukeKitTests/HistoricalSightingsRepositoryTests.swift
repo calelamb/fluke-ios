@@ -7,21 +7,22 @@ final class HistoricalSightingsRepositoryTests: XCTestCase {
 
     private var apiClient: APIClient!
     private var repo: HistoricalSightingsRepository!
+    private var mockSession: MockURLProtocolSession!
 
     override func setUp() async throws {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let session = URLSession(configuration: config)
+        mockSession = MockURLProtocolSession()
+        let session = URLSession(configuration: mockSession.configuration)
         apiClient = APIClient(baseURL: URL(string: "http://localhost:4000")!, session: session)
         repo = HistoricalSightingsRepository(api: apiClient)
     }
 
     override func tearDown() async throws {
-        MockURLProtocol.reset()
+        mockSession.reset()
+        mockSession = nil
     }
 
     func test_fetch_unwrapsHistoricalSightingsFromPaginatedResponse() async throws {
-        MockURLProtocol.install { req in
+        mockSession.install { req in
             XCTAssertEqual(req.url?.path, "/api/v1/sightings/historical")
             let body = """
             {
@@ -45,7 +46,7 @@ final class HistoricalSightingsRepositoryTests: XCTestCase {
     }
 
     func test_fetch_passesPodFilter() async throws {
-        MockURLProtocol.install { req in
+        mockSession.install { req in
             XCTAssertEqual(req.url?.queryItemsDictionary["pod"], "J")
             return (
                 HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
@@ -57,7 +58,7 @@ final class HistoricalSightingsRepositoryTests: XCTestCase {
 
     func test_fetch_consumesEveryPageWhilePreservingEncodedFilters() async throws {
         let requestCount = MockRequestCounter()
-        MockURLProtocol.install { req in
+        mockSession.install { req in
             let count = requestCount.increment()
             XCTAssertEqual(req.url?.path, "/api/v1/sightings/historical")
             XCTAssertEqual(req.url?.queryItemsDictionary["pod"], "J")

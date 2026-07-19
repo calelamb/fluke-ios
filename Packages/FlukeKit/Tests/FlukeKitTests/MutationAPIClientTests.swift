@@ -294,11 +294,10 @@ struct MutationAPIClientTests {
 struct MutationCookieTests {
   @Test("Mutation requests apply URLSession cookies")
   func mutationCookies() async throws {
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [MockURLProtocol.self]
+    let mockSession = MockURLProtocolSession()
     let client = APIClient(
       baseURL: URL(string: "https://api.fluke.test")!,
-      session: URLSession(configuration: configuration)
+      session: URLSession(configuration: mockSession.configuration)
     )
     let cookie = try #require(
       HTTPCookie(properties: [
@@ -309,9 +308,9 @@ struct MutationCookieTests {
         .secure: "TRUE",
       ]))
     client.cookieStorage.setCookie(cookie)
-    defer { MockURLProtocol.reset() }
+    defer { mockSession.reset() }
 
-    MockURLProtocol.install { request in
+    mockSession.install { request in
       #expect(
         request.value(forHTTPHeaderField: "Cookie")?
           .contains("fluke_session=cookie-value") == true

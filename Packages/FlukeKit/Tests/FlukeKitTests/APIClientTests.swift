@@ -5,11 +5,11 @@ import XCTest
 final class APIClientTests: XCTestCase {
 
   private var client: APIClient!
+  private var mockSession: MockURLProtocolSession!
 
   override func setUp() async throws {
-    let config = URLSessionConfiguration.ephemeral
-    config.protocolClasses = [MockURLProtocol.self]
-    let session = URLSession(configuration: config)
+    mockSession = MockURLProtocolSession()
+    let session = URLSession(configuration: mockSession.configuration)
     client = APIClient(
       baseURL: URL(string: "http://localhost:4000")!,
       session: session
@@ -17,14 +17,15 @@ final class APIClientTests: XCTestCase {
   }
 
   override func tearDown() async throws {
-    MockURLProtocol.reset()
+    mockSession.reset()
+    mockSession = nil
     client = nil
   }
 
   func test_get_decodesPaginatedWhaleResponse() async throws {
     let body = try FixtureLoader.data(named: "whales")
 
-    MockURLProtocol.install { request in
+    mockSession.install { request in
       XCTAssertEqual(request.url?.path, "/api/v1/whales")
       return (
         HTTPURLResponse(
@@ -44,7 +45,7 @@ final class APIClientTests: XCTestCase {
   }
 
   func test_get_throwsUnauthorizedOn401() async {
-    MockURLProtocol.install { request in
+    mockSession.install { request in
       (
         HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!,
         Data()
@@ -62,7 +63,7 @@ final class APIClientTests: XCTestCase {
   }
 
   func test_get_throwsServerOn500() async {
-    MockURLProtocol.install { request in
+    mockSession.install { request in
       (
         HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!,
         "boom".data(using: .utf8)!
@@ -96,7 +97,7 @@ final class APIClientTests: XCTestCase {
     ])!
     client.cookieStorage.setCookie(cookie)
 
-    MockURLProtocol.install { request in
+    mockSession.install { request in
       let cookieHeader = request.value(forHTTPHeaderField: "Cookie") ?? ""
       XCTAssertTrue(cookieHeader.contains("fluke_admin=abc123"))
       return (
