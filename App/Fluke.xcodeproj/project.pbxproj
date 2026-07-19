@@ -311,7 +311,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\nif [ \"$CONFIGURATION\" != \"Release\" ] || [ \"$ACTION\" != \"install\" ] || [ \"$PLATFORM_NAME\" != \"iphoneos\" ] || [ \"${CODE_SIGNING_ALLOWED:-YES}\" = \"NO\" ]; then\n  exit 0\nfi\n: \"${FLUKE_MODEL_CHECKOUT:?Set FLUKE_MODEL_CHECKOUT for an App Store archive}\"\n: \"${FLUKE_MODEL_RELEASE:?Set FLUKE_MODEL_RELEASE for an App Store archive}\"\n/usr/bin/python3 \"$SRCROOT/../scripts/generate-build-identity.py\" --repo \"$SRCROOT/..\" --model-checkout \"$FLUKE_MODEL_CHECKOUT\" --release \"$FLUKE_MODEL_RELEASE\" --output \"$SCRIPT_OUTPUT_FILE_0\" --derived-data \"$BUILD_ROOT\" --marketing-version \"$MARKETING_VERSION\" --build-number \"$CURRENT_PROJECT_VERSION\" --identifier-mode \"${FLUKE_IDENTIFIER_MODE:-live}\"\n";
+			shellScript = "set -eu\nif [ \"$CONFIGURATION\" != \"Release\" ] || [ \"$ACTION\" != \"install\" ] || [ \"$PLATFORM_NAME\" != \"iphoneos\" ] || [ \"${CODE_SIGNING_ALLOWED:-YES}\" = \"NO\" ]; then\n  exit 0\nfi\n: \"${FLUKE_MODEL_CHECKOUT:?Set FLUKE_MODEL_CHECKOUT for an App Store archive}\"\n: \"${FLUKE_MODEL_RELEASE:?Set FLUKE_MODEL_RELEASE for an App Store archive}\"\n/usr/bin/python3 \"$SRCROOT/../scripts/generate-build-identity.py\" --repo \"$SRCROOT/..\" --model-checkout \"$FLUKE_MODEL_CHECKOUT\" --release \"$FLUKE_MODEL_RELEASE\" --output \"$SCRIPT_OUTPUT_FILE_0\" --derived-data \"$DSTROOT\" --marketing-version \"$MARKETING_VERSION\" --build-number \"$CURRENT_PROJECT_VERSION\" --identifier-mode \"${FLUKE_IDENTIFIER_MODE:-live}\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
