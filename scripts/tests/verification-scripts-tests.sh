@@ -705,7 +705,8 @@ printf 'unexpected xcrun command: %s\n' "$*" >&2
 exit 1
 SH
 chmod +x "$capture_bin/curl" "$capture_bin/xcodebuild" "$capture_bin/xcrun"
-expect_success "screenshot capture resolves a pinned simulator and exports named images" env \
+expect_failure "screenshot capture requires real pinned model provenance" \
+  "FLUKE_MODEL_CHECKOUT" env \
   PATH="$capture_bin:$PATH" \
   FLUKE_SCREENSHOT_FIXTURE="$screenshot_fixture/01-sightings.png" \
   FLUKE_CAPTURE_XCODEBUILD_CAPTURE="$test_root/capture-xcodebuild-arguments" \
@@ -715,25 +716,13 @@ expect_success "screenshot capture resolves a pinned simulator and exports named
   FLUKE_SIMULATOR_BOOTSTATUS_COUNT="$test_root/capture-recovery-count" \
   FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS="1" \
   "$screenshot_capture" "$capture_output"
-if [[ "$(find "$capture_output" -type f -name '*.png' | wc -l | tr -d ' ')" != "7" ]]; then
-  echo "FAIL: screenshot capture did not export seven named images" >&2
+if grep -Fq 'https://fluke-api.onrender.com/api/v1/health' "$screenshot_capture"; then
+  echo "FAIL: screenshot capture must remain fixture-only" >&2
   failures=$((failures + 1))
 fi
-if ! grep -Fxq -- 'simctl shutdown AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE' \
-  "$test_root/capture-simctl-arguments"; then
-  echo "FAIL: screenshot capture did not use bounded simulator recovery" >&2
-  failures=$((failures + 1))
-fi
-if ! grep -Fxq -- 'https://fluke-api.onrender.com/api/v1/health' "$test_root/capture-curl-arguments"; then
-  echo "FAIL: screenshot capture did not warm the production API" >&2
-  failures=$((failures + 1))
-fi
-if ! grep -Fxq -- '-configuration' "$test_root/capture-xcodebuild-arguments" \
-  || ! grep -Fxq -- 'Release' "$test_root/capture-xcodebuild-arguments" \
-  || ! grep -Fxq -- 'ENABLE_TESTABILITY=YES' "$test_root/capture-xcodebuild-arguments" \
-  || ! grep -Fxq -- 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=FLUKE_XCTEST_FIXTURES' \
-    "$test_root/capture-xcodebuild-arguments"; then
-  echo "FAIL: screenshot capture did not use the XCTest-only Release configuration" >&2
+if ! grep -Fq 'verify-screenshot-provenance.py' "$screenshot_capture" \
+  || ! grep -Fq 'AppStore/1.1/en-US/screenshots/6.9-inch' "$screenshot_capture"; then
+  echo "FAIL: screenshot capture did not bind App Store 1.1 provenance" >&2
   failures=$((failures + 1))
 fi
 if ! grep -Fxq -- '-resultBundlePath' "$capture" \

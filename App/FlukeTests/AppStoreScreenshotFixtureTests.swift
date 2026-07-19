@@ -1,5 +1,6 @@
 import Foundation
 import FlukeKit
+import FlukeReleaseB
 import Testing
 
 @testable import Fluke
@@ -17,7 +18,7 @@ struct AppStoreScreenshotFixtureTests {
     ))
     #expect(AppStoreScreenshotFixtureMode.isEnabled(
       arguments: [argument],
-      environment: ["XCTestConfigurationFilePath": "/tmp/fixture.xctestconfiguration"]
+      environment: ["FLUKE_XCTEST_FIXTURES": "1"]
     ))
   }
 
@@ -37,6 +38,7 @@ struct AppStoreScreenshotFixtureTests {
     let environment = try AppStoreScreenshotFixtures.makeEnvironment()
     let sightings = try await environment.sightingsRepository.loadApproved()
     let whales = try await environment.whalesRepository.loadCatalog()
+    let feed = try await environment.sightingFeedRepository.load()
 
     guard case .fresh(let sightingValues, _) = sightings,
       case .fresh(let whaleValues, _) = whales
@@ -48,5 +50,7 @@ struct AppStoreScreenshotFixtureTests {
     #expect(whaleValues.count == 3)
     #expect(sightingValues.first?.locationName == "Salish Sea")
     #expect(whaleValues.first?.catalogId == "J35")
+    #expect(feed.items.count == 3)
+    #expect(feed.syncCursor == "fixture-r3")
   }
 }

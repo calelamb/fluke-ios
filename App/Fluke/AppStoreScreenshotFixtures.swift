@@ -9,12 +9,13 @@ enum AppStoreScreenshotFixtureMode {
     arguments: [String] = ProcessInfo.processInfo.arguments,
     environment: [String: String] = ProcessInfo.processInfo.environment
   ) -> Bool {
-    let hasXCTestConfiguration = environment["XCTestConfigurationFilePath"]?.isEmpty == false
-    return hasXCTestConfiguration && arguments.contains(launchArgument)
+    let fixtureEnvironmentEnabled = environment["FLUKE_XCTEST_FIXTURES"] == "1"
+    return fixtureEnvironmentEnabled && arguments.contains(launchArgument)
   }
 }
 
 enum AppStoreScreenshotFixtures {
+  // Preview fixture: identification is disabled, so screenshots cannot imply a production match.
   static func makeEnvironment() throws -> AppEnvironment {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [AppStoreScreenshotURLProtocol.self]
@@ -63,6 +64,7 @@ private final class AppStoreScreenshotURLProtocol: URLProtocol, @unchecked Senda
     guard method == "GET" else { return error(statusCode: 405, code: "FIXTURE_READ_ONLY") }
     switch path {
     case "/api/v1/capabilities": return response(capabilities)
+    case "/api/v1/sighting-feed": return response(sightingFeed)
     case "/api/v1/sightings": return response(sightings)
     case "/api/v1/external-sightings": return response(externalSightings)
     case "/api/v1/whales": return response(whales)
@@ -84,6 +86,64 @@ private final class AppStoreScreenshotURLProtocol: URLProtocol, @unchecked Senda
 
   private static let capabilities =
     #"{"accounts":true,"identification":false,"submissions":true}"#
+
+  private static let sightingFeed = #"""
+    {
+      "hasMore": false,
+      "items": [
+        {
+          "behaviorNotes": "Traveling north in a close group.",
+          "ecotypeGuess": "RESIDENT",
+          "groupSize": 5,
+          "id": "app-store-sighting-1",
+          "identifiedWhales": [{"catalogId":"J35","confidence":"CONFIRMED","name":"Tahlequah"}],
+          "kind": "internal",
+          "latitude": 48.52,
+          "locationName": "Salish Sea",
+          "longitude": -123.11,
+          "observedAt": "2026-07-16T18:00:00.000Z",
+          "photos": [],
+          "revision": 3
+        },
+        {
+          "behaviorNotes": "Foraging along the island shelf.",
+          "ecotypeGuess": "RESIDENT",
+          "groupSize": 3,
+          "id": "app-store-sighting-2",
+          "identifiedWhales": [{"catalogId":"J27","confidence":"LIKELY","name":"Blackberry"}],
+          "kind": "internal",
+          "latitude": 48.60,
+          "locationName": "Haro Strait",
+          "longitude": -123.18,
+          "observedAt": "2026-07-15T16:20:00.000Z",
+          "photos": [],
+          "revision": 2
+        },
+        {
+          "attribution": "Conserve.io / Spotter-API",
+          "ecotypeGuess": "BIGGS",
+          "groupSize": 4,
+          "id": "external:acartia:app-store-fixture-1",
+          "kind": "external",
+          "latitude": 48.31,
+          "longitude": -122.68,
+          "notes": "Steady travel past the lighthouse.",
+          "observedAt": "2026-07-14T20:45:00.000Z",
+          "revision": 1,
+          "source": "acartia",
+          "sourceUrl": "https://acartia.io",
+          "species": "Orcinus orca",
+          "trusted": true
+        }
+      ],
+      "pageCursor": null,
+      "providers": [
+        {"expectedMaximumLag":25200,"lastAttemptAt":"2026-07-16T17:40:00.000Z","lastSuccessAt":"2026-07-16T17:40:00.000Z","provider":"acartia","status":"SUCCEEDED"},
+        {"expectedMaximumLag":691200,"lastAttemptAt":"2026-07-16T12:00:00.000Z","lastSuccessAt":"2026-07-16T12:00:00.000Z","provider":"gbif","status":"SUCCEEDED"}
+      ],
+      "syncCursor": "fixture-r3"
+    }
+    """#
 
   private static let sightings = #"""
     {

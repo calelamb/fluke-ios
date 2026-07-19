@@ -5,8 +5,8 @@
   "tracking": false,
   "analytics": false,
   "dataSharedWithThirdParties": false,
-  "localOnlyProcessing": ["camera-frames", "photo-crops", "embeddings", "match-candidates", "identifier-caches", "submission-drafts"],
-  "transmittedOnlyOnExplicitSightingSubmission": ["contact-email", "chosen-location", "submitted-content", "attached-photo"],
+  "localOnlyProcessing": ["camera-frames", "photo-crops", "embeddings", "live-candidate-set", "identifier-caches", "submission-drafts"],
+  "transmittedOnlyOnExplicitSightingSubmission": ["contact-email", "chosen-location", "submitted-content", "attached-photo", "selected-catalog-id", "similarity-score", "score-semantics", "manifest-version", "model-version", "index-version", "up-to-five-reference-photo-ids"],
   "transmittedOnOptionalAccountUse": ["name", "account-email", "user-id"],
   "transmittedForAppleAuthentication": ["apple-identity-token", "apple-authorization-code"],
   "collectedData": [
@@ -17,5 +17,5 @@
     {"dataType": "user-id", "linkedToUser": true, "purpose": "app-functionality", "tracking": false},
     {"dataType": "other-user-content", "linkedToUser": true, "purpose": "app-functionality", "tracking": false}
   ],
-  "networkDisclosure": "Explicit sighting submission sends its contact email, user-chosen location and content, and attached photo. Optional account use separately sends Name, account email, and User ID. Sign in with Apple separately sends the Apple identity token and one-use authorization code for authentication. Identification camera frames and derived matching artifacts stay on device."
+  "networkDisclosure": "The live candidate set stays local. Explicit sighting submission sends its contact email, user-chosen location and content, attached photo, and selected suggestion evidence: catalog ID, similarity score and score semantics, manifest/model/index versions, and up to five reference-photo IDs. Optional account use separately sends Name, account email, and User ID. Sign in with Apple separately sends the Apple identity token and one-use authorization code for authentication. Camera frames, crops, embeddings, caches, drafts, and unselected candidates stay on device."
 }

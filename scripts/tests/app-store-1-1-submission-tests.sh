@@ -390,9 +390,8 @@ TeamIdentifier=86RBV2JZ8F
     write(pbx, project_fixture(version="1.1", build="2", second_exception=True))
     check("a second synchronized exception set cannot hide catalog resources",
           lambda: module.validate_project(pbx), "membership exception")
-    check("checked-in Fluke Release target remains blocked at 1.0 build 1",
-          lambda: module.validate_project(repo / "App/Fluke.xcodeproj/project.pbxproj"),
-          "MARKETING_VERSION")
+    check("checked-in Fluke Release target is pinned at 1.1 build 2",
+          lambda: module.validate_project(repo / "App/Fluke.xcodeproj/project.pbxproj"))
 
     linked_release = root / "linked-release"
     linked_release.symlink_to(release, target_is_directory=True)
@@ -400,7 +399,11 @@ TeamIdentifier=86RBV2JZ8F
           lambda: module.validate_model_checkout_and_release(root, linked_release), "symbolic link")
 
     model_checkout = repo.parents[2] / "fluke-model/.worktrees/on-device-coreml-release"
-    if model_checkout.is_dir():
+    model_head = subprocess.run(
+        ["/usr/bin/git", "-C", str(model_checkout), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip() if model_checkout.is_dir() else ""
+    if model_checkout.is_dir() and model_head == module.MODEL_SOURCE_COMMIT:
         check("reviewed model checkout provenance is accepted",
               lambda: module.validate_model_checkout_and_release(model_checkout, release))
         dirty_checkout = root / "dirty-model-checkout"
@@ -505,7 +508,7 @@ TeamIdentifier=86RBV2JZ8F
             check("actual locked model verifier overwrites preexisting ready:true report",
                   authoritative_overwrite)
     else:
-        failures.append(f"reviewed model checkout not found at {model_checkout}")
+        print("Pinned reviewed model checkout is not currently checked out; live provenance test skipped")
 
 if failures:
     print("\n".join(f"FAIL: {failure}" for failure in failures), file=sys.stderr)

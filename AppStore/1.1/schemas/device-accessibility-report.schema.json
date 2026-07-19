@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fluke.invalid/schemas/device-accessibility-report.schema.json",
+  "title": "Fluke iOS physical-device and accessibility release evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "physicalDeviceEvidenceComplete", "release", "provenance", "device", "performance", "runtime", "accessibility"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "status": {"enum": ["incomplete", "complete"]},
+    "physicalDeviceEvidenceComplete": {"type": "boolean"},
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["marketingVersion", "buildNumber"],
+      "properties": {"marketingVersion": {"const": "1.1"}, "buildNumber": {"const": "2"}}
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceCommit", "sourceTree", "modelSourceCommit", "modelSourceTree", "archiveSha256", "evidenceDigests"],
+      "properties": {
+        "sourceCommit": {"type": ["string", "null"]}, "sourceTree": {"type": ["string", "null"]},
+        "modelSourceCommit": {"const": "6fe4767cd1c5716a04b655c9eaac4bd745471569"},
+        "modelSourceTree": {"const": "fba0c558d30dd4b240e40c931b0ec8e5f4e9d29e"},
+        "archiveSha256": {"type": ["string", "null"]}, "evidenceDigests": {"type": "array"}
+      }
+    },
+    "device": {"type": "object"},
+    "performance": {"type": "object"},
+    "runtime": {"type": "object"},
+    "accessibility": {"type": "object"}
+  }
+}

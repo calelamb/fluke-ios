@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "status": "incomplete",
+  "physicalDeviceEvidenceComplete": false,
+  "release": {"marketingVersion": "1.1", "buildNumber": "2"},
+  "provenance": {
+    "sourceCommit": null,
+    "sourceTree": null,
+    "modelSourceCommit": "6fe4767cd1c5716a04b655c9eaac4bd745471569",
+    "modelSourceTree": "fba0c558d30dd4b240e40c931b0ec8e5f4e9d29e",
+    "archiveSha256": null,
+    "evidenceDigests": []
+  },
+  "device": {"model": null, "iosVersion": null, "runAtUtc": null},
+  "performance": {
+    "coldLatencyMs": {"p50": null, "p95": null},
+    "warmLatencyMs": {"p50": null, "p95": null},
+    "peakMemoryMB": null,
+    "appSizeBytes": null,
+    "binarySizeBytes": null,
+    "sustainedRunSeconds": null,
+    "maxRetainedFrames": null
+  },
+  "runtime": {
+    "thermalStateAcceptable": null,
+    "previewContinuous": null,
+    "backgroundSuspendsCamera": null,
+    "airplaneModeIdentificationWorks": null,
+    "airplaneModeSubmissionQueues": null,
+    "identifierNetworkRequestCount": null
+  },
+  "accessibility": {
+    "voiceOver": null,
+    "dynamicTypeXXXL": null,
+    "contrast": null,
+    "reduceMotion": null,
+    "cameraPermissionDenied": null,
+    "photoPermissionDenied": null
+  }
+}

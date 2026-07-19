@@ -31,11 +31,12 @@ privacy = load("App/Fluke/PrivacyInfo.xcprivacy")
 
 camera = info.get("NSCameraUsageDescription")
 expected_camera = (
-    "Fluke uses the camera only when you choose to attach an orca photo to a sighting "
-    "or, when identification is available, compare dorsal-fin visual similarity."
+    "Fluke analyzes live camera frames on device for dorsal-fin matching. Only after you "
+    "explicitly submit a sighting does it upload an attached photo and your selected "
+    "suggestion evidence."
 )
 if camera != expected_camera:
-    raise SystemExit("camera usage description must be specific to explicit photo actions")
+    raise SystemExit("camera usage description must disclose on-device analysis and explicit upload")
 
 if any(key.startswith("NSLocation") and key.endswith("UsageDescription") for key in info):
     raise SystemExit("location permission descriptions must be absent")

@@ -150,6 +150,7 @@
 				97C8ECC82FA59EDF00BCF41D /* Sources */,
 				97C8ECC92FA59EDF00BCF41D /* Frameworks */,
 				97C8ECCA2FA59EDF00BCF41D /* Resources */,
+				A10600012FA6000000000001 /* Generate Fluke Build Identity */,
 			);
 			buildRules = (
 			);
@@ -293,6 +294,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A10600012FA6000000000001 /* Generate Fluke Build Identity */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 8;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../scripts/generate-build-identity.py",
+			);
+			name = "Generate Fluke Build Identity";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/FlukeBuildIdentity.plist",
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nif [ \"$CONFIGURATION\" != \"Release\" ] || [ \"$ACTION\" != \"install\" ] || [ \"$PLATFORM_NAME\" != \"iphoneos\" ]; then\n  exit 0\nfi\n: \"${FLUKE_MODEL_CHECKOUT:?Set FLUKE_MODEL_CHECKOUT for an App Store archive}\"\n: \"${FLUKE_MODEL_RELEASE:?Set FLUKE_MODEL_RELEASE for an App Store archive}\"\n/usr/bin/python3 \"$SRCROOT/../scripts/generate-build-identity.py\" --repo \"$SRCROOT/..\" --model-checkout \"$FLUKE_MODEL_CHECKOUT\" --release \"$FLUKE_MODEL_RELEASE\" --output \"$SCRIPT_OUTPUT_FILE_0\" --derived-data \"$BUILD_ROOT\" --marketing-version \"$MARKETING_VERSION\" --build-number \"$CURRENT_PROJECT_VERSION\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		97C8ECC82FA59EDF00BCF41D /* Sources */ = {
@@ -505,7 +526,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Distribution";
 				"CODE_SIGN_STYLE[sdk=iphoneos*]" = Manual;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 86RBV2JZ8F;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -527,7 +548,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = app.fluke.Fluke;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "Fluke App Store 2026";

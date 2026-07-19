@@ -27,7 +27,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Fluke uses the camera only when you choose to attach an orca photo to a sighting or, when identification is available, compare dorsal-fin visual similarity.</string>
+	<string>Fluke analyzes live camera frames on device for dorsal-fin matching. Only after you explicitly submit a sighting does it upload an attached photo and your selected suggestion evidence.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UILaunchScreen</key>

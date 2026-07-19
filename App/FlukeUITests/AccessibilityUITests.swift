@@ -52,7 +52,8 @@ final class AccessibilityUITests: XCTestCase {
   func testIdentifyDisabledDoesNotRequestCameraOrPhotoPermission() throws {
     let app = launchAccessibilityApp(resetPermissions: true)
     app.tabBars.buttons["Identify"].tap()
-    XCTAssertTrue(app.staticTexts["Identification is in training"].waitForExistence(timeout: 8))
+    XCTAssertTrue(
+      app.staticTexts["On-device identification unavailable"].waitForExistence(timeout: 8))
     XCTAssertFalse(
       app.alerts.firstMatch.exists, "Disabled Identify must not request media permission")
     XCTAssertFalse(app.buttons["Take photo"].exists)

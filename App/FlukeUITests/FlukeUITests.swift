@@ -41,7 +41,7 @@ final class FlukeUITests: XCTestCase {
     func testAtlasPresentationKeepsControlsBelowTheStatusBar() throws {
         let app = XCUIApplication()
         app.launchArguments.append(AppStoreScreenshotFixtureArgument.value)
-        app.launchEnvironment["XCTestConfigurationFilePath"] = "FlukeUITests"
+        app.launchEnvironment["FLUKE_XCTEST_FIXTURES"] = "1"
         app.launch()
 
         let atlasButton = app.buttons["Open Atlas"]
@@ -68,7 +68,7 @@ final class FlukeUITests: XCTestCase {
             "-AppleLocale", "en_US",
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL",
         ]
-        app.launchEnvironment["XCTestConfigurationFilePath"] = "FlukeUITests"
+        app.launchEnvironment["FLUKE_XCTEST_FIXTURES"] = "1"
         app.launch()
 
         try capture("01-sightings", in: app) {

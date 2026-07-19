@@ -106,3 +106,7 @@ for path in license_paths:
 else:
     raise SystemExit("archived Fraunces OFL.txt notice is incomplete")
 PY
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python3 "$repo_root/scripts/verify-archive-runtime.py" \
+  "$1" "$repo_root/AppStore/1.1/runtime-dependency-allowlist.json"

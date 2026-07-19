@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Exact non-system runtime artifacts permitted in Fluke.app/Frameworks for version 1.1 build 2.",
+  "frameworks": [],
+  "telemetryFrameworks": [],
+  "identifierTransportArtifacts": []
+}
