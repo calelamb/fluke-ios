@@ -18,6 +18,7 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
   private let authorization: any IdentifyCameraAuthorizationProviding
   private let makeSession: () -> any IdentifyCameraSessionProviding
   private var session: (any IdentifyCameraSessionProviding)?
+  private var isOpening = false
   private var isSessionActive = false
   private var lifecycleGeneration: UInt64 = 0
 
@@ -62,7 +63,9 @@ final class IdentifyCameraCoordinator: IdentifyMediaProviding {
   func openCamera() async { await open() }
 
   func open() async {
-    guard !isSessionActive else { return }
+    guard !isSessionActive, !isOpening else { return }
+    isOpening = true
+    defer { isOpening = false }
     let openingGeneration = lifecycleGeneration
     state = .requestingPermission
     let permission = await resolvedPermission()

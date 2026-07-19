@@ -119,6 +119,39 @@ struct IdentifyViewModelTests {
     #expect(model.result == nil)
     #expect(model.presentation == .idle)
   }
+
+  @Test("opening and reopening reset local stabilization before consuming frames")
+  func cameraSessionsResetIdentifier() async {
+    let identifier = RecordingLocalIdentifier(results: [])
+    let media = RecordingIdentifyMedia()
+    let model = IdentifyViewModel(capability: .onDevice(identifier), media: media)
+
+    await model.openCamera()
+    model.cameraDidStop()
+    media.close()
+    await model.openCamera()
+
+    #expect(await identifier.resetCount == 2)
+  }
+
+  @Test("rapid camera taps share one open and one frame consumer")
+  func rapidOpenIsSingleFlight() async {
+    let identifier = RecordingLocalIdentifier(results: [])
+    let media = SuspendedOpenIdentifyMedia()
+    let model = IdentifyViewModel(capability: .onDevice(identifier), media: media)
+    let first = Task { await model.openCamera() }
+    await media.waitUntilOpenRequested()
+    let second = Task { await model.openCamera() }
+    for _ in 0..<20 { await Task.yield() }
+
+    #expect(media.openCount == 1)
+    media.resumeOpen()
+    await first.value
+    await second.value
+
+    #expect(media.frameConsumerCount == 1)
+    #expect(await identifier.resetCount == 1)
+  }
 }
 
 extension IdentifyViewModelTests {
@@ -197,20 +230,25 @@ private final class RecordingIdentifyMedia: IdentifyMediaProviding {
   func yieldWithoutDemand(_ frame: CameraFrame) {
     _ = channel.continuation.yield(frame)
   }
+
+  func close() { isCameraPresented = false }
 }
 
 private actor RecordingLocalIdentifier: LocalIdentifying {
   private var results: [Result<LocalIdentificationState, Error>]
   private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
   private(set) var requestCount = 0
+  private(set) var resetCount = 0
 
   init(results: [Result<LocalIdentificationState, Error>]) { self.results = results }
+
+  func resetSession() { resetCount += 1 }
 
   func identify(frame _: CameraFrame) throws -> LocalIdentificationState {
     requestCount += 1
     let ready = waiters.filter { requestCount >= $0.0 }
     waiters.removeAll { requestCount >= $0.0 }
-    ready.forEach { $0.1.resume() }
+    for waiter in ready { waiter.1.resume() }
     guard !results.isEmpty else { throw CancellationError() }
     return try results.removeFirst().get()
   }
@@ -218,6 +256,41 @@ private actor RecordingLocalIdentifier: LocalIdentifying {
   func waitForRequests(_ count: Int) async {
     guard requestCount < count else { return }
     await withCheckedContinuation { waiters.append((count, $0)) }
+  }
+}
+
+@MainActor
+private final class SuspendedOpenIdentifyMedia: IdentifyMediaProviding {
+  private let channel = CameraFrameChannel.make()
+  private var continuations: [CheckedContinuation<Void, Never>] = []
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+  let cameraState = PhotoCameraState.available
+  private(set) var isCameraPresented = false
+  private(set) var openCount = 0
+  private(set) var frameConsumerCount = 0
+  var frames: AsyncStream<CameraFrame> {
+    frameConsumerCount += 1
+    return channel.frames
+  }
+
+  func openCamera() async {
+    openCount += 1
+    let ready = waiters
+    waiters = []
+    for waiter in ready { waiter.resume() }
+    await withCheckedContinuation { continuations.append($0) }
+    isCameraPresented = true
+  }
+
+  func waitUntilOpenRequested() async {
+    guard openCount == 0 else { return }
+    await withCheckedContinuation { waiters.append($0) }
+  }
+
+  func resumeOpen() {
+    let pending = continuations
+    continuations = []
+    for continuation in pending { continuation.resume() }
   }
 }
 
@@ -237,7 +310,7 @@ private actor SuspendedLocalIdentifier: LocalIdentifying {
     maximumConcurrentRequests = max(maximumConcurrentRequests, concurrentRequests)
     let ready = waiters
     waiters = []
-    ready.forEach { $0.resume() }
+    for waiter in ready { waiter.resume() }
     await withCheckedContinuation { continuation = $0 }
     concurrentRequests -= 1
     return result

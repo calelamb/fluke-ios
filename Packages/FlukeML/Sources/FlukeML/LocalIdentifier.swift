@@ -31,7 +31,12 @@ public protocol EmbeddingProviding: Sendable {
 }
 
 public protocol LocalIdentifying: Sendable {
+  func resetSession() async
   func identify(frame: CameraFrame) async throws -> LocalIdentificationState
+}
+
+extension LocalIdentifying {
+  public func resetSession() async {}
 }
 
 public struct LocalIdentificationArtifact: Equatable, Sendable {
@@ -72,6 +77,7 @@ public actor LocalIdentifier: LocalIdentifying {
   private let reducer: StableMatchReducer
   private let artifact: LocalIdentificationArtifact
   private var state: StableMatchState
+  private var sessionGeneration: UInt64 = 0
 
   public init(embedder: any EmbeddingProviding, catalog: ReferenceCatalog) {
     self.embedder = embedder
@@ -100,7 +106,9 @@ public actor LocalIdentifier: LocalIdentifying {
   }
 
   public func identify(frame: CameraFrame) async throws -> LocalIdentificationState {
+    let generation = sessionGeneration
     let embedding = try await embedder.embedding(frame: frame)
+    guard generation == sessionGeneration else { throw CancellationError() }
     let matches = try searcher.search(embedding: embedding, limit: Self.resultLimit)
     let eligible = matches.first.flatMap { first in
       reducer.isEligible(first: first, second: matches.dropFirst().first) ? first : nil
@@ -108,9 +116,14 @@ public actor LocalIdentifier: LocalIdentifying {
     let updatedState = reducer.reduce(state: state, candidate: eligible)
     state = updatedState
     return LocalIdentificationState(
-      matches: matches,
+      matches: eligible == nil ? [] : matches,
       prominent: updatedState.prominent,
       artifact: artifact
     )
+  }
+
+  public func resetSession() async {
+    sessionGeneration &+= 1
+    state = reducer.initialState
   }
 }

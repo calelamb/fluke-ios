@@ -3,17 +3,20 @@ import SwiftUI
 
 public struct IdentifyView: View {
   private let capability: IdentifyCapability
+  private let capabilityRevision: UInt64
   private let browseWhales: () -> Void
   private let openWhale: (String) -> Void
   private let submitSighting: () -> Void
 
   public init(
     capability: IdentifyCapability,
+    capabilityRevision: UInt64 = 0,
     browseWhales: @escaping () -> Void,
     openWhale: @escaping (String) -> Void,
     submitSighting: @escaping () -> Void
   ) {
     self.capability = capability
+    self.capabilityRevision = capabilityRevision
     self.browseWhales = browseWhales
     self.openWhale = openWhale
     self.submitSighting = submitSighting
@@ -26,6 +29,7 @@ public struct IdentifyView: View {
       openWhale: openWhale,
       submitSighting: submitSighting
     )
+    .id(capabilityRevision)
     .navigationTitle("Identify")
     .background(Color.fog)
   }

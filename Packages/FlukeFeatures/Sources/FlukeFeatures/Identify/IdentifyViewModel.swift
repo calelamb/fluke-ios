@@ -72,6 +72,7 @@ public final class IdentifyViewModel {
   private let capability: IdentifyCapability
   private let media: any IdentifyMediaProviding
   private var inferenceTask: Task<Void, Never>?
+  private var isOpeningCamera = false
 
   public init(capability: IdentifyCapability, media: any IdentifyMediaProviding) {
     self.capability = capability
@@ -100,10 +101,16 @@ public final class IdentifyViewModel {
   }
 
   public func openCamera() async {
-    guard case .onDevice(let identifier) = capability, !media.isCameraPresented else { return }
+    guard case .onDevice(let identifier) = capability,
+      !media.isCameraPresented,
+      !isOpeningCamera
+    else { return }
     guard case .available = media.cameraState else { return }
+    isOpeningCamera = true
+    defer { isOpeningCamera = false }
     result = nil
     presentation = .analyzing
+    await identifier.resetSession()
     await media.openCamera()
     guard media.isCameraPresented else {
       presentation = .idle

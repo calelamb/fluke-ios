@@ -142,6 +142,28 @@ struct IdentifyCameraPipelineTests {
   }
 
   @MainActor
+  @Test("rapid opens share one suspended permission and capture start")
+  func concurrentPermissionOpenIsSingleFlight() async {
+    let authorization = SuspendedStatusCameraAuthorization()
+    let session = ImmediateFinishCameraSession()
+    let coordinator = IdentifyCameraCoordinator(
+      authorization: authorization,
+      session: session
+    )
+    let opens = (0..<10).map { _ in Task { await coordinator.open() } }
+    await authorization.waitUntilStatusRequested()
+    for _ in 0..<20 { await Task.yield() }
+
+    #expect(await authorization.statusRequestCount == 1)
+    #expect(await session.startCount == 0)
+    await authorization.resumeInitialStatus(.authorized)
+    for open in opens { await open.value }
+
+    #expect(await session.startCount == 1)
+    #expect(coordinator.isPresented)
+  }
+
+  @MainActor
   @Test("a denied permission request remains closed")
   func deniedPermissionRequest() async {
     let authorization = RecordingCameraAuthorization(status: .notDetermined)
@@ -534,7 +556,7 @@ private actor RecordingCameraSession: IdentifyCameraSessionProviding {
     startCount += 1
     let waiters = startWaiters
     startWaiters = []
-    waiters.forEach { $0.resume() }
+    for waiter in waiters { waiter.resume() }
     if let startError { throw startError }
   }
 
@@ -556,14 +578,14 @@ private actor SuspendedStatusCameraAuthorization: IdentifyCameraAuthorizationPro
   private var initialStatusContinuation: CheckedContinuation<IdentifyCameraPermission, Never>?
   private var requestWaiters: [CheckedContinuation<Void, Never>] = []
   private var currentStatus = IdentifyCameraPermission.authorized
-  private var statusRequestCount = 0
+  private(set) var statusRequestCount = 0
 
   func status() async -> IdentifyCameraPermission {
     statusRequestCount += 1
     guard statusRequestCount == 1 else { return currentStatus }
     let waiters = requestWaiters
     requestWaiters = []
-    waiters.forEach { $0.resume() }
+    for waiter in waiters { waiter.resume() }
     return await withCheckedContinuation { initialStatusContinuation = $0 }
   }
 
@@ -608,7 +630,7 @@ private actor SuspendedStartCameraSession: IdentifyCameraSessionProviding {
     startCount += 1
     let waiters = startWaiters
     startWaiters = []
-    waiters.forEach { $0.resume() }
+    for waiter in waiters { waiter.resume() }
     await withCheckedContinuation { startContinuation = $0 }
   }
 
@@ -640,7 +662,7 @@ private actor SuspendedFailingStartCameraSession: IdentifyCameraSessionProviding
     startCount += 1
     let waiters = startWaiters
     startWaiters = []
-    waiters.forEach { $0.resume() }
+    for waiter in waiters { waiter.resume() }
     try await withCheckedThrowingContinuation { startContinuation = $0 }
   }
 

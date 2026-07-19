@@ -131,6 +131,80 @@ struct StableMatchReducerTests {
     #expect(second.prominent == nil)
     #expect(third.prominent?.catalogID == first.matches.first?.catalogID)
   }
+
+  @Test("starting a new camera session clears prior stabilization wins")
+  func newSessionClearsHistory() async throws {
+    let fixture = try FixtureCatalog()
+    defer { fixture.remove() }
+    let catalog = try ReferenceCatalog.load(
+      directory: fixture.directory,
+      compatibility: FixtureCatalog.compatibility,
+      appBuild: 42
+    )
+    let identifier = LocalIdentifier(
+      embedder: FixedEmbedder(embedding: FixtureCatalog.queryEmbedding),
+      catalog: catalog
+    )
+    let frame = try Self.frame()
+
+    _ = try await identifier.identify(frame: frame)
+    _ = try await identifier.identify(frame: frame)
+    await identifier.resetSession()
+    let reopened = try await identifier.identify(frame: frame)
+
+    #expect(reopened.prominent == nil)
+  }
+
+  @Test("an embedding completed after reset cannot mutate the new session")
+  func staleEmbeddingCannotCrossSession() async throws {
+    let fixture = try FixtureCatalog()
+    defer { fixture.remove() }
+    let catalog = try ReferenceCatalog.load(
+      directory: fixture.directory,
+      compatibility: FixtureCatalog.compatibility,
+      appBuild: 42
+    )
+    let embedder = SuspendedThenImmediateEmbedder(embedding: FixtureCatalog.queryEmbedding)
+    let identifier = LocalIdentifier(embedder: embedder, catalog: catalog)
+    let frame = try Self.frame()
+    let stale = Task { try await identifier.identify(frame: frame) }
+    await embedder.waitUntilSuspended()
+
+    await identifier.resetSession()
+    await embedder.resume()
+    await #expect(throws: CancellationError.self) { try await stale.value }
+    let first = try await identifier.identify(frame: frame)
+    let second = try await identifier.identify(frame: frame)
+
+    #expect(first.prominent == nil)
+    #expect(second.prominent == nil)
+  }
+
+  @Test(
+    "real search candidates rejected by score or margin produce unknown",
+    arguments: [
+      ["scoreThreshold": 1.0],
+      ["marginThreshold": 1.0],
+    ]
+  )
+  func rejectedRealCandidatesAreUnknown(manifestUpdates: [String: Any]) async throws {
+    let fixture = try FixtureCatalog(manifestUpdates: manifestUpdates)
+    defer { fixture.remove() }
+    let catalog = try ReferenceCatalog.load(
+      directory: fixture.directory,
+      compatibility: FixtureCatalog.compatibility,
+      appBuild: 42
+    )
+    let identifier = LocalIdentifier(
+      embedder: FixedEmbedder(embedding: FixtureCatalog.queryEmbedding),
+      catalog: catalog
+    )
+
+    let state = try await identifier.identify(frame: Self.frame())
+
+    #expect(state.matches.isEmpty)
+    #expect(state.prominent == nil)
+  }
 }
 
 extension StableMatchReducerTests {
@@ -150,5 +224,41 @@ extension StableMatchReducerTests {
       rank: 1,
       matchedReferencePhotoIDs: ["photo-\(catalogID)"]
     )
+  }
+
+  fileprivate static func frame() throws -> CameraFrame {
+    try CameraFrame(
+      pixelBuffer: CoreMLEmbedderTests.redPixelBuffer(),
+      orientation: .up
+    )
+  }
+}
+
+private actor SuspendedThenImmediateEmbedder: EmbeddingProviding {
+  private let value: [Float]
+  private var shouldSuspend = true
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+
+  init(embedding: [Float]) { value = embedding }
+
+  func embedding(frame _: CameraFrame) async -> [Float] {
+    guard shouldSuspend else { return value }
+    shouldSuspend = false
+    let ready = waiters
+    waiters = []
+    for waiter in ready { waiter.resume() }
+    await withCheckedContinuation { continuation = $0 }
+    return value
+  }
+
+  func waitUntilSuspended() async {
+    guard shouldSuspend else { return }
+    await withCheckedContinuation { waiters.append($0) }
+  }
+
+  func resume() {
+    continuation?.resume()
+    continuation = nil
   }
 }

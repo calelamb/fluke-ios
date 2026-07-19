@@ -1,6 +1,7 @@
 import AppKit
 import FlukeML
 import FlukeUI
+import Observation
 import SwiftUI
 import Testing
 
@@ -33,6 +34,23 @@ struct IdentifyFeatureRenderingTests {
     #expect(try render(view) != nil)
   }
 
+  @Test("a retained host replaces disabled content when on-device capability arrives")
+  func retainedHostTransitionsToReady() async throws {
+    let state = RenderingCapabilityState()
+    let host = NSHostingView(rootView: RenderingCapabilityHost(state: state))
+    host.frame = CGRect(x: 0, y: 0, width: 430, height: 700)
+    host.layoutSubtreeIfNeeded()
+    let disabled = try renderedData(host)
+
+    state.capability = .onDevice(RenderingIdentifier())
+    state.revision += 1
+    await Task.yield()
+    host.layoutSubtreeIfNeeded()
+    let ready = try renderedData(host)
+
+    #expect(disabled != ready)
+  }
+
   @Test(
     "unknown, poor-quality, unavailable, and neutral presentations render",
     arguments: [
@@ -53,10 +71,11 @@ struct IdentifyFeatureRenderingTests {
       openWhale: { _ in }
     )
 
-    let expectsVisibleContent: Bool = switch presentation {
-    case .unknown, .poorQuality, .unavailable: true
-    default: false
-    }
+    let expectsVisibleContent: Bool =
+      switch presentation {
+      case .unknown, .poorQuality, .unavailable: true
+      default: false
+      }
     #expect((try render(view) != nil) == expectsVisibleContent)
   }
 
@@ -102,10 +121,39 @@ struct IdentifyFeatureRenderingTests {
     renderer.scale = 1
     return renderer.nsImage
   }
+
+  private func renderedData(_ host: NSHostingView<some View>) throws -> Data {
+    let representation = try #require(
+      host.bitmapImageRepForCachingDisplay(in: host.bounds)
+    )
+    host.cacheDisplay(in: host.bounds, to: representation)
+    return try #require(representation.representation(using: .png, properties: [:]))
+  }
 }
 
 private struct RenderingIdentifier: LocalIdentifying {
   func identify(frame: CameraFrame) async throws -> LocalIdentificationState {
     throw CancellationError()
+  }
+}
+
+@MainActor
+@Observable
+private final class RenderingCapabilityState {
+  var capability = IdentifyCapability.disabled
+  var revision: UInt64 = 0
+}
+
+private struct RenderingCapabilityHost: View {
+  let state: RenderingCapabilityState
+
+  var body: some View {
+    IdentifyView(
+      capability: state.capability,
+      capabilityRevision: state.revision,
+      browseWhales: {},
+      openWhale: { _ in },
+      submitSighting: {}
+    )
   }
 }

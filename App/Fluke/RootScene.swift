@@ -49,6 +49,7 @@ struct RootScene: View {
   @State private var deletionAuthorizationFlow: AppleAuthorizationFlow
   @State private var capabilities = LaunchCapabilityState.loading
   @State private var identifyCapability = IdentifyCapability.disabled
+  @State private var identifyCapabilityRevision: UInt64 = 0
   @State private var cachedIdentificationMode: IdentificationMode?
   @State private var localIdentifierAvailability = LocalIdentifierAvailability.unavailable
   @State private var movementNavigation: MovementNavigationModel
@@ -282,11 +283,7 @@ struct RootScene: View {
       await environment.identificationModeCache.record(effectiveMode)
       cachedIdentificationMode = effectiveMode == .onDevice ? .onDevice : nil
     }
-    identifyCapability = IdentificationComposition.resolve(
-      capabilities: loaded,
-      cachedMode: cachedIdentificationMode,
-      localIdentifier: localIdentifierAvailability
-    )
+    updateIdentificationCapability()
     if accountAvailability == .enabled {
       if !authSession.isAuthenticated { await authSession.restore() }
     } else {
@@ -294,12 +291,22 @@ struct RootScene: View {
     }
   }
 
+  private func updateIdentificationCapability() {
+    identifyCapability = IdentificationComposition.resolve(
+      capabilities: capabilities,
+      cachedMode: cachedIdentificationMode,
+      localIdentifier: localIdentifierAvailability
+    )
+    identifyCapabilityRevision &+= 1
+  }
+
   private func bootstrapCapabilities() async {
     async let cachedMode = environment.identificationModeCache.load()
     async let localIdentifier = environment.localIdentifierLoader.load()
     cachedIdentificationMode = await cachedMode
-    localIdentifierAvailability = await localIdentifier
     await refreshCapabilities()
+    localIdentifierAvailability = await localIdentifier
+    updateIdentificationCapability()
   }
 
   private var movementDestination: Binding<MovementDestination?> {
@@ -354,6 +361,7 @@ struct RootScene: View {
   private var identifyDestination: some View {
     FlukeFeatures.IdentifyView(
       capability: identifyCapability,
+      capabilityRevision: identifyCapabilityRevision,
       browseWhales: { selectedTab = .whales },
       openWhale: { whaleID in
         profileRequest = WhaleProfileRequest.next(whaleID: whaleID, after: profileRequest)

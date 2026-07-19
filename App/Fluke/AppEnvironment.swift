@@ -109,6 +109,7 @@ struct AppEnvironment {
     configuration: AppBuildConfiguration,
     session: URLSession = .shared,
     capabilitiesFetch: CapabilitiesFetch? = nil,
+    authService: (any AuthServiceProtocol)? = nil,
     submissionObservedAt: @escaping SubmissionObservedAt = Date.init,
     cacheStore: any BrowseCacheStore = MemoryBrowseCacheStore(),
     localIdentifierLoad: @escaping OnDeviceIdentificationLoader.Load = {
@@ -124,7 +125,7 @@ struct AppEnvironment {
 
     return AppEnvironment(
       apiBaseURL: apiBaseURL,
-      authService: AuthService(api: client),
+      authService: authService ?? AuthService(api: client),
       browseCacheStore: cacheStore,
       configuration: configuration,
       fetchCapabilities: capabilitiesFetch ?? {
