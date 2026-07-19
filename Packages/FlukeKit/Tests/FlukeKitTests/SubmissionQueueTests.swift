@@ -152,6 +152,55 @@ struct SubmissionQueueTests {
 
     #expect(try await queue.list().first?.payload.observerEmail == nil)
   }
+
+  @Test("Retry finds a persisted entry after relaunch and resets its bounded attempt state")
+  func retryAfterRelaunch() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let payload = try SubmissionValidator.validate(.fixture(photoCount: 1))
+    let id: UUID
+    do {
+      let queue = try SubmissionQueue(directory: directory)
+      let value = try await queue.enqueue(payload: payload, photos: [.fixture(1)])
+      id = value.id
+      try await queue.recordFailure(id: id)
+      try await queue.recordFailure(id: id)
+      try await queue.recordFailure(id: id)
+      #expect(try await queue.list().first?.state == .failed)
+      #expect(try await queue.list().first?.attempts == 3)
+    }
+
+    let relaunched = try SubmissionQueue(directory: directory)
+    try await relaunched.retry(id: id)
+
+    #expect(try await relaunched.list().first?.state == .queued)
+    #expect(try await relaunched.list().first?.attempts == 0)
+  }
+
+  @Test("Concurrent retries remain idempotent and actor-isolated")
+  func concurrentRetries() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let queue = try SubmissionQueue(directory: directory, inMemory: true)
+    let payload = try SubmissionValidator.validate(.fixture(photoCount: 1))
+    let value = try await queue.enqueue(payload: payload, photos: [.fixture(1)])
+    try await queue.recordFailure(id: value.id)
+
+    try await withThrowingTaskGroup(of: Void.self) { group in
+      for _ in 0..<8 {
+        group.addTask {
+          try await queue.retry(id: value.id)
+        }
+      }
+      try await group.waitForAll()
+    }
+
+    let entries = try await queue.list()
+    #expect(entries.count == 1)
+    #expect(entries.first?.id == value.id)
+    #expect(entries.first?.state == .queued)
+    #expect(entries.first?.attempts == 0)
+  }
 }
 
 private struct InjectedSaveError: Error {}

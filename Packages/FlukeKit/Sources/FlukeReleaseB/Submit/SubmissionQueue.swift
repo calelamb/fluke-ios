@@ -54,6 +54,7 @@ public actor SubmissionQueue: SubmissionQueueProtocol, ModelActor {
   public nonisolated let modelExecutor: any ModelExecutor
   private let photoStore: QueuedPhotoStore
   private let saveContext: (ModelContext) throws -> Void
+  private var rowIdentifiers: [UUID: PersistentIdentifier]?
 
   private var context: ModelContext { modelContext }
 
@@ -115,8 +116,10 @@ public actor SubmissionQueue: SubmissionQueueProtocol, ModelActor {
       state: .queued, attempts: 0, createdAt: Date()
     )
     do {
-      context.insert(try QueuedSubmissionRow(value: value))
+      let row = try QueuedSubmissionRow(value: value)
+      context.insert(row)
       try saveContext(context)
+      register(row)
     } catch {
       context.rollback()
       do {
@@ -141,6 +144,7 @@ public actor SubmissionQueue: SubmissionQueueProtocol, ModelActor {
       try await photoStore.remove(row.photoFileNames + row.cleanupFileNames)
       context.delete(row)
       try saveContext(context)
+      unregister(id: row.id)
     }
     let retainedRows = try context.fetch(FetchDescriptor<QueuedSubmissionRow>())
     for row in retainedRows where !row.cleanupFileNames.isEmpty {
@@ -167,6 +171,7 @@ public actor SubmissionQueue: SubmissionQueueProtocol, ModelActor {
     try await photoStore.remove(names)
     context.delete(row)
     try saveContext(context)
+    unregister(id: id)
   }
 
   public func photoBytes(for value: QueuedSubmissionValue) async throws -> [Data] {
@@ -218,8 +223,29 @@ public actor SubmissionQueue: SubmissionQueueProtocol, ModelActor {
   }
 
   private func requiredRow(id: UUID) throws -> QueuedSubmissionRow {
-    let descriptor = FetchDescriptor<QueuedSubmissionRow>(predicate: #Predicate { $0.id == id })
-    guard let row = try context.fetch(descriptor).first else { throw SubmissionQueueError.missingEntry }
+    try loadRowIdentifiersIfNeeded()
+    guard
+      let persistentIdentifier = rowIdentifiers?[id],
+      let row = context.model(for: persistentIdentifier) as? QueuedSubmissionRow
+    else {
+      throw SubmissionQueueError.missingEntry
+    }
     return row
+  }
+
+  private func loadRowIdentifiersIfNeeded() throws {
+    guard rowIdentifiers == nil else { return }
+    let rows = try context.fetch(FetchDescriptor<QueuedSubmissionRow>())
+    rowIdentifiers = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.persistentModelID) })
+  }
+
+  private func register(_ row: QueuedSubmissionRow) {
+    guard let rowIdentifiers else { return }
+    self.rowIdentifiers = rowIdentifiers.merging([row.id: row.persistentModelID]) { _, new in new }
+  }
+
+  private func unregister(id: UUID) {
+    guard let rowIdentifiers else { return }
+    self.rowIdentifiers = rowIdentifiers.filter { $0.key != id }
   }
 }
