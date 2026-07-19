@@ -1,0 +1,93 @@
+{
+  "artifacts": {
+    "manifest.json": "14ad629cc04ce07b1d4af1719490778aa6b2a21dad1480174f3caaaa77029306",
+    "metadata.json": "593f4516fb3635d99f2dd92aab6e20a7eaf4f7ebea1f1202343a1a9e982659c8",
+    "references.f16": "767507ffca6d004ce614c532c9266ac43d061213bd8134d91c855af758ac695c"
+  },
+  "command": "PYTHONPATH=src .venv/bin/python <generator> --producer-root . --output <python-catalog>",
+  "generator": "FixtureGeneration/generate_python_catalog.py",
+  "golden": {
+    "identities": [
+      {
+        "catalogId": "J35",
+        "referencePhotoIds": [
+          "ref-001",
+          "ref-002",
+          "ref-003"
+        ],
+        "score": 0.97998046875,
+        "whaleId": "whale-j35"
+      },
+      {
+        "catalogId": "J27",
+        "referencePhotoIds": [
+          "ref-005",
+          "ref-006"
+        ],
+        "score": 0.889892578125,
+        "whaleId": "whale-j27"
+      },
+      {
+        "catalogId": "T049A",
+        "referencePhotoIds": [
+          "ref-007"
+        ],
+        "score": 0.7998046875,
+        "whaleId": "whale-t049a"
+      }
+    ],
+    "query": {
+      "firstValue": 1.0,
+      "remainingValues": 0.0
+    }
+  },
+  "inputs": {
+    "dimension": 384,
+    "rightsFixture": "tests/fixtures/mobile-catalog/rights-attestation.json",
+    "scoreInputs": [
+      [
+        "ref-001",
+        "whale-j35",
+        "J35",
+        1.0
+      ],
+      [
+        "ref-002",
+        "whale-j35",
+        "J35",
+        0.98
+      ],
+      [
+        "ref-003",
+        "whale-j35",
+        "J35",
+        0.96
+      ],
+      [
+        "ref-004",
+        "whale-j35",
+        "J35",
+        0.1
+      ],
+      [
+        "ref-005",
+        "whale-j27",
+        "J27",
+        0.9
+      ],
+      [
+        "ref-006",
+        "whale-j27",
+        "J27",
+        0.88
+      ],
+      [
+        "ref-007",
+        "whale-t049a",
+        "T049A",
+        0.8
+      ]
+    ]
+  },
+  "producerCommit": "7aa6474ca51c4c7e91cd4552093e7cc3424924b2"
+}

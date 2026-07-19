@@ -6,11 +6,8 @@ import Testing
 struct IdentifierArtifactLoadingTests {
     @Test("loads the exact producer schema and immutable catalog")
     func loadsProducerSchema() throws {
-        let fixture = try FixtureCatalog()
-        defer { fixture.remove() }
-
         let catalog = try ReferenceCatalog.load(
-            directory: fixture.directory,
+            directory: FixtureCatalog.producerCatalogDirectory,
             compatibility: FixtureCatalog.compatibility,
             appBuild: 42
         )
@@ -20,6 +17,28 @@ struct IdentifierArtifactLoadingTests {
         #expect(catalog.referenceCount == 7)
         #expect(catalog.catalogCount == 3)
         #expect(catalog.dimension == 384)
+    }
+
+    @Test("pins producer commit and exact generated artifact bytes")
+    func producerFixtureProvenance() throws {
+        let provenance = try FixtureCatalog.producerProvenance
+        let artifacts = try #require(provenance["artifacts"] as? [String: String])
+        let expectedNames = Set(["manifest.json", "metadata.json", "references.f16"])
+        let directory = try FixtureCatalog.producerCatalogDirectory
+        let actualNames = Set(
+            try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        )
+
+        #expect(
+            provenance["producerCommit"] as? String
+                == "7aa6474ca51c4c7e91cd4552093e7cc3424924b2"
+        )
+        #expect(actualNames == expectedNames)
+        #expect(Set(artifacts.keys) == expectedNames)
+        for name in expectedNames {
+            let data = try Data(contentsOf: directory.appendingPathComponent(name))
+            #expect(FixtureCatalog.sha256(data) == artifacts[name])
+        }
     }
 
     @Test("bundle loading derives and enforces the running app build")
@@ -41,6 +60,68 @@ struct IdentifierArtifactLoadingTests {
             try ReferenceCatalog.load(
                 bundle: incompatibleBundle,
                 compatibility: FixtureCatalog.compatibility
+            )
+        }
+    }
+
+    @Test("bundle loading rejects traversal outside its resource directory")
+    func bundleTraversal() throws {
+        let fixture = try FixtureCatalog()
+        defer { fixture.remove() }
+        let bundle = try fixture.makeBundle(appBuild: 42)
+        defer { try? FileManager.default.removeItem(at: bundle.bundleURL) }
+        let outsideCatalog = try #require(bundle.resourceURL?.deletingLastPathComponent())
+            .appendingPathComponent("OutsideCatalog", isDirectory: true)
+        try FileManager.default.copyItem(at: fixture.directory, to: outsideCatalog)
+
+        #expect(throws: IdentifierArtifactError.invalidArtifactDirectory) {
+            try ReferenceCatalog.load(
+                bundle: bundle,
+                compatibility: FixtureCatalog.compatibility,
+                catalogDirectoryName: "../OutsideCatalog"
+            )
+        }
+    }
+
+    @Test("directory loading rejects a symlinked parent component")
+    func symlinkedParent() throws {
+        let fixture = try FixtureCatalog()
+        defer { fixture.remove() }
+        let container = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: container) }
+        let realParent = container.appendingPathComponent("real", isDirectory: true)
+        let linkedParent = container.appendingPathComponent("linked", isDirectory: true)
+        let catalog = realParent.appendingPathComponent("catalog", isDirectory: true)
+        try FileManager.default.createDirectory(at: realParent, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: fixture.directory, to: catalog)
+        try FileManager.default.createSymbolicLink(at: linkedParent, withDestinationURL: realParent)
+
+        #expect(throws: IdentifierArtifactError.invalidArtifactDirectory) {
+            try ReferenceCatalog.load(
+                directory: linkedParent.appendingPathComponent("catalog", isDirectory: true),
+                compatibility: FixtureCatalog.compatibility,
+                appBuild: 42
+            )
+        }
+    }
+
+    @Test("catalog loading rejects symlinked artifact files")
+    func symlinkedArtifact() throws {
+        let fixture = try FixtureCatalog()
+        defer { fixture.remove() }
+        let vectorsURL = fixture.directory.appendingPathComponent("references.f16")
+        let outsideURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).f16")
+        defer { try? FileManager.default.removeItem(at: outsideURL) }
+        try FileManager.default.moveItem(at: vectorsURL, to: outsideURL)
+        try FileManager.default.createSymbolicLink(at: vectorsURL, withDestinationURL: outsideURL)
+
+        #expect(throws: IdentifierArtifactError.unreadableArtifact("references.f16")) {
+            try ReferenceCatalog.load(
+                directory: fixture.directory,
+                compatibility: FixtureCatalog.compatibility,
+                appBuild: 42
             )
         }
     }
@@ -109,21 +190,104 @@ struct IdentifierArtifactLoadingTests {
     @Test(
         "rejects malformed manifest scalar contracts",
         arguments: [
-            ("schemaVersion", 2 as Any),
-            ("embeddingDimension", 383 as Any),
-            ("dtype", "float32" as Any),
-            ("scoreSemantics", "probability" as Any),
-            ("scoreThreshold", 1.01 as Any),
-            ("marginThreshold", -1.01 as Any),
-            ("vectorsSha256", "ABC" as Any),
-            ("vectorsSha256", String(repeating: "١", count: 32) as Any),
+            ("schemaVersion", "2"),
+            ("embeddingDimension", "383"),
+            ("dtype", "\"float32\""),
+            ("scoreSemantics", "\"probability\""),
+            ("scoreThreshold", "1.01"),
+            ("marginThreshold", "-1.01"),
+            ("vectorsSha256", "\"ABC\""),
+            ("vectorsSha256", "\"\(String(repeating: "١", count: 32))\""),
         ]
     )
-    func malformedManifest(field: String, value: Any) throws {
-        let fixture = try FixtureCatalog(manifestUpdates: [field: value])
+    func malformedManifest(field: String, rawValue: String) throws {
+        let fixture = try FixtureCatalog()
         defer { fixture.remove() }
+        try fixture.replaceManifestValue(field: field, with: rawValue)
 
         #expect(throws: IdentifierArtifactError.invalidManifest(field)) {
+            try ReferenceCatalog.load(
+                directory: fixture.directory,
+                compatibility: FixtureCatalog.compatibility,
+                appBuild: 42
+            )
+        }
+    }
+
+    @Test(
+        "integer fields require integer JSON tokens",
+        arguments: [
+            ("schemaVersion", "1.0"),
+            ("embeddingDimension", "3.84e2"),
+            ("referenceCount", "7e0"),
+            ("catalogCount", "3.0"),
+            ("minimumAppBuild", "1e0"),
+            ("maximumAppBuild", "100.0"),
+        ]
+    )
+    func exactIntegerTokens(field: String, rawValue: String) throws {
+        let fixture = try FixtureCatalog()
+        defer { fixture.remove() }
+        try fixture.replaceManifestValue(field: field, with: rawValue)
+
+        #expect(throws: IdentifierArtifactError.invalidManifest(field)) {
+            try ReferenceCatalog.load(
+                directory: fixture.directory,
+                compatibility: FixtureCatalog.compatibility,
+                appBuild: 42
+            )
+        }
+    }
+
+    @Test(
+        "numeric fields reject booleans",
+        arguments: [
+            "schemaVersion", "embeddingDimension", "referenceCount", "catalogCount",
+            "minimumAppBuild", "maximumAppBuild", "scoreThreshold", "marginThreshold",
+        ]
+    )
+    func numericBooleans(field: String) throws {
+        let fixture = try FixtureCatalog()
+        defer { fixture.remove() }
+        try fixture.replaceManifestValue(field: field, with: "true")
+
+        #expect(throws: IdentifierArtifactError.invalidManifest(field)) {
+            try ReferenceCatalog.load(
+                directory: fixture.directory,
+                compatibility: FixtureCatalog.compatibility,
+                appBuild: 42
+            )
+        }
+    }
+
+    @Test(
+        "thresholds are bounded as Double before narrowing to Float",
+        arguments: [
+            ("scoreThreshold", "1.00000001"),
+            ("marginThreshold", "-1.00000001"),
+        ]
+    )
+    func doubleThresholdBounds(field: String, rawValue: String) throws {
+        let fixture = try FixtureCatalog()
+        defer { fixture.remove() }
+        try fixture.replaceManifestValue(field: field, with: rawValue)
+
+        #expect(throws: IdentifierArtifactError.invalidManifest(field)) {
+            try ReferenceCatalog.load(
+                directory: fixture.directory,
+                compatibility: FixtureCatalog.compatibility,
+                appBuild: 42
+            )
+        }
+    }
+
+    @Test("unrepresentable JSON numbers fail closed")
+    func unrepresentableNumber() throws {
+        let fixture = try FixtureCatalog()
+        defer { fixture.remove() }
+        try fixture.replaceManifestValue(field: "scoreThreshold", with: "1e400")
+
+        #expect(throws: IdentifierArtifactError.self) {
             try ReferenceCatalog.load(
                 directory: fixture.directory,
                 compatibility: FixtureCatalog.compatibility,
@@ -227,6 +391,22 @@ struct IdentifierArtifactLoadingTests {
         }
     }
 
+    @Test("accepts producer-approved Float16 normalization drift")
+    func float16NormalizationTolerance() throws {
+        var vectors = FixtureCatalog.defaultVectors
+        let quantizedUnit = Float(Float16(1.0015))
+        vectors[0] = [quantizedUnit]
+            + [Float](repeating: 0, count: FixtureCatalog.dimension - 1)
+        let fixture = try FixtureCatalog(vectors: vectors)
+        defer { fixture.remove() }
+
+        _ = try ReferenceCatalog.load(
+            directory: fixture.directory,
+            compatibility: FixtureCatalog.compatibility,
+            appBuild: 42
+        )
+    }
+
     @Test(
         "rejects duplicate, unstable, or unsorted stable IDs",
         arguments: ["duplicate", "whale", "catalog", "unsorted"]
@@ -303,16 +483,27 @@ struct IdentifierArtifactLoadingTests {
 struct ExactCosineSearchTests {
     @Test("returns the producer-fixture golden identity order")
     func goldenOrder() throws {
-        let fixture = try FixtureCatalog()
-        defer { fixture.remove() }
-        let searcher = try makeSearcher(fixture)
+        let catalog = try ReferenceCatalog.load(
+            directory: FixtureCatalog.producerCatalogDirectory,
+            compatibility: FixtureCatalog.compatibility,
+            appBuild: 42
+        )
+        let searcher = ExactCosineSearcher(catalog: catalog)
 
         let results = try searcher.search(embedding: FixtureCatalog.queryEmbedding, limit: 3)
+        let provenance = try FixtureCatalog.producerProvenance
+        let golden = try #require(provenance["golden"] as? [String: Any])
+        let identities = try #require(golden["identities"] as? [[String: Any]])
+        let expectedCatalogIDs = identities.compactMap { $0["catalogId"] as? String }
+        let expectedScores = identities.compactMap { ($0["score"] as? NSNumber)?.floatValue }
+        let expectedReferences = identities.compactMap {
+            $0["referencePhotoIds"] as? [String]
+        }
 
-        #expect(results.map(\.catalogID) == ["J35", "J27", "T049A"])
+        #expect(results.map(\.catalogID) == expectedCatalogIDs)
         #expect(results.map(\.rank) == [1, 2, 3])
-        #expect(abs(results[0].score - 0.98) < 0.002)
-        #expect(results[0].matchedReferencePhotoIDs == ["ref-001", "ref-002", "ref-003"])
+        #expect(zip(results.map(\.score), expectedScores).allSatisfy { abs($0 - $1) < 0.000_001 })
+        #expect(results.map(\.matchedReferencePhotoIDs) == expectedReferences)
     }
 
     @Test("aggregates mean top three after the global top 25 references")
@@ -389,6 +580,19 @@ struct ExactCosineSearchTests {
         default:
             embedding = [Float](repeating: 0, count: 384)
         }
+
+        #expect(throws: IdentifierArtifactError.invalidQuery) {
+            try searcher.search(embedding: embedding, limit: 3)
+        }
+    }
+
+    @Test("keeps source Float32 query normalization strict")
+    func queryNormalizationTolerance() throws {
+        let fixture = try FixtureCatalog()
+        defer { fixture.remove() }
+        let searcher = try makeSearcher(fixture)
+        let embedding = [Float(1.0015)]
+            + [Float](repeating: 0, count: FixtureCatalog.dimension - 1)
 
         #expect(throws: IdentifierArtifactError.invalidQuery) {
             try searcher.search(embedding: embedding, limit: 3)

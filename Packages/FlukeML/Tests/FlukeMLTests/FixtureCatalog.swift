@@ -92,8 +92,56 @@ struct FixtureCatalog {
         return bundle
     }
 
+    func replaceManifestValue(field: String, with rawJSON: String) throws {
+        let url = directory.appendingPathComponent("manifest.json")
+        let data = try Data(contentsOf: url)
+        guard var manifest = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileReadInapplicableStringEncoding)
+        }
+        let marker = "\"\(field)\":"
+        guard let markerRange = manifest.range(of: marker) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let valueStart = markerRange.upperBound
+        let valueEnd = manifest[valueStart...].firstIndex { $0 == "," || $0 == "}" }
+            ?? manifest.endIndex
+        manifest.replaceSubrange(valueStart ..< valueEnd, with: rawJSON)
+        guard let rewritten = manifest.data(using: .utf8) else {
+            throw CocoaError(.fileWriteInapplicableStringEncoding)
+        }
+        try rewritten.write(to: url)
+    }
+
     static var queryEmbedding: [Float] {
         unitVector(score: 1)
+    }
+
+    static var producerCatalogDirectory: URL {
+        get throws {
+            guard let url = Bundle.module.url(
+                forResource: "python-catalog",
+                withExtension: nil
+            ) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            return url
+        }
+    }
+
+    static var producerProvenance: [String: Any] {
+        get throws {
+            guard let url = Bundle.module.url(
+                forResource: "python-catalog-provenance",
+                withExtension: "json"
+            ) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            let data = try Data(contentsOf: url)
+            guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            return payload
+        }
     }
 
     static var defaultMetadata: [[String: Any]] {
