@@ -52,6 +52,16 @@ expected_types = [
     "NSPrivacyCollectedDataTypeUserID",
     "NSPrivacyCollectedDataTypeOtherUserContent",
 ]
+expected_accessed_api_types = [
+    {
+        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+        "NSPrivacyAccessedAPITypeReasons": ["C617.1"],
+    }
+]
+if privacy.get("NSPrivacyAccessedAPITypes") != expected_accessed_api_types:
+    raise SystemExit(
+        "archived privacy manifest must declare exactly FileTimestamp C617.1"
+    )
 expected_privacy = {
     "NSPrivacyTracking": False,
     "NSPrivacyTrackingDomains": [],
@@ -66,7 +76,7 @@ expected_privacy = {
         }
         for data_type in expected_types
     ],
-    "NSPrivacyAccessedAPITypes": [],
+    "NSPrivacyAccessedAPITypes": expected_accessed_api_types,
 }
 if privacy != expected_privacy:
     raise SystemExit("archived privacy manifest does not match the full launch data use")

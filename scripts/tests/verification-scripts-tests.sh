@@ -409,6 +409,29 @@ expect_failure "signed archive rejects failed deep bundle verification" \
   "$archive_path/Info.plist"
 expect_success "valid archive bundles App Store privacy and font notices" \
   "$app_store_archive_verifier" "$archive_path"
+plutil -replace NSPrivacyAccessedAPITypes -xml '<array/>' \
+  "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy"
+expect_failure "App Store archive verifier rejects a missing required-reason declaration" \
+  "archived privacy manifest must declare exactly FileTimestamp C617.1" \
+  "$app_store_archive_verifier" "$archive_path"
+cp "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" \
+  "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy"
+python3 - "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy" <<'PY'
+import plistlib
+import sys
+
+path = sys.argv[1]
+with open(path, "rb") as source:
+    manifest = plistlib.load(source)
+manifest["NSPrivacyAccessedAPITypes"][0]["NSPrivacyAccessedAPITypeReasons"] = ["0A2A.1"]
+with open(path, "wb") as output:
+    plistlib.dump(manifest, output)
+PY
+expect_failure "App Store archive verifier rejects the wrong required reason" \
+  "archived privacy manifest must declare exactly FileTimestamp C617.1" \
+  "$app_store_archive_verifier" "$archive_path"
+cp "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" \
+  "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy"
 rm "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy"
 expect_failure "App Store archive verifier rejects a missing privacy manifest" \
   "archived app is missing PrivacyInfo.xcprivacy" \
@@ -487,6 +510,62 @@ expect_success "App Store release verifier accepts complete launch assets" env \
   FLUKE_APP_ICON_PATH="$app_store_fixture/icon-1024.png" \
   FLUKE_FONT_LICENSE_PATH="$app_store_fixture/Fonts/OFL.txt" \
   "$app_store_verifier"
+plutil -replace NSPrivacyAccessedAPITypes -xml '<array/>' \
+  "$app_store_fixture/PrivacyInfo.xcprivacy"
+expect_failure "App Store release verifier rejects a missing required-reason declaration" \
+  "PrivacyInfo.xcprivacy must declare exactly FileTimestamp C617.1" env \
+  FLUKE_INFO_PLIST="$app_store_fixture/Info.plist" \
+  FLUKE_PRIVACY_MANIFEST="$app_store_fixture/PrivacyInfo.xcprivacy" \
+  FLUKE_APP_STORE_METADATA="$app_store_fixture/metadata/en-US/metadata.json" \
+  FLUKE_APP_ICON_PATH="$app_store_fixture/icon-1024.png" \
+  FLUKE_FONT_LICENSE_PATH="$app_store_fixture/Fonts/OFL.txt" \
+  "$app_store_verifier"
+cp "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" "$app_store_fixture/PrivacyInfo.xcprivacy"
+python3 - "$app_store_fixture/PrivacyInfo.xcprivacy" <<'PY'
+import plistlib
+import sys
+
+path = sys.argv[1]
+with open(path, "rb") as source:
+    manifest = plistlib.load(source)
+manifest["NSPrivacyAccessedAPITypes"][0]["NSPrivacyAccessedAPITypeReasons"].append("0A2A.1")
+with open(path, "wb") as output:
+    plistlib.dump(manifest, output)
+PY
+expect_failure "App Store release verifier rejects an extra required reason" \
+  "PrivacyInfo.xcprivacy must declare exactly FileTimestamp C617.1" env \
+  FLUKE_INFO_PLIST="$app_store_fixture/Info.plist" \
+  FLUKE_PRIVACY_MANIFEST="$app_store_fixture/PrivacyInfo.xcprivacy" \
+  FLUKE_APP_STORE_METADATA="$app_store_fixture/metadata/en-US/metadata.json" \
+  FLUKE_APP_ICON_PATH="$app_store_fixture/icon-1024.png" \
+  FLUKE_FONT_LICENSE_PATH="$app_store_fixture/Fonts/OFL.txt" \
+  "$app_store_verifier"
+cp "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" "$app_store_fixture/PrivacyInfo.xcprivacy"
+python3 - "$app_store_fixture/PrivacyInfo.xcprivacy" <<'PY'
+import plistlib
+import sys
+
+path = sys.argv[1]
+with open(path, "rb") as source:
+    manifest = plistlib.load(source)
+manifest["NSPrivacyAccessedAPITypes"].append(
+    {
+        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+        "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
+    }
+)
+with open(path, "wb") as output:
+    plistlib.dump(manifest, output)
+PY
+expect_failure "App Store release verifier rejects an extra required-reason category" \
+  "PrivacyInfo.xcprivacy must declare exactly FileTimestamp C617.1" env \
+  FLUKE_INFO_PLIST="$app_store_fixture/Info.plist" \
+  FLUKE_PRIVACY_MANIFEST="$app_store_fixture/PrivacyInfo.xcprivacy" \
+  FLUKE_APP_STORE_METADATA="$app_store_fixture/metadata/en-US/metadata.json" \
+  FLUKE_APP_ICON_PATH="$app_store_fixture/icon-1024.png" \
+  FLUKE_FONT_LICENSE_PATH="$app_store_fixture/Fonts/OFL.txt" \
+  "$app_store_verifier"
+cp "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" "$app_store_fixture/PrivacyInfo.xcprivacy"
 /usr/libexec/PlistBuddy -c 'Set :ITSAppUsesNonExemptEncryption true' \
   "$app_store_fixture/Info.plist"
 expect_failure "App Store release verifier rejects incorrect export compliance" \

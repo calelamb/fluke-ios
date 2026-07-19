@@ -78,8 +78,19 @@ for entry in entries:
     if entry.get("NSPrivacyCollectedDataTypePurposes") != ["NSPrivacyCollectedDataTypePurposeAppFunctionality"]:
         raise SystemExit("collected data must be used only for app functionality")
 
-if privacy.get("NSPrivacyAccessedAPITypes") != []:
-    raise SystemExit("required-reason API declarations must remain empty unless audited usage is added")
+# CatalogArtifactReader uses fstat only to bound app-owned resource reads. Apple maps
+# that use to File Timestamp C617.1:
+# https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api
+expected_accessed_api_types = [
+    {
+        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+        "NSPrivacyAccessedAPITypeReasons": ["C617.1"],
+    }
+]
+if privacy.get("NSPrivacyAccessedAPITypes") != expected_accessed_api_types:
+    raise SystemExit(
+        "required-reason API declarations must contain exactly FileTimestamp C617.1"
+    )
 
 print("full-launch privacy contract verified")
 PY

@@ -60,6 +60,84 @@ make_fixture "$tracking"
 plutil -replace NSPrivacyTracking -bool YES "$tracking/App/Fluke/PrivacyInfo.xcprivacy"
 expect_failure "tracking is rejected" "tracking must be false" "$verifier" --root "$tracking"
 
+missing_required_reason="$test_root/missing-required-reason"
+make_fixture "$missing_required_reason"
+plutil -replace NSPrivacyAccessedAPITypes -xml '<array/>' \
+  "$missing_required_reason/App/Fluke/PrivacyInfo.xcprivacy"
+expect_failure "missing required-reason declaration is rejected" \
+  "required-reason API declarations must contain exactly FileTimestamp C617.1" \
+  "$verifier" --root "$missing_required_reason"
+
+wrong_required_reason="$test_root/wrong-required-reason"
+make_fixture "$wrong_required_reason"
+python3 - "$wrong_required_reason/App/Fluke/PrivacyInfo.xcprivacy" <<'PY'
+import plistlib
+import sys
+
+path = sys.argv[1]
+with open(path, "rb") as source:
+    manifest = plistlib.load(source)
+manifest["NSPrivacyAccessedAPITypes"] = [
+    {
+        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+        "NSPrivacyAccessedAPITypeReasons": ["0A2A.1"],
+    }
+]
+with open(path, "wb") as output:
+    plistlib.dump(manifest, output)
+PY
+expect_failure "wrong required reason is rejected" \
+  "required-reason API declarations must contain exactly FileTimestamp C617.1" \
+  "$verifier" --root "$wrong_required_reason"
+
+extra_required_reason="$test_root/extra-required-reason"
+make_fixture "$extra_required_reason"
+python3 - "$extra_required_reason/App/Fluke/PrivacyInfo.xcprivacy" <<'PY'
+import plistlib
+import sys
+
+path = sys.argv[1]
+with open(path, "rb") as source:
+    manifest = plistlib.load(source)
+manifest["NSPrivacyAccessedAPITypes"] = [
+    {
+        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+        "NSPrivacyAccessedAPITypeReasons": ["C617.1", "0A2A.1"],
+    }
+]
+with open(path, "wb") as output:
+    plistlib.dump(manifest, output)
+PY
+expect_failure "extra required reason is rejected" \
+  "required-reason API declarations must contain exactly FileTimestamp C617.1" \
+  "$verifier" --root "$extra_required_reason"
+
+extra_required_category="$test_root/extra-required-category"
+make_fixture "$extra_required_category"
+python3 - "$extra_required_category/App/Fluke/PrivacyInfo.xcprivacy" <<'PY'
+import plistlib
+import sys
+
+path = sys.argv[1]
+with open(path, "rb") as source:
+    manifest = plistlib.load(source)
+manifest["NSPrivacyAccessedAPITypes"] = [
+    {
+        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+        "NSPrivacyAccessedAPITypeReasons": ["C617.1"],
+    },
+    {
+        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+        "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
+    },
+]
+with open(path, "wb") as output:
+    plistlib.dump(manifest, output)
+PY
+expect_failure "extra required-reason category is rejected" \
+  "required-reason API declarations must contain exactly FileTimestamp C617.1" \
+  "$verifier" --root "$extra_required_category"
+
 missing_category="$test_root/missing-category"
 make_fixture "$missing_category"
 python3 - "$missing_category/App/Fluke/PrivacyInfo.xcprivacy" <<'PY'

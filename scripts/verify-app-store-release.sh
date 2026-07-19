@@ -54,14 +54,27 @@ expected_collected_data = [
     }
     for data_type in expected_types
 ]
+expected_accessed_api_types = [
+    {
+        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+        "NSPrivacyAccessedAPITypeReasons": ["C617.1"],
+    }
+]
+if privacy.get("NSPrivacyAccessedAPITypes") != expected_accessed_api_types:
+    raise SystemExit(
+        "PrivacyInfo.xcprivacy must declare exactly FileTimestamp C617.1"
+    )
 expected_privacy = {
     "NSPrivacyTracking": False,
     "NSPrivacyTrackingDomains": [],
     "NSPrivacyCollectedDataTypes": expected_collected_data,
-    "NSPrivacyAccessedAPITypes": [],
+    "NSPrivacyAccessedAPITypes": expected_accessed_api_types,
 }
 if privacy != expected_privacy:
-    raise SystemExit("PrivacyInfo.xcprivacy must declare the complete linked app-functionality data set with no tracking or required-reason API access")
+    raise SystemExit(
+        "PrivacyInfo.xcprivacy must declare the complete linked app-functionality "
+        "data set with no tracking and only audited required-reason API access"
+    )
 
 try:
     with open(metadata_path, encoding="utf-8") as source:
