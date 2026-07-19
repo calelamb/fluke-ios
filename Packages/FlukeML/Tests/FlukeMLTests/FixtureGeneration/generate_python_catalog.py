@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import shutil
 
 # Safe here: the fixed-argument git invocation only verifies pinned provenance.
 import subprocess  # nosec B404
+import sys
 from functools import reduce
 from pathlib import Path
+from types import ModuleType
 
 import numpy as np
 
@@ -36,7 +39,7 @@ def _arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _verify_producer(root: Path) -> None:
+def _verify_producer(root: Path) -> Path:
     git = shutil.which("git")
     if git is None:
         raise RuntimeError("git is required to verify producer provenance")
@@ -49,6 +52,36 @@ def _verify_producer(root: Path) -> None:
     ).stdout.strip()
     if head != PRODUCER_COMMIT:
         raise RuntimeError(f"expected producer {PRODUCER_COMMIT}, found {head}")
+    status = subprocess.run(  # nosec
+        [git, "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    if status:
+        raise RuntimeError("producer worktree must be clean")
+    source_root = (root / "src").resolve(strict=True)
+    module_path = (source_root / "fluke_model/mobile_catalog.py").resolve(strict=True)
+    if not module_path.is_relative_to(source_root) or not module_path.is_file():
+        raise RuntimeError("producer module must be a regular file under producer src")
+    return source_root
+
+
+def _import_producer(source_root: Path) -> ModuleType:
+    verified_source = source_root.resolve(strict=True)
+    for name in tuple(sys.modules):
+        if name == "fluke_model" or name.startswith("fluke_model."):
+            del sys.modules[name]
+    sys.path.insert(0, str(verified_source))
+    importlib.invalidate_caches()
+    try:
+        module = importlib.import_module("fluke_model.mobile_catalog")
+    finally:
+        sys.path.pop(0)
+    module_file = Path(module.__file__ or "").resolve(strict=True)
+    if not module_file.is_relative_to(verified_source):
+        raise RuntimeError("producer module did not load from verified producer src")
+    return module
 
 
 def _unit_vector(score: float) -> np.ndarray:
@@ -105,20 +138,17 @@ def main() -> None:
     arguments = _arguments()
     producer_root = arguments.producer_root.resolve(strict=True)
     output = arguments.output.resolve(strict=False)
-    _verify_producer(producer_root)
-    from fluke_model.mobile_catalog import (  # noqa: PLC0415
-        MobileCatalogRelease,
-        ReferenceRow,
-        SCORE_SEMANTICS,
-        write_mobile_catalog,
-    )
+    producer_source = _verify_producer(producer_root)
+    producer = _import_producer(producer_source)
 
     rows = tuple(
-        ReferenceRow(reference_id, whale_id, catalog_id, "synthetic-owned-fixture")
+        producer.ReferenceRow(
+            reference_id, whale_id, catalog_id, "synthetic-owned-fixture"
+        )
         for reference_id, whale_id, catalog_id, _ in SCORE_INPUTS
     )
     embeddings = np.stack(tuple(_unit_vector(score) for *_, score in SCORE_INPUTS))
-    release = MobileCatalogRelease(
+    release = producer.MobileCatalogRelease(
         manifest_version="2026-07-18",
         model_id="facebook/dinov2-small",
         model_revision=MODEL_REVISION,
@@ -129,13 +159,13 @@ def main() -> None:
         index_version="mobile-reference-v1",
         minimum_app_build=1,
         maximum_app_build=100,
-        score_semantics=SCORE_SEMANTICS,
+        score_semantics=producer.SCORE_SEMANTICS,
         score_threshold=0.72,
         margin_threshold=0.08,
         rights_attestation_path=producer_root
         / "tests/fixtures/mobile-catalog/rights-attestation.json",
     )
-    write_mobile_catalog(output, embeddings, rows, release)
+    producer.write_mobile_catalog(output, embeddings, rows, release)
     artifacts = {
         name: _sha256(output / name)
         for name in ("manifest.json", "metadata.json", "references.f16")
@@ -143,7 +173,7 @@ def main() -> None:
     provenance = {
         "producerCommit": PRODUCER_COMMIT,
         "generator": "FixtureGeneration/generate_python_catalog.py",
-        "command": "PYTHONPATH=src .venv/bin/python <generator> --producer-root . --output <python-catalog>",
+        "command": ".venv/bin/python <generator> --producer-root . --output <python-catalog>",
         "inputs": {
             "dimension": DIMENSION,
             "scoreInputs": [list(item) for item in SCORE_INPUTS],

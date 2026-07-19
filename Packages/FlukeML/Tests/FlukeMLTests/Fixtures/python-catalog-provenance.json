@@ -4,7 +4,7 @@
     "metadata.json": "593f4516fb3635d99f2dd92aab6e20a7eaf4f7ebea1f1202343a1a9e982659c8",
     "references.f16": "767507ffca6d004ce614c532c9266ac43d061213bd8134d91c855af758ac695c"
   },
-  "command": "PYTHONPATH=src .venv/bin/python <generator> --producer-root . --output <python-catalog>",
+  "command": ".venv/bin/python <generator> --producer-root . --output <python-catalog>",
   "generator": "FixtureGeneration/generate_python_catalog.py",
   "golden": {
     "identities": [
