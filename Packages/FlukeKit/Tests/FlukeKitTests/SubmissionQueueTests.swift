@@ -1,6 +1,7 @@
 import Foundation
-@testable import FlukeReleaseB
+import SwiftData
 import Testing
+@testable import FlukeReleaseB
 
 @Suite("Durable submission queue")
 struct SubmissionQueueTests {
@@ -201,9 +202,111 @@ struct SubmissionQueueTests {
     #expect(entries.first?.state == .queued)
     #expect(entries.first?.attempts == 0)
   }
+
+  @Test("Lookup observes rows inserted and deleted by a second context after a warm fetch")
+  func lookupObservesSecondContextChanges() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let payload = try SubmissionValidator.validate(.fixture(photoCount: 1))
+    let firstQueue = try SubmissionQueue(directory: directory)
+    let first = try await firstQueue.enqueue(payload: payload, photos: [.fixture(1)])
+    try await firstQueue.retry(id: first.id)
+
+    let secondQueue = try SubmissionQueue(directory: directory)
+    let second = try await secondQueue.enqueue(payload: payload, photos: [.fixture(2)])
+
+    try await firstQueue.retry(id: second.id)
+    try await firstQueue.recordFailure(id: second.id)
+    #expect(try await firstQueue.list().first(where: { $0.id == second.id })?.attempts == 1)
+
+    try await secondQueue.discard(id: first.id)
+    await #expect(throws: SubmissionQueueError.missingEntry) {
+      try await firstQueue.recordFailure(id: first.id)
+    }
+  }
+
+  @Test("Discard rolls back a failed final delete save and reconciliation can finish cleanup")
+  func discardDeleteSaveRollback() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let savePlan = SaveFailurePlan(failingCalls: [3])
+    let queue = try SubmissionQueue(
+      directory: directory,
+      saveContext: savePlan.save
+    )
+    let payload = try SubmissionValidator.validate(.fixture(photoCount: 1))
+    let value = try await queue.enqueue(payload: payload, photos: [.fixture(1)])
+
+    await #expect(throws: InjectedSaveError.self) {
+      try await queue.discard(id: value.id)
+    }
+    #expect(try await queue.list().isEmpty)
+    #expect(try photoFiles(in: directory).isEmpty)
+
+    try await queue.reconcileStorage()
+    #expect(try await queue.list().isEmpty)
+    #expect(savePlan.completedCallCount == 4)
+  }
+
+  @Test("Reconciliation rolls back a failed tombstone delete save and retries safely")
+  func reconciliationDeleteSaveRollback() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    let payload = try SubmissionValidator.validate(.fixture(photoCount: 1))
+    do {
+      let queue = try SubmissionQueue(
+        directory: directory,
+        photoStore: QueuedPhotoStore(directory: directory, failRemoval: true)
+      )
+      let value = try await queue.enqueue(payload: payload, photos: [.fixture(1)])
+      await #expect(throws: QueuedPhotoStoreError.injectedFailure) {
+        try await queue.discard(id: value.id)
+      }
+    }
+
+    let savePlan = SaveFailurePlan(failingCalls: [1])
+    let relaunched = try SubmissionQueue(
+      directory: directory,
+      saveContext: savePlan.save
+    )
+    await #expect(throws: InjectedSaveError.self) {
+      try await relaunched.reconcileStorage()
+    }
+    #expect(try await relaunched.list().isEmpty)
+    #expect(try photoFiles(in: directory).isEmpty)
+
+    try await relaunched.reconcileStorage()
+    #expect(try await relaunched.list().isEmpty)
+    #expect(savePlan.completedCallCount == 2)
+  }
 }
 
 private struct InjectedSaveError: Error {}
+
+private final class SaveFailurePlan: @unchecked Sendable {
+  private let lock = NSLock()
+  private let failingCalls: Set<Int>
+  private var callCount = 0
+
+  init(failingCalls: Set<Int>) {
+    self.failingCalls = failingCalls
+  }
+
+  func save(_ context: ModelContext) throws {
+    lock.lock()
+    callCount += 1
+    let shouldFail = failingCalls.contains(callCount)
+    lock.unlock()
+    if shouldFail { throw InjectedSaveError() }
+    try context.save()
+  }
+
+  var completedCallCount: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return callCount
+  }
+}
 
 private func photoFiles(in directory: URL) throws -> [String] {
   try FileManager.default.contentsOfDirectory(atPath: directory.path())
