@@ -10,10 +10,10 @@ import Testing
 @MainActor
 @Suite("Identify feature rendering")
 struct IdentifyFeatureRenderingTests {
-  @Test("disabled feature renders its honest unavailable state")
-  func disabledStateRenders() throws {
+  @Test("camera-only feature renders its honest matching-inactive state")
+  func cameraOnlyStateRenders() throws {
     let view = IdentifyView(
-      capability: .disabled,
+      capability: .cameraOnly(.notEnabledForRelease),
       browseWhales: {},
       openWhale: { _ in },
       submitSighting: { _ in }
@@ -140,7 +140,7 @@ private struct RenderingIdentifier: LocalIdentifying {
 @MainActor
 @Observable
 private final class RenderingCapabilityState {
-  var capability = IdentifyCapability.disabled
+  var capability = IdentifyCapability.cameraOnly(.notEnabledForRelease)
   var revision: UInt64 = 0
 }
 

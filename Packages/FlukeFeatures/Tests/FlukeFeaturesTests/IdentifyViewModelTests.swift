@@ -8,11 +8,10 @@ import Testing
 @MainActor
 @Suite("On-device identification state machine")
 struct IdentifyViewModelTests {
-  @Test("disabled and unavailable identification never open capture")
+  @Test("unavailable identification never opens capture")
   func unavailableDoesNoWork() async {
     for capability in [
-      IdentifyCapability.disabled,
-      .unavailable(.localArtifactsUnavailable),
+      IdentifyCapability.unavailable(.localArtifactsUnavailable),
       .unavailable(.serverUnsupported),
     ] {
       let media = RecordingIdentifyMedia()
@@ -23,6 +22,39 @@ struct IdentifyViewModelTests {
       #expect(media.openCount == 0)
       #expect(model.availability != .ready)
     }
+  }
+
+  @Test("camera-only mode opens the live camera without any inference")
+  func cameraOnlyOpensWithoutInference() async throws {
+    let media = RecordingIdentifyMedia()
+    let model = IdentifyViewModel(
+      capability: .cameraOnly(.notEnabledForRelease), media: media)
+
+    #expect(model.availability == .cameraOnly(.notEnabledForRelease))
+    #expect(model.unavailableMessage == nil)
+    #expect(model.matchingNotice != nil)
+
+    await model.openCamera()
+    #expect(media.openCount == 1)
+
+    media.yieldWithoutDemand(try Self.frame())
+    await Task.yield()
+    #expect(model.isIdentifying == false)
+    #expect(model.presentation == .idle)
+    #expect(model.result == nil)
+  }
+
+  @Test("camera-only mode never produces submission evidence")
+  func cameraOnlyNeverSuggests() async throws {
+    let media = RecordingIdentifyMedia()
+    let model = IdentifyViewModel(
+      capability: .cameraOnly(.artifactsUnavailable), media: media)
+    await model.openCamera()
+    media.yieldWithoutDemand(try Self.frame())
+    await Task.yield()
+
+    #expect(model.submissionSuggestion == nil)
+    #expect(model.matchingNotice != nil)
   }
 
   @Test("local state maps canonical identities, raw scores, references, and artifact versions")

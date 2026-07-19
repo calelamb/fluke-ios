@@ -88,7 +88,7 @@ def require_output_under(output: Path, derived_data: Path) -> Path:
     return candidate
 
 
-def release_digests(release: Path) -> tuple[str, str]:
+def release_digests(release: Path, identifier_mode: str = "live") -> tuple[str, str]:
     report_path = release / "mobile-release-report.json"
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -96,7 +96,16 @@ def release_digests(release: Path) -> tuple[str, str]:
         raise IdentityError(
             f"mobile release report is missing or invalid: {error}"
         ) from error
-    if not isinstance(report, dict) or report.get("ready") is not True:
+    if not isinstance(report, dict):
+        raise IdentityError("mobile release report must contain an object")
+    if identifier_mode == "dormant":
+        # A dormant archive bundles no catalog: matching stays off in the app,
+        # so the report may be not-ready, but the model package stays pinned.
+        model_digest = package_tree_sha256(release / "FlukeEmbedder.mlpackage")
+        if report.get("modelPackageSha256") != model_digest:
+            raise IdentityError("mobile release report model digest does not match")
+        return model_digest, ""
+    if report.get("ready") is not True:
         raise IdentityError("mobile release report must declare ready:true")
     catalog_digest = sha256_file(release / "catalog/manifest.json")
     for name in ("metadata.json", "references.f16"):
@@ -121,7 +130,9 @@ def generate(arguments: argparse.Namespace) -> dict[str, object]:
         raise IdentityError(
             "model checkout does not match the pinned reviewed revision"
         )
-    model_digest, catalog_digest = release_digests(arguments.release)
+    model_digest, catalog_digest = release_digests(
+        arguments.release, arguments.identifier_mode
+    )
     return {
         "schemaVersion": 1,
         "sourceCommit": source_commit,
@@ -130,6 +141,7 @@ def generate(arguments: argparse.Namespace) -> dict[str, object]:
         "modelSourceTree": model_tree,
         "marketingVersion": VERSION,
         "buildNumber": BUILD,
+        "identifierMode": arguments.identifier_mode,
         "modelPackageSha256": model_digest,
         "catalogManifestSha256": catalog_digest,
         "output": output,
@@ -145,6 +157,9 @@ def parse_arguments() -> argparse.Namespace:  # pragma: no cover - CLI glue
     parser.add_argument("--derived-data", required=True, type=Path)
     parser.add_argument("--marketing-version", required=True)
     parser.add_argument("--build-number", required=True)
+    parser.add_argument(
+        "--identifier-mode", choices=("live", "dormant"), default="live"
+    )
     return parser.parse_args()
 
 

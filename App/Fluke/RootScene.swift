@@ -48,7 +48,7 @@ struct RootScene: View {
   @State private var signInAuthorizationFlow: AppleAuthorizationFlow
   @State private var deletionAuthorizationFlow: AppleAuthorizationFlow
   @State private var capabilities = LaunchCapabilityState.loading
-  @State private var identifyCapability = IdentifyCapability.disabled
+  @State private var identifyCapability = IdentifyCapability.cameraOnly(.notEnabledForRelease)
   @State private var identifyCapabilityRevision: UInt64 = 0
   @State private var cachedIdentificationMode: IdentificationMode?
   @State private var localIdentifierAvailability = LocalIdentifierAvailability.unavailable

@@ -49,13 +49,14 @@ final class AccessibilityUITests: XCTestCase {
   }
 
   @MainActor
-  func testIdentifyDisabledDoesNotRequestCameraOrPhotoPermission() throws {
+  func testIdentifyMatchingInactiveDoesNotRequestCameraOrPhotoPermission() throws {
     let app = launchAccessibilityApp(resetPermissions: true)
     app.tabBars.buttons["Identify"].tap()
     XCTAssertTrue(
-      app.staticTexts["On-device identification unavailable"].waitForExistence(timeout: 8))
+      app.staticTexts["Live matching not active"].waitForExistence(timeout: 8))
     XCTAssertFalse(
-      app.alerts.firstMatch.exists, "Disabled Identify must not request media permission")
+      app.alerts.firstMatch.exists,
+      "Matching-inactive Identify must not request media permission before an explicit tap")
     XCTAssertFalse(app.buttons["Take photo"].exists)
     XCTAssertFalse(app.buttons["Choose photo"].exists)
   }

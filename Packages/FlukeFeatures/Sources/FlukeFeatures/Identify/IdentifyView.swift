@@ -89,6 +89,9 @@ private struct IdentifyReadyView: View {
         if let message = model.unavailableMessage {
           FlukeEmptyState(title: "On-device identification unavailable", message: message)
         } else {
+          if let notice = model.matchingNotice {
+            FlukeEmptyState(title: "Live matching not active", message: notice)
+          }
           controls
         }
         IdentifyResultContent(

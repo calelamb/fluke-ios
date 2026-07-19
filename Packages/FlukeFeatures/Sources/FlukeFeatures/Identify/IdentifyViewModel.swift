@@ -8,8 +8,13 @@ public enum IdentifyUnavailableReason: Equatable, Sendable {
   case serverUnsupported
 }
 
+public enum IdentifyMatchingInactiveReason: Equatable, Sendable {
+  case notEnabledForRelease
+  case artifactsUnavailable
+}
+
 public enum IdentifyCapability: Sendable {
-  case disabled
+  case cameraOnly(IdentifyMatchingInactiveReason)
   case onDevice(any LocalIdentifying)
   case unavailable(IdentifyUnavailableReason)
 }
@@ -19,10 +24,15 @@ extension IdentifyCapability {
     guard case .unavailable(let reason) = self else { return nil }
     return reason
   }
+
+  public var matchingInactiveReason: IdentifyMatchingInactiveReason? {
+    guard case .cameraOnly(let reason) = self else { return nil }
+    return reason
+  }
 }
 
 public enum IdentifyAvailability: Equatable, Sendable {
-  case disabled
+  case cameraOnly(IdentifyMatchingInactiveReason)
   case unavailable(IdentifyUnavailableReason)
   case ready
 }
@@ -82,7 +92,7 @@ public final class IdentifyViewModel {
     self.media = media
     availability =
       switch capability {
-      case .disabled: .disabled
+      case .cameraOnly(let reason): .cameraOnly(reason)
       case .unavailable(let reason): .unavailable(reason)
       case .onDevice: .ready
       }
@@ -107,8 +117,8 @@ public final class IdentifyViewModel {
 
   public var unavailableMessage: String? {
     switch availability {
-    case .disabled:
-      "On-device identification is not enabled for this release."
+    case .cameraOnly:
+      nil
     case .unavailable(.localArtifactsUnavailable):
       "On-device identification is unavailable because its verified model catalog could not load."
     case .unavailable(.serverUnsupported):
@@ -118,8 +128,26 @@ public final class IdentifyViewModel {
     }
   }
 
+  public var matchingNotice: String? {
+    switch availability {
+    case .cameraOnly(.notEnabledForRelease):
+      "Live matching is off in this release: no certified whale catalog ships with this build. "
+        + "The camera preview stays on this device; nothing is captured or uploaded."
+    case .cameraOnly(.artifactsUnavailable):
+      "Live matching is off because the verified whale catalog could not load. "
+        + "The camera preview stays on this device; nothing is captured or uploaded."
+    case .unavailable, .ready:
+      nil
+    }
+  }
+
   public func openCamera() async {
-    guard case .onDevice(let identifier) = capability else { return }
+    let identifier: (any LocalIdentifying)?
+    switch capability {
+    case .onDevice(let value): identifier = value
+    case .cameraOnly: identifier = nil
+    case .unavailable: return
+    }
     let requestedGeneration = lifecycleGeneration
     if let activeOpeningGeneration = openingGeneration {
       await waitForOpening()
@@ -135,19 +163,19 @@ public final class IdentifyViewModel {
   }
 
   private func performOpen(
-    identifier: any LocalIdentifying,
+    identifier: (any LocalIdentifying)?,
     generation: UInt64
   ) async {
     result = nil
-    presentation = .analyzing
-    await identifier.resetSession()
+    presentation = identifier == nil ? .idle : .analyzing
+    if let identifier { await identifier.resetSession() }
     await media.openCamera()
     guard generation == lifecycleGeneration else { return }
     guard media.isCameraPresented else {
       presentation = .idle
       return
     }
-    consumeFrames(using: identifier, generation: generation)
+    if let identifier { consumeFrames(using: identifier, generation: generation) }
   }
 
   public func cameraDidStop() {

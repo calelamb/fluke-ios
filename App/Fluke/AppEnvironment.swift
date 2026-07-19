@@ -313,12 +313,12 @@ enum IdentificationComposition {
   ) -> IdentifyCapability {
     switch effectiveMode(capabilities: capabilities, cachedMode: cachedMode) {
     case .disabled:
-      return .disabled
+      return .cameraOnly(.notEnabledForRelease)
     case .server:
       return .unavailable(.serverUnsupported)
     case .onDevice:
       guard case .available(let identifier) = localIdentifier else {
-        return .unavailable(.localArtifactsUnavailable)
+        return .cameraOnly(.artifactsUnavailable)
       }
       return .onDevice(identifier)
     }

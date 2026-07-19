@@ -134,7 +134,7 @@ struct LaunchCapabilityTests {
       Issue.record("Expected cached on-device identification")
       return
     }
-    #expect(missing.unavailableReason == .localArtifactsUnavailable)
+    #expect(missing.matchingInactiveReason == .artifactsUnavailable)
   }
 
   @Test("server mode is explicitly unsupported in the shipping composition")

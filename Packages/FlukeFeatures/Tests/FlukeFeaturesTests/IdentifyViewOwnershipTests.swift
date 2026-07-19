@@ -7,11 +7,12 @@ import Testing
 @MainActor
 @Suite("Identify view ownership")
 struct IdentifyViewOwnershipTests {
-  @Test("convenience owner keeps disabled capability fail-closed")
-  func disabledConvenienceOwner() {
-    let owner = IdentifyReadyState(capability: .disabled)
+  @Test("convenience owner keeps camera-only capability matching-inactive")
+  func cameraOnlyConvenienceOwner() {
+    let owner = IdentifyReadyState(capability: .cameraOnly(.notEnabledForRelease))
 
-    #expect(owner.model.availability == .disabled)
+    #expect(owner.model.availability == .cameraOnly(.notEnabledForRelease))
+    #expect(owner.model.submissionSuggestion == nil)
   }
 
   @Test("one retained owner wires the model and sheet to the same camera")

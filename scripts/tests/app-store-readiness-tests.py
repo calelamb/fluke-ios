@@ -113,6 +113,30 @@ class BuildIdentityTests(unittest.TestCase):
             with self.assertRaisesRegex(self.identity.IdentityError, "ready:true"):
                 self.identity.release_digests(release)
 
+    def test_dormant_release_pins_model_without_catalog_or_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory)
+            package = release / "FlukeEmbedder.mlpackage"
+            package.mkdir()
+            (package / "model.mlmodel").write_bytes(b"model")
+            model_digest = self.identity.package_tree_sha256(package)
+            report = {
+                "ready": False,
+                "modelPackageSha256": model_digest,
+                "catalogManifestSha256": None,
+            }
+            (release / "mobile-release-report.json").write_text(json.dumps(report))
+            self.assertEqual(
+                self.identity.release_digests(release, "dormant"),
+                (model_digest, ""),
+            )
+            report["modelPackageSha256"] = "0" * 64
+            (release / "mobile-release-report.json").write_text(json.dumps(report))
+            with self.assertRaisesRegex(
+                self.identity.IdentityError, "model digest does not match"
+            ):
+                self.identity.release_digests(release, "dormant")
+
     def test_clean_checkout_provenance_rejects_untracked_files(self) -> None:
         import subprocess
 
@@ -167,13 +191,15 @@ class EvidenceContractTests(unittest.TestCase):
         self.assertIn("6fe4767cd1c5716a04b655c9eaac4bd745471569", text)
         self.assertNotRegex(text, r"top[- ]?1\s*[:=]\s*\d")
 
-    def test_metadata_names_selected_suggestion_provenance(self) -> None:
+    def test_metadata_discloses_dormant_matching_without_claims(self) -> None:
         metadata = json.loads(
             (REPO_ROOT / "AppStore/1.1/en-US/metadata.json").read_text()
         )
         review_notes = metadata["reviewNotes"].lower()
-        self.assertIn("selected suggestion", review_notes)
-        self.assertIn("on-device catalog", review_notes)
+        self.assertIn("dormant", review_notes)
+        self.assertIn("no identification claims", review_notes)
+        self.assertIn("live camera framing preview", review_notes)
+        self.assertNotIn("selected suggestion", review_notes)
 
     @staticmethod
     def complete_report() -> dict:

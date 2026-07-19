@@ -263,15 +263,23 @@ def validate_package(repo_root: Path) -> None:
     if not isinstance(metadata, dict):
         raise VerificationError("metadata must contain an object")
     copy = " ".join(str(metadata[key]) for key in ("description", "promotionalText", "whatsNew", "reviewNotes")).lower()
+    # This release ships the matching engine dormant: copy must disclose the
+    # inactive state and must not claim working identification.
     required_copy = (
         "camera frames", "stay on device", "no analytics or tracking", "explicit sighting submission",
         "optional account", "account email", "identity token", "authorization code", "dorsal fin",
-        "orca individual", "without capture or upload", "ready:true",
+        "matching engine", "dormant", "not active in this release", "rights-cleared", "ready:true",
     )
     missing = next((text for text in required_copy if text not in copy), None)
     if missing:
         raise VerificationError(f"metadata is missing required truthful copy: {missing}")
-    if any(text in copy for text in ("fluke matching", "fluke photo", "at a fluke")):
+    forbidden_copy = (
+        "fluke matching", "fluke photo", "at a fluke",
+        "point the live camera at an orca dorsal fin to compare",
+        "against a certified rights-cleared catalog", "review local suggestions",
+        "certified production catalog",
+    )
+    if any(text in copy for text in forbidden_copy):
         raise VerificationError("metadata contains misleading fluke-identification copy")
     expected_urls = {
         "supportURL": "https://fluke-pnw.vercel.app/support",
