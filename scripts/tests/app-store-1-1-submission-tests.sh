@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.machinery
+import ast
 import json
 import os
 from pathlib import Path
@@ -73,6 +74,7 @@ def make_archive(root, release, identity):
             "CFBundleIdentifier": "app.fluke.Fluke",
             "CFBundleShortVersionString": "1.1",
             "CFBundleVersion": "2",
+            "SigningIdentity": "Apple Distribution: Cale Lamb (86RBV2JZ8F)",
         }
     }
     app_info = {
@@ -81,7 +83,7 @@ def make_archive(root, release, identity):
         "CFBundleVersion": "2",
     }
     for path, value in ((root / "Info.plist", archive_info), (app / "Info.plist", app_info),
-                        (root / "FlukeBuildIdentity.plist", identity)):
+                        (app / "FlukeBuildIdentity.plist", identity)):
         with path.open("wb") as output:
             plistlib.dump(value, output)
     for name in ("manifest.json", "metadata.json", "references.f16"):
@@ -172,6 +174,27 @@ with tempfile.TemporaryDirectory(prefix="fluke-app-store-tests.") as temporary:
     )
     if direct.returncode != 1 or "requires 1-10 accepted opaque 6.9-inch screenshots" not in direct.stderr:
         failures.append("Python verifier is not directly executable under its historical .sh name")
+    hostile_bin = root / "hostile-bin"
+    hostile_python = hostile_bin / "python3"
+    write(hostile_python, "#!/bin/sh\nexit 0\n")
+    hostile_python.chmod(0o755)
+    hostile_environment = {**os.environ, "PATH": f"{hostile_bin}:/usr/bin:/bin"}
+    hostile_launch = subprocess.run(
+        [str(verifier_path), "/nonexistent/model", "/nonexistent/release", "/nonexistent/archive"],
+        capture_output=True,
+        text=True,
+        env=hostile_environment,
+        check=False,
+    )
+    if hostile_launch.returncode == 0:
+        failures.append("hostile PATH python3 bypassed the direct production launcher")
+
+    check("verifier source parses under the trusted platform Python 3.9 grammar",
+          lambda: ast.parse(verifier_path.read_text(encoding="utf-8"), feature_version=(3, 9)))
+    if "stat(follow_symlinks=" in verifier_path.read_text(encoding="utf-8"):
+        failures.append("verifier uses Path.stat(follow_symlinks=), unavailable on platform Python 3.9")
+    check("schema minLength rejects empty metadata values",
+          lambda: module._validate_schema("", {"type": "string", "minLength": 1}), "too short")
 
     screenshot = root / "screen.png"
     shutil.copyfile(repo / "AppStore/1.0/en-US/screenshots/6.9-inch/01-sightings.png", screenshot)
@@ -203,6 +226,30 @@ with tempfile.TemporaryDirectory(prefix="fluke-app-store-tests.") as temporary:
               archive, release, digests, "1" * 40, "2" * 40,
               compiled_model_validator=lambda _: None,
           ))
+
+    unsigned = root / "unsigned.xcarchive"
+    shutil.copytree(archive, unsigned)
+    with (unsigned / "Info.plist").open("rb") as source:
+        unsigned_info = plistlib.load(source)
+    del unsigned_info["ApplicationProperties"]["SigningIdentity"]
+    with (unsigned / "Info.plist").open("wb") as output:
+        plistlib.dump(unsigned_info, output)
+    check("unsigned archive is rejected before attestation trust",
+          lambda: module.validate_archive(
+              unsigned, release, digests, "1" * 40, "2" * 40,
+              compiled_model_validator=lambda _: None,
+          ), "Apple Distribution")
+
+    forged_root_identity = root / "forged-root-identity.xcarchive"
+    shutil.copytree(archive, forged_root_identity)
+    (forged_root_identity / "Products/Applications/Fluke.app/FlukeBuildIdentity.plist").unlink()
+    with (forged_root_identity / "FlukeBuildIdentity.plist").open("wb") as output:
+        plistlib.dump(identity, output)
+    check("unsigned archive-root identity cannot replace signed in-app attestation",
+          lambda: module.validate_archive(
+              forged_root_identity, release, digests, "1" * 40, "2" * 40,
+              compiled_model_validator=lambda _: None,
+          ), "signed app build identity")
     check("compiled model validator loads Core ML rather than trusting membership",
           lambda: module.validate_compiled_model(app / "FlukeEmbedder.mlmodelc"),
           "compiled FlukeEmbedder model load/interface/prediction failed")
@@ -239,12 +286,23 @@ with tempfile.TemporaryDirectory(prefix="fluke-app-store-tests.") as temporary:
               compiled_model_validator=lambda _: None,
           ), "symbolic link")
 
+    duplicate_model_archive = root / "duplicate-model.xcarchive"
+    shutil.copytree(archive, duplicate_model_archive)
+    duplicate = duplicate_model_archive / "Products/Applications/Fluke.app/Frameworks/Nested/FlukeEmbedder.mlmodelc"
+    write(duplicate / "model.mil", b"duplicate")
+    check("recursive duplicate compiled models are rejected",
+          lambda: module.validate_archive(
+              duplicate_model_archive, release, digests, "1" * 40, "2" * 40,
+              compiled_model_validator=lambda _: None,
+          ), "exactly one compiled FlukeEmbedder.mlmodelc")
+
     wrong_identity = root / "wrong-identity.xcarchive"
     shutil.copytree(archive, wrong_identity)
-    with (wrong_identity / "FlukeBuildIdentity.plist").open("rb") as source:
+    wrong_identity_path = wrong_identity / "Products/Applications/Fluke.app/FlukeBuildIdentity.plist"
+    with wrong_identity_path.open("rb") as source:
         changed = plistlib.load(source)
     changed["sourceCommit"] = "f" * 40
-    with (wrong_identity / "FlukeBuildIdentity.plist").open("wb") as output:
+    with wrong_identity_path.open("wb") as output:
         plistlib.dump(changed, output)
     check("archive source identity is exact",
           lambda: module.validate_archive(
@@ -283,20 +341,44 @@ with tempfile.TemporaryDirectory(prefix="fluke-app-store-tests.") as temporary:
         check("dirty relevant model checkout is rejected",
               lambda: module.validate_model_checkout_and_release(dirty_checkout, release),
               "dirty or untracked verifier inputs")
+        poisoned_venv = model_checkout / ".venv/bin/python"
+        check("isolated verifier command never executes the ignored checkout venv",
+              lambda: module.mobile_release_command(model_checkout, release, module._find_uv()),
+              None)
+        try:
+            isolated_command = module.mobile_release_command(model_checkout, release, module._find_uv())
+            rendered = " ".join(str(value) for value in isolated_command)
+            if "--isolated" not in isolated_command or "--no-cache" not in isolated_command or str(poisoned_venv) in rendered:
+                failures.append("mobile release command is not isolated from the ignored checkout venv")
+        except Exception:
+            pass
+        poison_root = root / "poison-smoke"
+        poison_marker = poison_root / "poison-ran"
+        poison_python = poison_root / ".venv/bin/python"
+        write(poison_python, f"#!/bin/sh\ntouch '{poison_marker}'\nexit 0\n")
+        poison_python.chmod(0o755)
+        uv = module._find_uv()
+        model_python = module._find_model_python(uv)
+        isolated_smoke = subprocess.run(
+            [
+                str(uv), "--no-cache", "--no-config", "run", "--isolated", "--no-project",
+                "--python", str(model_python), "--no-python-downloads", "python", "-c",
+                "print('isolated')",
+            ],
+            cwd=poison_root,
+            capture_output=True,
+            text=True,
+            env=module.sanitized_environment(),
+            check=False,
+        )
+        if isolated_smoke.returncode != 0 or poison_marker.exists():
+            failures.append("uv isolated execution invoked the poisoned checkout .venv")
         with tempfile.TemporaryDirectory(prefix=".appstore-model-test.", dir=repo) as model_temporary:
             hand_authored = Path(model_temporary)
             write(hand_authored / "mobile-release-report.json", json.dumps({"ready": True}))
-            def reject_hand_authored_report():
-                try:
-                    module.run_mobile_release_verifier(model_checkout, hand_authored)
-                except module.VerificationError:
-                    regenerated = json.loads((hand_authored / "mobile-release-report.json").read_text())
-                    if regenerated.get("schemaVersion") != 1 or regenerated.get("ready") is not False or len(regenerated.get("gates", [])) < 17:
-                        raise AssertionError("authoritative verifier did not replace the hand-authored report")
-                    raise
             check("hand-authored report without underlying evidence fails fresh verifier",
-                  reject_hand_authored_report,
-                  "fresh mobile release verification failed")
+                  lambda: module.validate_release_report(hand_authored),
+                  "fields do not match the exact schema")
     else:
         failures.append(f"reviewed model checkout not found at {model_checkout}")
 

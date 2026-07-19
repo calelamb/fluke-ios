@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3 -I
 """Fail-closed App Store 1.1 verification bound to source, evidence, and archive."""
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from typing import Callable
+from typing import Callable, Optional
 
 MODEL_SOURCE_COMMIT = "6fe4767cd1c5716a04b655c9eaac4bd745471569"
 MODEL_SOURCE_TREE = "fba0c558d30dd4b240e40c931b0ec8e5f4e9d29e"
@@ -23,6 +23,8 @@ MODEL_VERIFIER_SHA256 = "188e88512d500b932794dc56e45f8e7a305cc22fd9da2a482890e21
 MODEL_UV_LOCK_SHA256 = "f9be2cbfe4efcb499f074b660ca6ef3ce04c5ac1a56b8233456cd39bfc7260e7"
 MODEL_PYPROJECT_SHA256 = "70fb5c14ecd6a67f43d3023d82b6cfbd3408c5d94415a1ba0681f8ceeefce098"
 UV_EXECUTABLE_SHA256 = "51f0ae3c531a124727fa39e16e8599f2e371e427822a4aa92ebf667b52548b43"
+MODEL_PYTHON_VERSION = "3.11.15"
+MODEL_PYTHON_SHA256 = "4c78423e7d5986362ac04df40edb18cdd1174f9818d653402e3abbd2a5bbf793"
 VERSION = "1.1"
 BUILD = "2"
 BUNDLE_ID = "app.fluke.Fluke"
@@ -41,7 +43,7 @@ class _ArgumentParser(argparse.ArgumentParser):
         raise VerificationError(f"usage: MODEL_CHECKOUT RELEASE_DIRECTORY ARCHIVE ({message})")
 
 
-def parse_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
+def parse_arguments(arguments: Optional[list[str]] = None) -> argparse.Namespace:
     parser = _ArgumentParser(
         description="Verify App Store 1.1 against a reviewed model checkout and real archive"
     )
@@ -54,13 +56,11 @@ def parse_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
 def sanitized_environment() -> dict[str, str]:
     """Return the small fixed environment used for all release subprocesses."""
     return {
-        "HOME": str(Path.home()),
         "PATH": "/usr/bin:/bin",
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "PYTHONNOUSERSITE": "1",
         "UV_NO_CONFIG": "1",
-        "UV_OFFLINE": "1",
     }
 
 
@@ -78,7 +78,7 @@ def _reject_symlink_components(path: Path, label: str) -> None:
 def _require_regular(path: Path, label: str) -> None:
     _reject_symlink_components(path, label)
     try:
-        mode = path.stat(follow_symlinks=False).st_mode
+        mode = os.lstat(path).st_mode
     except OSError as error:
         raise VerificationError(f"{label} is missing: {error}") from error
     if not stat.S_ISREG(mode):
@@ -178,7 +178,7 @@ def screenshot_digest_denylist(app_store_1_0: Path) -> set[str]:
 
 def validate_screenshot_path(path: Path, denylist: set[str]) -> None:
     _require_regular(path, "App Store 1.1 screenshot")
-    if path.stat(follow_symlinks=False).st_size > MAX_SCREENSHOT_BYTES:
+    if os.lstat(path).st_size > MAX_SCREENSHOT_BYTES:
         raise VerificationError(f"App Store 1.1 screenshot exceeds the bounded size: {path.name}")
     digest = _sha256_file(path, "App Store 1.1 screenshot")
     if digest in denylist:
@@ -187,7 +187,9 @@ def validate_screenshot_path(path: Path, denylist: set[str]) -> None:
 
 def _validate_screenshot_geometry(path: Path) -> None:
     command = ["/usr/bin/sips", "-g", "pixelWidth", "-g", "pixelHeight", "-g", "hasAlpha", str(path)]
-    result = subprocess.run(command, capture_output=True, text=True, env=sanitized_environment(), check=False)
+    result = subprocess.run(
+        command, capture_output=True, text=True, env=sanitized_environment(), check=False
+    )
     if result.returncode != 0:
         raise VerificationError(f"cannot inspect screenshot {path.name}: {result.stderr.strip()}")
     width = re.search(r"pixelWidth:\s*(\d+)", result.stdout)
@@ -236,8 +238,11 @@ def _validate_schema(value: object, schema: dict[str, object], path: str = "$") 
         if isinstance(item_schema, dict):
             for index, child in enumerate(value):
                 _validate_schema(child, item_schema, f"{path}[{index}]")
-    elif isinstance(value, str) and len(value) > schema.get("maxLength", len(value)):
-        raise VerificationError(f"{path} exceeds {schema['maxLength']} characters")
+    elif isinstance(value, str):
+        if len(value) < schema.get("minLength", 0):
+            raise VerificationError(f"{path} is too short")
+        if len(value) > schema.get("maxLength", len(value)):
+            raise VerificationError(f"{path} exceeds {schema['maxLength']} characters")
 
 
 def validate_package(repo_root: Path) -> None:
@@ -358,14 +363,38 @@ def _find_uv() -> Path:
     return candidate
 
 
+def _find_model_python(uv: Path) -> Path:
+    command = [
+        str(uv), "--no-config", "--offline", "python", "find", "--no-project",
+        "--managed-python", "--no-python-downloads", MODEL_PYTHON_VERSION,
+    ]
+    result = subprocess.run(
+        command, capture_output=True, text=True, env=sanitized_environment(), check=False
+    )
+    if result.returncode != 0:
+        raise VerificationError(f"pinned model Python is unavailable: {result.stderr.strip()}")
+    candidate = Path(result.stdout.strip()).absolute()
+    if candidate.is_symlink() or not candidate.is_file() or not os.access(candidate, os.X_OK):
+        raise VerificationError("model Python must resolve to a regular executable")
+    if _sha256_file(candidate, "model Python executable") != MODEL_PYTHON_SHA256:
+        raise VerificationError("model Python executable does not match the pinned identity")
+    return candidate
+
+
+def mobile_release_command(checkout: Path, release: Path, uv: Path) -> list[str]:
+    model_python = _find_model_python(uv)
+    return [
+        str(uv), "--no-cache", "--no-config", "run", "--isolated", "--locked",
+        "--python", str(model_python), "--no-python-downloads", "--project", str(checkout),
+        "python", str(checkout / "scripts/verify_mobile_release.py"),
+        "--release-dir", str(release), "--report", str(release / REPORT_NAME),
+    ]
+
+
 def run_mobile_release_verifier(checkout: Path, release: Path) -> None:
     report = release / REPORT_NAME
     _reject_symlink_components(report, "mobile release report")
-    command = [
-        str(_find_uv()), "run", "--offline", "--locked", "--project", str(checkout), "python",
-        str(checkout / "scripts/verify_mobile_release.py"), "--release-dir", str(release),
-        "--report", str(report),
-    ]
+    command = mobile_release_command(checkout, release, _find_uv())
     result = subprocess.run(command, capture_output=True, text=True, env=sanitized_environment(), check=False)
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
@@ -449,10 +478,18 @@ def validate_xcode_build_settings(repo_root: Path) -> None:
         raise VerificationError(f"xcodebuild Release settings failed: {result.stderr.strip()}")
     values: dict[str, str] = {}
     for line in result.stdout.splitlines():
-        match = re.match(r"\s*(TARGET_NAME|PRODUCT_BUNDLE_IDENTIFIER|MARKETING_VERSION|CURRENT_PROJECT_VERSION)\s*=\s*(.*?)\s*$", line)
+        match = re.match(
+            r"\s*(TARGET_NAME|PRODUCT_BUNDLE_IDENTIFIER|MARKETING_VERSION|CURRENT_PROJECT_VERSION)\s*=\s*(.*?)\s*$",
+            line,
+        )
         if match:
             values[match.group(1)] = match.group(2)
-    expected = {"TARGET_NAME": "Fluke", "PRODUCT_BUNDLE_IDENTIFIER": BUNDLE_ID, "MARKETING_VERSION": VERSION, "CURRENT_PROJECT_VERSION": BUILD}
+    expected = {
+        "TARGET_NAME": "Fluke",
+        "PRODUCT_BUNDLE_IDENTIFIER": BUNDLE_ID,
+        "MARKETING_VERSION": VERSION,
+        "CURRENT_PROJECT_VERSION": BUILD,
+    }
     if values != expected:
         raise VerificationError(f"sanitized xcodebuild settings do not match shipping contract: {values}")
 
@@ -463,14 +500,28 @@ def _archive_app(archive: Path) -> tuple[Path, dict[str, object], dict[str, obje
         raise VerificationError("App Store archive must be a regular directory")
     archive_info = read_plist_no_follow(archive / "Info.plist", "archive Info.plist")
     properties = archive_info.get("ApplicationProperties")
-    if not isinstance(properties, dict) or properties.get("ApplicationPath") != "Applications/Fluke.app":
+    if (
+        not isinstance(properties, dict)
+        or properties.get("ApplicationPath") != "Applications/Fluke.app"
+    ):
         raise VerificationError("archive application path must be Applications/Fluke.app")
+    signing_identity = properties.get("SigningIdentity")
+    if (
+        not isinstance(signing_identity, str)
+        or not signing_identity.startswith("Apple Distribution:")
+        or not signing_identity.endswith(" (86RBV2JZ8F)")
+    ):
+        raise VerificationError("archive must use an Apple Distribution identity for team 86RBV2JZ8F")
     app = archive / "Products/Applications/Fluke.app"
     _reject_symlink_components(app, "archived Fluke app")
     if not app.is_dir():
         raise VerificationError("archived Fluke app is missing")
     app_info = read_plist_no_follow(app / "Info.plist", "archived app Info.plist")
-    expected = {"CFBundleIdentifier": BUNDLE_ID, "CFBundleShortVersionString": VERSION, "CFBundleVersion": BUILD}
+    expected = {
+        "CFBundleIdentifier": BUNDLE_ID,
+        "CFBundleShortVersionString": VERSION,
+        "CFBundleVersion": BUILD,
+    }
     for key, value in expected.items():
         if properties.get(key) != value or app_info.get(key) != value:
             raise VerificationError(f"archive and app {key} must equal {value}")
@@ -497,8 +548,10 @@ def validate_archive(
         archived = app / "IdentifierCatalog" / filename
         if _sha256_file(released, f"release catalog {filename}") != _sha256_file(archived, f"archived catalog {filename}"):
             raise VerificationError(f"archived IdentifierCatalog does not match release: {filename}")
-    model_candidates = (app / "FlukeEmbedder.mlmodelc", app / "Models/FlukeEmbedder.mlmodelc")
-    compiled = [path for path in model_candidates if path.exists() or path.is_symlink()]
+    compiled = [
+        path for path in app.rglob("FlukeEmbedder.mlmodelc")
+        if path.exists() or path.is_symlink()
+    ]
     if len(compiled) != 1:
         raise VerificationError("archive must contain exactly one compiled FlukeEmbedder.mlmodelc")
     _reject_symlink_components(compiled[0], "compiled FlukeEmbedder.mlmodelc")
@@ -506,7 +559,9 @@ def validate_archive(
         raise VerificationError("compiled FlukeEmbedder.mlmodelc must be a regular directory")
     for entry in compiled[0].rglob("*"):
         _reject_symlink_components(entry, "compiled FlukeEmbedder.mlmodelc")
-    identity = read_plist_no_follow(archive / "FlukeBuildIdentity.plist", "archive build identity")
+    identity = read_plist_no_follow(
+        app / "FlukeBuildIdentity.plist", "signed app build identity"
+    )
     expected_identity = {
         "schemaVersion": 1,
         "sourceCommit": source_commit,
@@ -594,14 +649,14 @@ def verify_submission(repo_root: Path, model_checkout: Path, release: Path, arch
     run_mobile_release_verifier(model_checkout, release)
     digests = validate_release_report(release)
     source_commit, source_tree = _ios_source_identity(repo_root)
+    _run_existing_archive_validators(repo_root, archive)
     validate_archive(
         archive, release, digests, source_commit, source_tree,
         compiled_model_validator=validate_compiled_model,
     )
-    _run_existing_archive_validators(repo_root, archive)
 
 
-def main(arguments: list[str] | None = None) -> int:
+def main(arguments: Optional[list[str]] = None) -> int:
     args = parse_arguments(arguments)
     repo_root = Path(__file__).resolve().parent.parent
     try:

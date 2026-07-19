@@ -15,7 +15,10 @@ scripts/verify-app-store-1-1-submission.sh \
   /absolute/path/to/Fluke.xcarchive
 ```
 
-The executable keeps its historical `.sh` name but is implemented in Python. It accepts exactly
+The executable keeps its historical `.sh` name but is implemented in Python and uses the trusted
+platform launcher `/usr/bin/python3 -I`; hostile `PATH`, `python3`, `PYTHONPATH`, and user-site
+entries cannot replace its interpreter or imports. The
+source remains compatible with the platform Python 3.9 runtime. It accepts exactly
 three positional production inputs and has no test, fixture, environment, build-settings, app-root,
 or membership override. It constructs a minimal subprocess environment, so ambient `PATH` and
 `XCODE_XCCONFIG_FILE` values cannot change release verification.
@@ -27,8 +30,13 @@ The fluke-model checkout is authenticated to source commit
 files under the authoritative verifier inputs. Using an absolute regular `uv` executable, the
 pinned executable SHA-256
 `51f0ae3c531a124727fa39e16e8599f2e371e427822a4aa92ebf667b52548b43`, the pinned lockfile,
-offline mode, and a clean environment, it invokes `scripts/verify_mobile_release.py`
-fresh against the supplied release directory. That invocation overwrites or produces
+and a clean environment, it locates Python 3.11.15 by exact executable SHA-256
+`4c78423e7d5986362ac04df40edb18cdd1174f9818d653402e3abbd2a5bbf793`. It then uses
+`uv run --isolated --locked --no-cache --no-python-downloads` to create the verifier environment
+without reading or executing the checkout's ignored `.venv`. Locked dependency identities may be
+downloaded into the ephemeral no-cache environment. The isolated environment invokes
+`scripts/verify_mobile_release.py` fresh against the supplied release directory. That invocation
+overwrites or produces
 `mobile-release-report.json` and must exit zero. Only then does the App Store verifier validate
 the report schema and independently recompute the Core ML package-tree and catalog-manifest
 digests. A hand-authored `ready:true` report without the rights, export, catalog, parity, and
@@ -42,12 +50,15 @@ Info.plists. It compares these archived catalog resources byte-for-byte with the
 - `Products/Applications/Fluke.app/IdentifierCatalog/metadata.json`
 - `Products/Applications/Fluke.app/IdentifierCatalog/references.f16`
 
-The archive must contain exactly one compiled `FlukeEmbedder.mlmodelc`. The verifier loads it
+The archive must be signed with an Apple Distribution identity for team `86RBV2JZ8F`; unsigned,
+ad-hoc, development, and other-team archives fail. Existing archive signature validation runs
+before the build attestation is trusted. The verifier recursively searches the entire signed app
+and requires exactly one compiled `FlukeEmbedder.mlmodelc`. It loads that model
 with Core ML, enforces the `pixels` float32 `[1,3,224,224]` input and `embedding` float32
 `[1,384]` output, performs a prediction, and requires a finite unit-normalized embedding. Existing
 archive privacy, signing, bundle, and deployment validators also run.
 
-`FlukeBuildIdentity.plist` at the archive root must exactly record schema version 1, the current
+`FlukeBuildIdentity.plist` inside the signed `Fluke.app` must exactly record schema version 1, the current
 clean iOS source commit and tree, the pinned model commit and tree, version/build, and the verified
 model-package and catalog-manifest digests. Direct parsing of the Fluke target's Release
 configuration and sanitized `xcodebuild -showBuildSettings` must independently agree on 1.1/2.
