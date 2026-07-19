@@ -1,4 +1,5 @@
 import CryptoKit
+import CoreFoundation
 import Foundation
 
 public struct ReferenceCatalog: Sendable {
@@ -40,15 +41,16 @@ public struct ReferenceCatalog: Sendable {
         else {
             throw IdentifierArtifactError.invalidAppBuild
         }
-        let directory = resourceURL.appendingPathComponent(
-            catalogDirectoryName,
-            isDirectory: true
-        )
-        return try load(
-            directory: directory,
-            compatibility: compatibility,
-            appBuild: appBuild
-        )
+        return try CatalogArtifactReader.withSubdirectory(
+            parent: resourceURL,
+            name: catalogDirectoryName
+        ) { descriptor in
+            try load(
+                directoryDescriptor: descriptor,
+                compatibility: compatibility,
+                appBuild: appBuild
+            )
+        }
     }
 
     public static func load(
@@ -57,13 +59,25 @@ public struct ReferenceCatalog: Sendable {
         appBuild: Int
     ) throws -> ReferenceCatalog {
         guard appBuild > 0 else { throw IdentifierArtifactError.invalidAppBuild }
-        try validateDirectory(directory)
+        return try CatalogArtifactReader.withDirectory(at: directory) { descriptor in
+            try load(
+                directoryDescriptor: descriptor,
+                compatibility: compatibility,
+                appBuild: appBuild
+            )
+        }
+    }
 
-        let manifestData = try readJSON(named: "manifest.json", from: directory)
+    private static func load(
+        directoryDescriptor: Int32,
+        compatibility: IdentifierArtifactCompatibility,
+        appBuild: Int
+    ) throws -> ReferenceCatalog {
+        let manifestData = try readJSON(named: "manifest.json", from: directoryDescriptor)
         let manifest = try decodeManifest(manifestData)
         try validate(manifest: manifest, compatibility: compatibility, appBuild: appBuild)
 
-        let metadataData = try readJSON(named: "metadata.json", from: directory)
+        let metadataData = try readJSON(named: "metadata.json", from: directoryDescriptor)
         let records = try decodeMetadata(metadataData)
         try requireDigest(
             metadataData,
@@ -71,8 +85,7 @@ public struct ReferenceCatalog: Sendable {
             artifactName: "metadata.json"
         )
 
-        let vectorURL = directory.appendingPathComponent("references.f16")
-        let vectorData = try readVectors(from: vectorURL, manifest: manifest)
+        let vectorData = try readVectors(from: directoryDescriptor, manifest: manifest)
         let vectors = try decodeVectors(vectorData, manifest: manifest)
         try validateMetadata(records, manifest: manifest)
 
@@ -83,7 +96,7 @@ public struct ReferenceCatalog: Sendable {
         guard embedding.count == dimension, embedding.allSatisfy(\.isFinite) else {
             throw IdentifierArtifactError.invalidQuery
         }
-        guard Self.isNormalized(embedding) else {
+        guard Self.isNormalized(embedding, tolerance: Self.sourceNormTolerance) else {
             throw IdentifierArtifactError.invalidQuery
         }
     }
@@ -97,67 +110,58 @@ struct ReferenceRecord: Equatable, Sendable {
 }
 
 private extension ReferenceCatalog {
-    static let requiredFiles = Set(["manifest.json", "metadata.json", "references.f16"])
     static let metadataKeys = Set(["referencePhotoId", "whaleId", "catalogId", "sourceId"])
     static let scoreSemantics = "uncalibrated_similarity_not_probability"
     static let float16ByteCount = 2
-    static let normTolerance: Float = 0.001
+    static let sourceNormTolerance: Float = 0.001
+    static let float16NormTolerance: Float = 0.002
+    static let integerManifestFields = [
+        "schemaVersion", "embeddingDimension", "minimumAppBuild", "maximumAppBuild",
+        "referenceCount", "catalogCount",
+    ]
+    static let thresholdManifestFields = ["scoreThreshold", "marginThreshold"]
 
-    static func validateDirectory(_ directory: URL) throws {
-        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey]
-        guard
-            let values = try? directory.resourceValues(forKeys: keys),
-            values.isDirectory == true,
-            values.isSymbolicLink != true,
-            let entries = try? FileManager.default.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: nil
-            ),
-            Set(entries.map(\.lastPathComponent)) == requiredFiles
-        else {
-            throw IdentifierArtifactError.invalidArtifactDirectory
-        }
-    }
-
-    static func readJSON(named name: String, from directory: URL) throws -> Data {
-        let url = directory.appendingPathComponent(name)
-        let size = try regularFileSize(url, name: name)
-        guard size <= maximumJSONBytes else {
-            throw IdentifierArtifactError.artifactTooLarge(name)
-        }
-        guard let data = try? Data(contentsOf: url), String(data: data, encoding: .utf8) != nil else {
+    static func readJSON(named name: String, from directoryDescriptor: Int32) throws -> Data {
+        let data = try CatalogArtifactReader.readJSON(
+            named: name,
+            from: directoryDescriptor,
+            maximumBytes: maximumJSONBytes
+        )
+        guard String(data: data, encoding: .utf8) != nil else {
             throw IdentifierArtifactError.invalidJSON(name)
         }
         return data
-    }
-
-    static func regularFileSize(_ url: URL, name: String) throws -> Int {
-        let keys: Set<URLResourceKey> = [
-            .fileSizeKey,
-            .isRegularFileKey,
-            .isSymbolicLinkKey,
-        ]
-        guard let values = try? url.resourceValues(forKeys: keys) else {
-            throw IdentifierArtifactError.missingArtifact(name)
-        }
-        guard values.isRegularFile == true, values.isSymbolicLink != true else {
-            throw IdentifierArtifactError.unreadableArtifact(name)
-        }
-        guard let size = values.fileSize, size >= 0 else {
-            throw IdentifierArtifactError.unreadableArtifact(name)
-        }
-        return size
     }
 
     static func decodeManifest(_ data: Data) throws -> IdentifierArtifactManifest {
         guard
             let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             Set(payload.keys) == IdentifierArtifactManifest.expectedKeys,
+            try validateRawNumbers(payload),
             let manifest = try? JSONDecoder().decode(IdentifierArtifactManifest.self, from: data)
         else {
             throw IdentifierArtifactError.invalidManifestSchema
         }
         return manifest
+    }
+
+    static func validateRawNumbers(_ payload: [String: Any]) throws -> Bool {
+        for field in integerManifestFields {
+            guard let number = payload[field] as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID(),
+                  !CFNumberIsFloatType(number) else {
+                throw IdentifierArtifactError.invalidManifest(field)
+            }
+        }
+        for field in thresholdManifestFields {
+            guard let number = payload[field] as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID(),
+                  number.doubleValue.isFinite,
+                  (-1.0 ... 1.0).contains(number.doubleValue) else {
+                throw IdentifierArtifactError.invalidManifest(field)
+            }
+        }
+        return true
     }
 
     static func validate(
@@ -299,15 +303,15 @@ private extension ReferenceCatalog {
     }
 
     static func readVectors(
-        from url: URL,
+        from directoryDescriptor: Int32,
         manifest: IdentifierArtifactManifest
     ) throws -> Data {
         let expected = try expectedVectorBytes(manifest)
-        let size = try regularFileSize(url, name: "references.f16")
-        guard size == expected else { throw IdentifierArtifactError.invalidVectorLength }
-        guard let data = try? Data(contentsOf: url), data.count == expected else {
-            throw IdentifierArtifactError.unreadableArtifact("references.f16")
-        }
+        let data = try CatalogArtifactReader.readExact(
+            named: "references.f16",
+            from: directoryDescriptor,
+            byteCount: expected
+        )
         guard SHA256.hash(data: data).hexDigest == manifest.vectorsSHA256 else {
             throw IdentifierArtifactError.digestMismatch("references.f16")
         }
@@ -339,16 +343,22 @@ private extension ReferenceCatalog {
         for row in 0 ..< manifest.referenceCount {
             let start = row * manifest.embeddingDimension
             let end = start + manifest.embeddingDimension
-            guard isNormalized(values[start ..< end]) else {
+            guard isNormalized(
+                values[start ..< end],
+                tolerance: float16NormTolerance
+            ) else {
                 throw IdentifierArtifactError.invalidVectors
             }
         }
         return values
     }
 
-    static func isNormalized<C: Collection>(_ values: C) -> Bool where C.Element == Float {
+    static func isNormalized<C: Collection>(
+        _ values: C,
+        tolerance: Float
+    ) -> Bool where C.Element == Float {
         let sum = values.reduce(Float.zero) { $0 + $1 * $1 }
-        return sum.isFinite && abs(sqrt(sum) - 1) <= normTolerance
+        return sum.isFinite && abs(sqrt(sum) - 1) <= tolerance
     }
 
     static func requireDigest(

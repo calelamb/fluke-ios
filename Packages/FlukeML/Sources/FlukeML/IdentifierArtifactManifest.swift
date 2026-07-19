@@ -44,6 +44,45 @@ public struct IdentifierArtifactManifest: Codable, Equatable, Sendable {
         case scoreThreshold
         case marginThreshold
     }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        manifestVersion = try values.decode(String.self, forKey: .manifestVersion)
+        modelID = try values.decode(String.self, forKey: .modelID)
+        modelRevision = try values.decode(String.self, forKey: .modelRevision)
+        modelVersion = try values.decode(String.self, forKey: .modelVersion)
+        modelSHA256 = try values.decode(String.self, forKey: .modelSHA256)
+        preprocessingVersion = try values.decode(String.self, forKey: .preprocessingVersion)
+        embeddingDimension = try values.decode(Int.self, forKey: .embeddingDimension)
+        dtype = try values.decode(String.self, forKey: .dtype)
+        indexVersion = try values.decode(String.self, forKey: .indexVersion)
+        minimumAppBuild = try values.decode(Int.self, forKey: .minimumAppBuild)
+        maximumAppBuild = try values.decode(Int.self, forKey: .maximumAppBuild)
+        referenceCount = try values.decode(Int.self, forKey: .referenceCount)
+        catalogCount = try values.decode(Int.self, forKey: .catalogCount)
+        vectorsSHA256 = try values.decode(String.self, forKey: .vectorsSHA256)
+        metadataSHA256 = try values.decode(String.self, forKey: .metadataSHA256)
+        rightsAttestationSHA256 = try values.decode(String.self, forKey: .rightsAttestationSHA256)
+        scoreSemantics = try values.decode(String.self, forKey: .scoreSemantics)
+        scoreThreshold = try Self.decodeThreshold(from: values, forKey: .scoreThreshold)
+        marginThreshold = try Self.decodeThreshold(from: values, forKey: .marginThreshold)
+    }
+
+    private static func decodeThreshold(
+        from values: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) throws -> Float {
+        let value = try values.decode(Double.self, forKey: key)
+        guard value.isFinite, (-1.0 ... 1.0).contains(value) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key,
+                in: values,
+                debugDescription: "Threshold must be finite and within [-1, 1]."
+            )
+        }
+        return Float(value)
+    }
 }
 
 extension IdentifierArtifactManifest {
