@@ -12,6 +12,7 @@
 		A10000032FA6000000000003 /* FlukeFeatures in Frameworks */ = {isa = PBXBuildFile; productRef = A10100032FA6000000000003 /* FlukeFeatures */; };
 		A10000042FA6000000000004 /* FlukeKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10100012FA6000000000001 /* FlukeKit */; };
 		A10000052FA6000000000005 /* FlukeReleaseB in Frameworks */ = {isa = PBXBuildFile; productRef = A10100042FA6000000000004 /* FlukeReleaseB */; };
+		A10000062FA6000000000006 /* FlukeML in Frameworks */ = {isa = PBXBuildFile; productRef = A10100052FA6000000000005 /* FlukeML */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -78,6 +79,7 @@
 			files = (
 				A10000012FA6000000000001 /* FlukeKit in Frameworks */,
 				A10000052FA6000000000005 /* FlukeReleaseB in Frameworks */,
+				A10000062FA6000000000006 /* FlukeML in Frameworks */,
 				A10000022FA6000000000002 /* FlukeUI in Frameworks */,
 				A10000032FA6000000000003 /* FlukeFeatures in Frameworks */,
 			);
@@ -154,6 +156,7 @@
 			packageProductDependencies = (
 				A10100012FA6000000000001 /* FlukeKit */,
 				A10100042FA6000000000004 /* FlukeReleaseB */,
+				A10100052FA6000000000005 /* FlukeML */,
 				A10100022FA6000000000002 /* FlukeUI */,
 				A10100032FA6000000000003 /* FlukeFeatures */,
 			);
@@ -246,6 +249,7 @@
 				A10200012FA6000000000001 /* XCLocalSwiftPackageReference "../Packages/FlukeKit" */,
 				A10200022FA6000000000002 /* XCLocalSwiftPackageReference "../Packages/FlukeUI" */,
 				A10200032FA6000000000003 /* XCLocalSwiftPackageReference "../Packages/FlukeFeatures" */,
+				A10200042FA6000000000004 /* XCLocalSwiftPackageReference "../Packages/FlukeML" */,
 			);
 			projectDirPath = "";
 			projectRoot = "";
@@ -771,6 +775,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../Packages/FlukeFeatures;
 		};
+		A10200042FA6000000000004 /* XCLocalSwiftPackageReference "../Packages/FlukeML" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Packages/FlukeML;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -793,6 +801,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A10200012FA6000000000001 /* XCLocalSwiftPackageReference "../Packages/FlukeKit" */;
 			productName = FlukeReleaseB;
+		};
+		A10100052FA6000000000005 /* FlukeML */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10200042FA6000000000004 /* XCLocalSwiftPackageReference "../Packages/FlukeML" */;
+			productName = FlukeML;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
