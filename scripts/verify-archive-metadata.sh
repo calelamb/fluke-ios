@@ -26,10 +26,11 @@ properties = archive_info.get("ApplicationProperties", {})
 if properties.get("CFBundleIdentifier") != expected_bundle_id:
     raise SystemExit("archive bundle identifier mismatch")
 signing_identity = properties.get("SigningIdentity")
-if signing_identity is not None and (
-    not isinstance(signing_identity, str) or not signing_identity.strip()
-):
+if signing_identity is not None and not isinstance(signing_identity, str):
     raise SystemExit("archive signing identity is invalid")
+# An unsigned verification archive records either no SigningIdentity or an
+# empty one depending on the Xcode host; both mean "unsigned" here.
+signing_identity = (signing_identity or "").strip()
 distribution_prefixes = ("Apple Distribution:", "iPhone Distribution:")
 if signing_identity and not signing_identity.startswith(distribution_prefixes):
     raise SystemExit("signed archive must use an Apple or iPhone Distribution identity")
