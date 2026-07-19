@@ -34,7 +34,11 @@ and a clean environment, it locates Python 3.11.15 by exact executable SHA-256
 `4c78423e7d5986362ac04df40edb18cdd1174f9818d653402e3abbd2a5bbf793`. It then uses
 the complete managed-Python distribution tree SHA-256
 `8115357d8d2ad864ef1dc2c90b838df90f3e6b040f9992ff3c8986d0e5470d5f`; the launcher,
-stdlib, dynamic libraries, and sibling runtime files must all match. It then uses
+stdlib, dynamic libraries, and sibling runtime files must all match. After authentication, the
+complete distribution is copied with no-follow, descriptor-relative reads into a private
+temporary directory. The copy is hashed again and must match the same reviewed tree identity;
+only its interpreter path is supplied to `uv`, so a later replacement in the mutable managed
+installation cannot control execution. It then uses
 `uv run --isolated --locked --no-cache --no-python-downloads` to create the verifier environment
 without reading or executing the checkout's ignored `.venv`. Locked dependency identities may be
 downloaded into the ephemeral no-cache environment. The isolated environment invokes
@@ -61,9 +65,12 @@ The archive must be signed with an Apple Distribution certificate for team `86RB
 ad-hoc, development, and other-team archives fail. The archive-root `SigningIdentity` string is not
 trusted. The verifier cryptographically validates the app signature, reads its certificate chain
 and subject from `codesign`, decodes the distribution provisioning profile, and requires matching
-team/application entitlements with `get-task-allow` false. Existing deep signature validation runs
-before the build attestation is trusted. The verifier recursively searches the entire signed app
-and requires exactly one compiled `FlukeEmbedder.mlmodelc`. It loads that model
+team/application entitlements with `get-task-allow` false. The profile itself must contain the
+App Store distribution entitlement `beta-reports-active` set to true, must not list any
+`ProvisionedDevices`, and must not enable `ProvisionsAllDevices`; this rejects Ad Hoc, development,
+and enterprise profiles even when the signing certificate says Apple Distribution. Existing deep
+signature validation runs before the build attestation is trusted. The verifier recursively
+searches the entire signed app and requires exactly one compiled `FlukeEmbedder.mlmodelc`. It loads that model
 with Core ML, enforces the `pixels` float32 `[1,3,224,224]` input and `embedding` float32
 `[1,384]` output, performs a prediction, and requires a finite unit-normalized embedding. Existing
 archive privacy, signing, bundle, and deployment validators also run.

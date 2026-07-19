@@ -255,10 +255,14 @@ TeamIdentifier=86RBV2JZ8F
         "com.apple.developer.team-identifier": "86RBV2JZ8F",
         "get-task-allow": False,
     }
+    valid_profile_entitlements = {
+        **valid_entitlements,
+        "beta-reports-active": True,
+    }
     valid_profile = {
         "TeamIdentifier": ["86RBV2JZ8F"],
         "ApplicationIdentifierPrefix": ["86RBV2JZ8F"],
-        "Entitlements": valid_entitlements,
+        "Entitlements": valid_profile_entitlements,
         "ProvisionsAllDevices": False,
     }
     check("captured Apple Distribution signing evidence is accepted",
@@ -275,6 +279,22 @@ TeamIdentifier=86RBV2JZ8F
           lambda: module.validate_signing_evidence(
               wrong_team_codesign, valid_entitlements, valid_profile
           ), "team")
+    adhoc_profile = {
+        **valid_profile,
+        "ProvisionedDevices": ["00008110-001C2D923600801E"],
+    }
+    check("Apple Distribution Ad Hoc profile with devices is rejected",
+          lambda: module.validate_signing_evidence(
+              valid_codesign, valid_entitlements, adhoc_profile
+          ), "ProvisionedDevices")
+    missing_app_store_marker = {
+        **valid_profile,
+        "Entitlements": valid_entitlements,
+    }
+    check("distribution profile without App Store marker is rejected",
+          lambda: module.validate_signing_evidence(
+              valid_codesign, valid_entitlements, missing_app_store_marker
+          ), "beta-reports-active")
     check("archive structure binds catalog and build identity",
           lambda: module.validate_archive(
               archive, release, digests, "1" * 40, "2" * 40,
@@ -393,13 +413,23 @@ TeamIdentifier=86RBV2JZ8F
               lambda: module.validate_model_checkout_and_release(dirty_checkout, release),
               "dirty or untracked verifier inputs")
         poisoned_venv = model_checkout / ".venv/bin/python"
+        private_python = root / "private-python-snapshot/bin/python3.11"
         check("isolated verifier command never executes the ignored checkout venv",
-              lambda: module.mobile_release_command(model_checkout, release, module._find_uv()),
+              lambda: module.mobile_release_command(
+                  model_checkout, release, module._find_uv(), private_python
+              ),
               None)
         try:
-            isolated_command = module.mobile_release_command(model_checkout, release, module._find_uv())
+            isolated_command = module.mobile_release_command(
+                model_checkout, release, module._find_uv(), private_python
+            )
             rendered = " ".join(str(value) for value in isolated_command)
-            if "--isolated" not in isolated_command or "--no-cache" not in isolated_command or str(poisoned_venv) in rendered:
+            if (
+                "--isolated" not in isolated_command
+                or "--no-cache" not in isolated_command
+                or str(poisoned_venv) in rendered
+                or str(private_python) not in rendered
+            ):
                 failures.append("mobile release command is not isolated from the ignored checkout venv")
         except Exception:
             pass
@@ -420,6 +450,30 @@ TeamIdentifier=86RBV2JZ8F
         check("managed Python sibling stdlib mutation is rejected",
               lambda: module.authenticate_model_python(fake_python),
               "distribution tree")
+        snapshot_source = root / "snapshot-python"
+        snapshot_python = snapshot_source / "bin/python3.11"
+        write(snapshot_python, "#!/bin/sh\nprintf 'trusted-snapshot\\n'\n")
+        snapshot_python.chmod(0o755)
+        write(snapshot_source / "lib/python3.11/runtime.txt", "authenticated\n")
+        snapshot_digest = module._managed_python_tree_sha256(snapshot_source)
+        def original_swap_cannot_control_execution():
+            with module._trusted_python_snapshot(
+                snapshot_python, snapshot_digest
+            ) as trusted_python:
+                write(snapshot_python, "#!/bin/sh\nprintf 'attacker-controlled\\n'\n")
+                snapshot_run = subprocess.run(
+                    [str(trusted_python)],
+                    capture_output=True,
+                    text=True,
+                    env=module.sanitized_environment(),
+                    check=False,
+                )
+                if snapshot_run.returncode != 0 or snapshot_run.stdout != "trusted-snapshot\n":
+                    raise AssertionError("authenticated source swap controlled snapshot execution")
+                if snapshot_source in trusted_python.parents:
+                    raise AssertionError("trusted Python still executes from the mutable source tree")
+        check("managed Python source swap after authentication cannot control execution",
+              original_swap_cannot_control_execution)
         isolated_smoke = subprocess.run(
             [
                 str(uv), "--no-cache", "--no-config", "run", "--isolated", "--no-project",

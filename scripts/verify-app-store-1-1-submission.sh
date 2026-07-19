@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -15,7 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from typing import Callable, Optional
+from typing import Callable, Iterator, Optional
 
 MODEL_SOURCE_COMMIT = "6fe4767cd1c5716a04b655c9eaac4bd745471569"
 MODEL_SOURCE_TREE = "fba0c558d30dd4b240e40c931b0ec8e5f4e9d29e"
@@ -419,8 +420,96 @@ def authenticate_model_python(interpreter: Path) -> None:
     if _managed_python_tree_sha256(distribution) != MODEL_PYTHON_TREE_SHA256:
         raise VerificationError("managed Python distribution tree does not match pinned identity")
 
-def mobile_release_command(checkout: Path, release: Path, uv: Path) -> list[str]:
-    model_python = _find_model_python(uv)
+def _copy_tree_no_follow(source: Path, destination: Path) -> None:
+    """Copy a directory through descriptor-relative, no-follow operations."""
+    source_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    source_descriptor = os.open(source, source_flags)
+    try:
+        destination.mkdir(mode=0o700)
+        destination_descriptor = os.open(destination, source_flags)
+        try:
+            _copy_tree_entries(source_descriptor, destination_descriptor)
+        finally:
+            os.close(destination_descriptor)
+    finally:
+        os.close(source_descriptor)
+
+def _copy_tree_entries(source_descriptor: int, destination_descriptor: int) -> None:
+    entries = sorted(os.scandir(source_descriptor), key=lambda entry: entry.name)
+    for entry in entries:
+        metadata = os.stat(entry.name, dir_fd=source_descriptor, follow_symlinks=False)
+        if stat.S_ISLNK(metadata.st_mode):
+            target = os.readlink(entry.name, dir_fd=source_descriptor)
+            os.symlink(target, entry.name, dir_fd=destination_descriptor)
+            continue
+        if stat.S_ISDIR(metadata.st_mode):
+            os.mkdir(entry.name, mode=0o700, dir_fd=destination_descriptor)
+            flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            source_child = os.open(entry.name, flags, dir_fd=source_descriptor)
+            destination_child = os.open(entry.name, flags, dir_fd=destination_descriptor)
+            try:
+                _copy_tree_entries(source_child, destination_child)
+                os.fchmod(destination_child, stat.S_IMODE(metadata.st_mode))
+            finally:
+                os.close(source_child)
+                os.close(destination_child)
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
+            raise VerificationError("managed Python distribution contains a non-regular entry")
+        source_file = os.open(
+            entry.name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=source_descriptor
+        )
+        try:
+            opened_metadata = os.fstat(source_file)
+            if (
+                not stat.S_ISREG(opened_metadata.st_mode)
+                or opened_metadata.st_dev != metadata.st_dev
+                or opened_metadata.st_ino != metadata.st_ino
+            ):
+                raise VerificationError("managed Python distribution changed during snapshot")
+            destination_file = os.open(
+                entry.name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=destination_descriptor,
+            )
+            try:
+                for chunk in iter(lambda: os.read(source_file, 1024 * 1024), b""):
+                    view = memoryview(chunk)
+                    while view:
+                        view = view[os.write(destination_file, view):]
+                os.fchmod(destination_file, stat.S_IMODE(opened_metadata.st_mode))
+            finally:
+                os.close(destination_file)
+        finally:
+            os.close(source_file)
+
+@contextmanager
+def _trusted_python_snapshot(interpreter: Path, expected_digest: str) -> Iterator[Path]:
+    """Yield an authenticated private snapshot of the complete Python distribution."""
+    _require_regular(interpreter, "model Python executable")
+    distribution = interpreter.parent.parent
+    relative_interpreter = interpreter.relative_to(distribution)
+    if _managed_python_tree_sha256(distribution) != expected_digest:
+        raise VerificationError("managed Python distribution tree does not match pinned identity")
+    with tempfile.TemporaryDirectory(prefix="fluke-managed-python-snapshot.") as temporary:
+        temporary_root = Path(temporary)
+        os.chmod(temporary_root, 0o700)
+        snapshot = temporary_root / "distribution"
+        try:
+            _copy_tree_no_follow(distribution, snapshot)
+        except OSError as error:
+            raise VerificationError(f"cannot snapshot managed Python distribution: {error}") from error
+        os.chmod(snapshot, 0o700)
+        if _managed_python_tree_sha256(snapshot) != expected_digest:
+            raise VerificationError("managed Python distribution changed during snapshot")
+        snapshot_interpreter = snapshot / relative_interpreter
+        _require_regular(snapshot_interpreter, "snapshotted model Python executable")
+        yield snapshot_interpreter
+
+def mobile_release_command(
+    checkout: Path, release: Path, uv: Path, model_python: Path
+) -> list[str]:
     return [
         str(uv), "--no-cache", "--no-config", "run", "--isolated", "--locked",
         "--python", str(model_python), "--no-python-downloads", "--project", str(checkout),
@@ -431,12 +520,15 @@ def mobile_release_command(checkout: Path, release: Path, uv: Path) -> list[str]
 def run_mobile_release_verifier(checkout: Path, release: Path) -> None:
     report = release / REPORT_NAME
     _reject_symlink_components(report, "mobile release report")
-    command = mobile_release_command(checkout, release, _find_uv())
-    with tempfile.TemporaryDirectory(prefix="fluke-trusted-bytecode-parent.") as temporary:
-        environment = verifier_environment(Path(temporary) / "pycache")
-        result = subprocess.run(
-            command, capture_output=True, text=True, env=environment, check=False
-        )
+    uv = _find_uv()
+    model_python = _find_model_python(uv)
+    with _trusted_python_snapshot(model_python, MODEL_PYTHON_TREE_SHA256) as trusted_python:
+        command = mobile_release_command(checkout, release, uv, trusted_python)
+        with tempfile.TemporaryDirectory(prefix="fluke-trusted-bytecode-parent.") as temporary:
+            environment = verifier_environment(Path(temporary) / "pycache")
+            result = subprocess.run(
+                command, capture_output=True, text=True, env=environment, check=False
+            )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
         raise VerificationError(f"fresh mobile release verification failed: {detail}")
@@ -591,8 +683,12 @@ def validate_signing_evidence(
         raise VerificationError("distribution provisioning profile prefix does not match")
     if any(profile_entitlements.get(key) != value for key, value in entitlement_checks.items()):
         raise VerificationError("distribution provisioning profile permits development access")
+    if "ProvisionedDevices" in provisioning_profile:
+        raise VerificationError("distribution provisioning profile must not contain ProvisionedDevices")
     if provisioning_profile.get("ProvisionsAllDevices") is True:
         raise VerificationError("enterprise provisioning is not accepted for App Store submission")
+    if profile_entitlements.get("beta-reports-active") is not True:
+        raise VerificationError("distribution provisioning profile requires beta-reports-active")
 
 def validate_archive_signature(archive: Path) -> None:
     app, _, _ = _archive_app(archive)
