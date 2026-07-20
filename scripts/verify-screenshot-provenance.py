@@ -81,7 +81,9 @@ def create(arguments: argparse.Namespace) -> dict[str, object]:
         raise ProvenanceError(
             "model checkout does not match the pinned reviewed revision"
         )
-    model_digest, catalog_digest = identity.release_digests(arguments.release)
+    model_digest, catalog_digest = identity.release_digests(
+        arguments.release, arguments.identifier_mode
+    )
     digests = screenshot_digests(arguments.screenshots)
     if set(digests.values()) & old_release_digests(arguments.repo):
         raise ProvenanceError(
@@ -98,6 +100,7 @@ def create(arguments: argparse.Namespace) -> dict[str, object]:
         "locale": "en-US",
         "modelSourceCommit": model_commit,
         "modelSourceTree": model_tree,
+        "identifierMode": arguments.identifier_mode,
         "modelPackageSha256": model_digest,
         "catalogManifestSha256": catalog_digest,
         "fixtureSource": {
@@ -138,6 +141,9 @@ def parse_arguments() -> argparse.Namespace:  # pragma: no cover - CLI glue
     parser.add_argument("--source-tree", required=True)
     parser.add_argument("--runtime", required=True)
     parser.add_argument("--device", required=True)
+    parser.add_argument(
+        "--identifier-mode", choices=("live", "dormant"), default="live"
+    )
     return parser.parse_args()
 
 

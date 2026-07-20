@@ -101,5 +101,6 @@ python3 "$repo_root/scripts/verify-screenshot-provenance.py" create \
   --repo "$repo_root" --screenshots "$output_directory" --manifest "$provenance" \
   --model-checkout "$FLUKE_MODEL_CHECKOUT" --release "$FLUKE_MODEL_RELEASE" \
   --source-commit "$source_commit" --source-tree "$source_tree" \
-  --runtime "$runtime_identifier" --device "$device_name"
+  --runtime "$runtime_identifier" --device "$device_name" \
+  --identifier-mode "${FLUKE_IDENTIFIER_MODE:-live}"
 printf 'App Store screenshots exported to %s\n' "$output_directory"
