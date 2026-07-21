@@ -40,6 +40,23 @@ final class AtlasFeatureSnapshotTests: XCTestCase {
     try assertFeatureSnapshot(image, named: "timeline-accessibility3")
   }
 
+  func test_snapshotBaselinesSelectThePinnedCIRunner() {
+    XCTAssertEqual(
+      atlasSnapshotReferenceName(
+        named: "timeline",
+        version: OperatingSystemVersion(majorVersion: 15, minorVersion: 7, patchVersion: 0)
+      ),
+      "timeline.macos-15.png"
+    )
+    XCTAssertEqual(
+      atlasSnapshotReferenceName(
+        named: "timeline",
+        version: OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 1)
+      ),
+      "timeline.png"
+    )
+  }
+
   private func assertModeSnapshot<Content: View>(
     _ content: Content,
     named name: String
@@ -235,11 +252,13 @@ private func assertFeatureSnapshot(
   file: StaticString = #filePath,
   line: UInt = #line
 ) throws {
+  let referenceName = atlasSnapshotReferenceName(named: name)
   let referenceURL = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .appending(path: "__Snapshots__")
     .appending(path: "AtlasFeatureSnapshotTests")
-    .appending(path: "\(name).png")
+    .appending(path: referenceName)
+  try writeSnapshotArtifactIfConfigured(image, named: referenceName)
   let actual = try rgbaPixels(image)
 
   if ProcessInfo.processInfo.environment["FLUKE_RECORD_ATLAS_SNAPSHOTS"] == "1" {
@@ -275,6 +294,28 @@ private func assertFeatureSnapshot(
   let precision = 1 - Double(differingPixels) / Double(pixelCount)
   XCTAssertGreaterThanOrEqual(
     precision, 0.99, "Atlas snapshot precision was \(precision)", file: file, line: line)
+}
+
+private func atlasSnapshotReferenceName(
+  named name: String,
+  version: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+) -> String {
+  let platformSuffix = version.majorVersion == 15 ? ".macos-15" : ""
+  return "\(name)\(platformSuffix).png"
+}
+
+private func writeSnapshotArtifactIfConfigured(_ image: NSImage, named name: String) throws {
+  guard
+    let artifactPath = ProcessInfo.processInfo.environment["SNAPSHOT_ARTIFACTS"],
+    !artifactPath.isEmpty
+  else { return }
+
+  let directory = URL(fileURLWithPath: artifactPath, isDirectory: true)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  try pngData(image).write(
+    to: directory.appending(path: "\(name).actual.png"),
+    options: .atomic
+  )
 }
 
 private func pngData(_ image: NSImage) throws -> Data {
