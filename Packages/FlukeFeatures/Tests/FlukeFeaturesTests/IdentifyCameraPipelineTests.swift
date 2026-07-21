@@ -78,9 +78,10 @@ struct IdentifyCameraPipelineTests {
 
     let consumer = Task { await channel.frames.first { _ in true } }
     var delivered = false
-    for _ in 0..<100 where !delivered {
+    let deliveryDeadline = ContinuousClock.now.advanced(by: .seconds(1))
+    while !delivered && ContinuousClock.now < deliveryDeadline {
       if case .enqueued = channel.continuation.yield(frame) { delivered = true }
-      if !delivered { await Task.yield() }
+      if !delivered { try await Task.sleep(for: .milliseconds(1)) }
     }
     guard delivered else {
       Issue.record("Expected a waiting consumer to receive one frame")
