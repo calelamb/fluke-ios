@@ -60,11 +60,11 @@ Do not hand-edit the copied JSON or add client-only fields. Update the API contr
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | Package boundary, dependency rules, how new code lands in the right module |
 | [`docs/design-system.md`](docs/design-system.md) | Color/font/animation tokens, `DorsalFinShape`, components reference |
-| [`docs/contributing.md`](docs/contributing.md) | TDD workflow, subagent-driven development, code review, branching |
+| [`docs/contributing.md`](docs/contributing.md) | Why the project doesn't take outside contributions, and the code conventions it follows |
 | [`docs/testing.md`](docs/testing.md) | Test strategy, snapshot testing, MockURLProtocol, coverage targets |
 | [`docs/build-and-ci.md`](docs/build-and-ci.md) | Local builds, simulator targets, CI workflow, deployment target rationale |
 
-The full design spec lives at [`../fluke/docs/specs/ios-app.md`](../fluke/docs/specs/ios-app.md). Per-milestone implementation plans live at [`../fluke/docs/plans/`](../fluke/docs/plans/).
+The full design spec lives at [`../fluke/docs/specs/ios-app.md`](../fluke/docs/specs/ios-app.md) in the main Fluke repository.
 
 ## Project layout
 
@@ -110,3 +110,16 @@ fluke-ios/
 ## Status
 
 Release A ships four real public browsing surfaces: a merged sightings list/map, searchable whale catalog and profiles, a locally authored Learn reader, and the public movement Atlas. Every network-backed surface distinguishes fresh, stale, offline, empty, loading, and failed states while retaining last-known-good data. Deterministic API fixtures, resilient read-only persistence, and fail-closed environment configuration protect that boundary. See [`docs/build-and-ci.md`](docs/build-and-ci.md) for the exact verification and submission-readiness state.
+
+## Contributions and use
+
+This is one repository in the [Fluke](https://github.com/calelamb/fluke) project — a
+non-commercial, single-author labor of love for the orcas of the Pacific Northwest.
+The source is public so people can see how the app is built and why it makes the
+choices it does — including that dorsal-fin matching runs entirely on-device and
+ships dormant until a reference catalog is licensed.
+
+**It is not open to outside contributions.** Pull requests and feature issues
+aren't being accepted; this is a solo project by design. You're welcome to read
+the code and learn from it. No open-source license is attached, so all rights are
+reserved — the source is available to understand, not a grant of reuse.
