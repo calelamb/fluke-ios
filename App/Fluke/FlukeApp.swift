@@ -1,17 +1,28 @@
+import FlukeUI
 import SwiftUI
 
 @main
 struct FlukeApp: App {
-  private let bootstrap = AppBootstrap.load()
+  static let preferredColorScheme: ColorScheme? = .light
+
+  private let bootstrap: AppBootstrap
+
+  init() {
+    FlukeUIFontRegistration.registerIfNeeded()
+    bootstrap = AppBootstrap.load()
+  }
 
   var body: some Scene {
     WindowGroup {
-      switch bootstrap {
-      case .ready(let environment):
-        RootScene(environment: environment)
-      case .unavailable:
-        ConfigurationUnavailableView()
+      Group {
+        switch bootstrap {
+        case .ready(let environment):
+          RootScene(environment: environment)
+        case .unavailable:
+          ConfigurationUnavailableView()
+        }
       }
+      .preferredColorScheme(Self.preferredColorScheme)
     }
   }
 }
@@ -22,6 +33,11 @@ private enum AppBootstrap {
 
   static func load() -> AppBootstrap {
     do {
+      #if DEBUG || FLUKE_XCTEST_FIXTURES
+        if AppStoreScreenshotFixtureMode.isEnabled() {
+          return .ready(try AppStoreScreenshotFixtures.makeEnvironment())
+        }
+      #endif
       return .ready(try AppEnvironment.live())
     } catch {
       return .unavailable

@@ -44,14 +44,42 @@ try:
         privacy = plistlib.load(source)
 except (OSError, plistlib.InvalidFileException) as error:
     raise SystemExit(f"invalid archived privacy manifest: {error}")
+expected_types = [
+    "NSPrivacyCollectedDataTypeEmailAddress",
+    "NSPrivacyCollectedDataTypeName",
+    "NSPrivacyCollectedDataTypePhotosorVideos",
+    "NSPrivacyCollectedDataTypeCoarseLocation",
+    "NSPrivacyCollectedDataTypeUserID",
+    "NSPrivacyCollectedDataTypeOtherUserContent",
+]
+expected_accessed_api_types = [
+    {
+        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+        "NSPrivacyAccessedAPITypeReasons": ["C617.1"],
+    }
+]
+if privacy.get("NSPrivacyAccessedAPITypes") != expected_accessed_api_types:
+    raise SystemExit(
+        "archived privacy manifest must declare exactly FileTimestamp C617.1"
+    )
 expected_privacy = {
     "NSPrivacyTracking": False,
     "NSPrivacyTrackingDomains": [],
-    "NSPrivacyCollectedDataTypes": [],
-    "NSPrivacyAccessedAPITypes": [],
+    "NSPrivacyCollectedDataTypes": [
+        {
+            "NSPrivacyCollectedDataType": data_type,
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ],
+            "NSPrivacyCollectedDataTypeTracking": False,
+        }
+        for data_type in expected_types
+    ],
+    "NSPrivacyAccessedAPITypes": expected_accessed_api_types,
 }
 if privacy != expected_privacy:
-    raise SystemExit("archived privacy manifest does not match Release A data use")
+    raise SystemExit("archived privacy manifest does not match the full launch data use")
 
 license_paths = []
 for directory, _, filenames in os.walk(app_path):
@@ -78,3 +106,7 @@ for path in license_paths:
 else:
     raise SystemExit("archived Fraunces OFL.txt notice is incomplete")
 PY
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python3 "$repo_root/scripts/verify-archive-runtime.py" \
+  "$1" "$repo_root/AppStore/1.1/runtime-dependency-allowlist.json"

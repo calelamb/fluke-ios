@@ -7,21 +7,22 @@ final class HistoricalSightingsRepositoryTests: XCTestCase {
 
     private var apiClient: APIClient!
     private var repo: HistoricalSightingsRepository!
+    private var mockSession: MockURLProtocolSession!
 
     override func setUp() async throws {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let session = URLSession(configuration: config)
+        mockSession = MockURLProtocolSession()
+        let session = URLSession(configuration: mockSession.configuration)
         apiClient = APIClient(baseURL: URL(string: "http://localhost:4000")!, session: session)
         repo = HistoricalSightingsRepository(api: apiClient)
     }
 
     override func tearDown() async throws {
-        MockURLProtocol.handler = nil
+        mockSession.reset()
+        mockSession = nil
     }
 
     func test_fetch_unwrapsHistoricalSightingsFromPaginatedResponse() async throws {
-        MockURLProtocol.handler = { req in
+        mockSession.install { req in
             XCTAssertEqual(req.url?.path, "/api/v1/sightings/historical")
             let body = """
             {
@@ -45,7 +46,7 @@ final class HistoricalSightingsRepositoryTests: XCTestCase {
     }
 
     func test_fetch_passesPodFilter() async throws {
-        MockURLProtocol.handler = { req in
+        mockSession.install { req in
             XCTAssertEqual(req.url?.queryItemsDictionary["pod"], "J")
             return (
                 HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
@@ -56,15 +57,15 @@ final class HistoricalSightingsRepositoryTests: XCTestCase {
     }
 
     func test_fetch_consumesEveryPageWhilePreservingEncodedFilters() async throws {
-        var requestCount = 0
-        MockURLProtocol.handler = { req in
-            requestCount += 1
+        let requestCount = MockRequestCounter()
+        mockSession.install { req in
+            let count = requestCount.increment()
             XCTAssertEqual(req.url?.path, "/api/v1/sightings/historical")
             XCTAssertEqual(req.url?.queryItemsDictionary["pod"], "J")
             XCTAssertEqual(req.url?.queryItemsDictionary["whaleId"], "whale a&b")
-            XCTAssertEqual(req.url?.queryItemsDictionary["cursor"], requestCount == 1 ? nil : "next+page&two")
-            let sightingId = requestCount == 1 ? "si_1" : "si_2"
-            let pagination = requestCount == 1
+            XCTAssertEqual(req.url?.queryItemsDictionary["cursor"], count == 1 ? nil : "next+page&two")
+            let sightingId = count == 1 ? "si_1" : "si_2"
+            let pagination = count == 1
                 ? #"{"hasMore":true,"nextCursor":"next+page&two"}"#
                 : #"{"hasMore":false,"nextCursor":null}"#
             let body = """
@@ -86,7 +87,7 @@ final class HistoricalSightingsRepositoryTests: XCTestCase {
         let sightings = try await repo.fetch(from: from, to: to, pod: .j, whaleId: "whale a&b")
 
         XCTAssertEqual(sightings.map(\.id), ["si_1", "si_2"])
-        XCTAssertEqual(requestCount, 2)
+        XCTAssertEqual(requestCount.value, 2)
     }
 }
 

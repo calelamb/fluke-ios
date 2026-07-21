@@ -7,6 +7,42 @@ import Testing
 @MainActor
 @Suite("Whale catalog presentation")
 struct WhalesViewModelTests {
+    @Test("the same canonical whale can produce a fresh profile request")
+    func repeatedCanonicalProfileRequest() {
+        let first = WhaleProfileRequest.next(whaleID: "canonical-whale-id", after: nil)
+        let second = WhaleProfileRequest.next(whaleID: "canonical-whale-id", after: first)
+
+        #expect(first.whaleID == second.whaleID)
+        #expect(first != second)
+        #expect(second.revision == first.revision + 1)
+    }
+
+    @Test("canonical whale IDs resolve the profile navigation value")
+    func canonicalProfileLookup() async {
+        let whale = makeWhale(
+            id: "canonical-whale-id",
+            catalogId: "J35",
+            name: "Tahlequah",
+            ecotype: .resident,
+            pod: "J"
+        )
+        let model = WhalesViewModel(
+            repository: WhalesRepositoryFake(
+                catalog: [
+                    .fresh(
+                        value: [whale],
+                        metadata: BrowseMetadata(fetchedAt: Date(), schemaVersion: 1)
+                    )
+                ]
+            )
+        )
+
+        await model.load()
+
+        #expect(model.whale(id: "canonical-whale-id") == whale)
+        #expect(model.whale(id: "J35") == nil)
+    }
+
     private let metadata = BrowseMetadata(fetchedAt: Date(), schemaVersion: 1)
 
     @Test("Catalog sorts stably and search spans identity, pod, and ecotype")

@@ -52,7 +52,7 @@ api_root="$test_root/api"
 make_fixture_set "$client_fixtures"
 make_fixture_set "$api_root/contracts/fixtures"
 (
-  cd "$client_fixtures"
+  cd "$client_fixtures" || exit
   shasum -a 256 capabilities.json whales.json
 ) >"$test_root/fixtures.sha256"
 
@@ -206,14 +206,35 @@ expect_failure "Swift selected coverage rejects an empty selection" \
   "$swift_coverage_verifier" "$test_root/swift-coverage.json" 80 \
   --include '/Sources/FlukeFeatures/DoesNotExist\.swift$'
 
+expect_success "CI enforces FlukeUI source coverage" \
+  python3 - "$repo_root/.github/workflows/ci.yml" <<'PY'
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    workflow = source.read()
+
+pattern = re.compile(
+    r"(?m)^      - name: Enforce FlukeUI source line coverage\n"
+    r"        run: >-\n"
+    r"          scripts/verify-swift-package-coverage\.sh\n"
+    r"          build/verification/package-coverage/FlukeUI\.json\n"
+    r"          /Sources/FlukeUI/\n"
+    r"          80$"
+)
+if not pattern.search(workflow):
+    raise SystemExit("missing exact FlukeUI 80 percent source coverage gate")
+PY
+
 archive_path="$test_root/Fluke.xcarchive"
-python3 - "$archive_path" <<'PY'
+python3 - "$archive_path" "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" <<'PY'
 import os
 import plistlib
 import stat
 import sys
 
 archive = sys.argv[1]
+privacy_source = sys.argv[2]
 app = os.path.join(archive, "Products", "Applications", "Fluke.app")
 os.makedirs(app)
 with open(os.path.join(archive, "Info.plist"), "wb") as output:
@@ -245,16 +266,10 @@ with open(os.path.join(app, "Info.plist"), "wb") as output:
         },
         output,
     )
+with open(privacy_source, "rb") as source:
+    privacy = plistlib.load(source)
 with open(os.path.join(app, "PrivacyInfo.xcprivacy"), "wb") as output:
-    plistlib.dump(
-        {
-            "NSPrivacyTracking": False,
-            "NSPrivacyTrackingDomains": [],
-            "NSPrivacyCollectedDataTypes": [],
-            "NSPrivacyAccessedAPITypes": [],
-        },
-        output,
-    )
+    plistlib.dump(privacy, output)
 resource_bundle = os.path.join(app, "FlukeFeatures_FlukeFeatures.bundle")
 os.makedirs(resource_bundle)
 with open(os.path.join(resource_bundle, "OFL.txt"), "w", encoding="utf-8") as output:
@@ -271,27 +286,158 @@ os.chmod(binary, os.stat(binary).st_mode | stat.S_IXUSR)
 PY
 expect_success "valid unsigned iPhone archive passes" \
   "$archive_verifier" "$archive_path" app.fluke.Fluke 17.0
-expect_success "valid archive bundles App Store privacy and font notices" \
-  "$app_store_archive_verifier" "$archive_path"
-rm "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy"
-expect_failure "App Store archive verifier rejects a missing privacy manifest" \
-  "archived app is missing PrivacyInfo.xcprivacy" \
-  "$app_store_archive_verifier" "$archive_path"
-python3 - "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy" <<'PY'
+archive_signing_bin="$test_root/archive-signing-bin"
+mkdir -p "$archive_signing_bin"
+signed_entitlements="$test_root/signed-entitlements.plist"
+signed_profile="$archive_path/Products/Applications/Fluke.app/embedded.mobileprovision"
+python3 - "$signed_entitlements" "$signed_profile" <<'PY'
+import plistlib
+import sys
+
+entitlements_path, profile_path = sys.argv[1:]
+entitlements = {
+    "application-identifier": "86RBV2JZ8F.app.fluke.Fluke",
+    "com.apple.developer.applesignin": ["Default"],
+    "com.apple.developer.team-identifier": "86RBV2JZ8F",
+}
+with open(entitlements_path, "wb") as output:
+    plistlib.dump(entitlements, output)
+with open(profile_path, "wb") as output:
+    plistlib.dump(
+        {
+            "ApplicationIdentifierPrefix": ["86RBV2JZ8F"],
+            "Entitlements": entitlements,
+            "TeamIdentifier": ["86RBV2JZ8F"],
+        },
+        output,
+    )
+PY
+cat >"$archive_signing_bin/codesign" <<'SH'
+#!/usr/bin/env bash
+if [[ " $* " == *" --verify "* ]]; then
+  [[ "${FLUKE_FAKE_CODESIGN_VERIFY_FAIL:-0}" != "1" ]]
+  exit
+fi
+if [[ " $* " == *" --entitlements "* ]]; then
+  cat "$FLUKE_FAKE_SIGNED_ENTITLEMENTS"
+  exit 0
+fi
+exit 0
+SH
+cat >"$archive_signing_bin/security" <<'SH'
+#!/usr/bin/env bash
+cat "$FLUKE_FAKE_EMBEDDED_PROFILE"
+SH
+chmod +x "$archive_signing_bin/codesign" "$archive_signing_bin/security"
+/usr/libexec/PlistBuddy -c \
+  'Add :ApplicationProperties:SigningIdentity string Apple\ Distribution:\ Cale\ Lamb\ (86RBV2JZ8F)' \
+  "$archive_path/Info.plist"
+expect_success "valid signed distribution archive passes" env \
+  PATH="$archive_signing_bin:$PATH" \
+  FLUKE_FAKE_SIGNED_ENTITLEMENTS="$signed_entitlements" \
+  FLUKE_FAKE_EMBEDDED_PROFILE="$signed_profile" \
+  "$archive_verifier" "$archive_path" app.fluke.Fluke 17.0
+/usr/libexec/PlistBuddy -c \
+  'Set :ApplicationProperties:SigningIdentity iPhone\ Distribution:\ Cale\ Lamb\ (86RBV2JZ8F)' \
+  "$archive_path/Info.plist"
+expect_success "valid legacy-named distribution archive passes" env \
+  PATH="$archive_signing_bin:$PATH" \
+  FLUKE_FAKE_SIGNED_ENTITLEMENTS="$signed_entitlements" \
+  FLUKE_FAKE_EMBEDDED_PROFILE="$signed_profile" \
+  "$archive_verifier" "$archive_path" app.fluke.Fluke 17.0
+/usr/libexec/PlistBuddy -c \
+  'Set :ApplicationProperties:SigningIdentity Apple\ Development:\ Cale\ Lamb\ (86RBV2JZ8F)' \
+  "$archive_path/Info.plist"
+expect_failure "signed archive rejects a development identity" \
+  "signed archive must use an Apple or iPhone Distribution identity" env \
+  PATH="$archive_signing_bin:$PATH" \
+  FLUKE_FAKE_SIGNED_ENTITLEMENTS="$signed_entitlements" \
+  FLUKE_FAKE_EMBEDDED_PROFILE="$signed_profile" \
+  "$archive_verifier" "$archive_path" app.fluke.Fluke 17.0
+/usr/libexec/PlistBuddy -c \
+  'Set :ApplicationProperties:SigningIdentity Apple\ Distribution:\ Cale\ Lamb\ (86RBV2JZ8F)' \
+  "$archive_path/Info.plist"
+wrong_team_entitlements="$test_root/wrong-team-entitlements.plist"
+python3 - "$wrong_team_entitlements" <<'PY'
 import plistlib
 import sys
 
 with open(sys.argv[1], "wb") as output:
     plistlib.dump(
         {
-            "NSPrivacyTracking": False,
-            "NSPrivacyTrackingDomains": [],
-            "NSPrivacyCollectedDataTypes": [],
-            "NSPrivacyAccessedAPITypes": [],
+            "application-identifier": "WRONGTEAM1.app.fluke.Fluke",
+            "com.apple.developer.applesignin": ["Default"],
+            "com.apple.developer.team-identifier": "WRONGTEAM1",
         },
         output,
     )
 PY
+expect_failure "signed archive rejects the wrong team" \
+  "signed archive team identifier mismatch" env \
+  PATH="$archive_signing_bin:$PATH" \
+  FLUKE_FAKE_SIGNED_ENTITLEMENTS="$wrong_team_entitlements" \
+  FLUKE_FAKE_EMBEDDED_PROFILE="$signed_profile" \
+  "$archive_verifier" "$archive_path" app.fluke.Fluke 17.0
+missing_siwa_entitlements="$test_root/missing-siwa-entitlements.plist"
+python3 - "$missing_siwa_entitlements" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "wb") as output:
+    plistlib.dump(
+        {
+            "application-identifier": "86RBV2JZ8F.app.fluke.Fluke",
+            "com.apple.developer.team-identifier": "86RBV2JZ8F",
+        },
+        output,
+    )
+PY
+expect_failure "signed archive rejects missing Sign in with Apple entitlement" \
+  "signed archive Sign in with Apple entitlement mismatch" env \
+  PATH="$archive_signing_bin:$PATH" \
+  FLUKE_FAKE_SIGNED_ENTITLEMENTS="$missing_siwa_entitlements" \
+  FLUKE_FAKE_EMBEDDED_PROFILE="$signed_profile" \
+  "$archive_verifier" "$archive_path" app.fluke.Fluke 17.0
+expect_failure "signed archive rejects failed deep bundle verification" \
+  "signed archive app bundle failed deep strict code-signature verification" env \
+  PATH="$archive_signing_bin:$PATH" \
+  FLUKE_FAKE_CODESIGN_VERIFY_FAIL=1 \
+  FLUKE_FAKE_SIGNED_ENTITLEMENTS="$signed_entitlements" \
+  FLUKE_FAKE_EMBEDDED_PROFILE="$signed_profile" \
+  "$archive_verifier" "$archive_path" app.fluke.Fluke 17.0
+/usr/libexec/PlistBuddy -c 'Delete :ApplicationProperties:SigningIdentity' \
+  "$archive_path/Info.plist"
+expect_success "valid archive bundles App Store privacy and font notices" \
+  "$app_store_archive_verifier" "$archive_path"
+plutil -replace NSPrivacyAccessedAPITypes -xml '<array/>' \
+  "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy"
+expect_failure "App Store archive verifier rejects a missing required-reason declaration" \
+  "archived privacy manifest must declare exactly FileTimestamp C617.1" \
+  "$app_store_archive_verifier" "$archive_path"
+cp "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" \
+  "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy"
+python3 - "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy" <<'PY'
+import plistlib
+import sys
+
+path = sys.argv[1]
+with open(path, "rb") as source:
+    manifest = plistlib.load(source)
+manifest["NSPrivacyAccessedAPITypes"][0]["NSPrivacyAccessedAPITypeReasons"] = ["0A2A.1"]
+with open(path, "wb") as output:
+    plistlib.dump(manifest, output)
+PY
+expect_failure "App Store archive verifier rejects the wrong required reason" \
+  "archived privacy manifest must declare exactly FileTimestamp C617.1" \
+  "$app_store_archive_verifier" "$archive_path"
+cp "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" \
+  "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy"
+rm "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy"
+expect_failure "App Store archive verifier rejects a missing privacy manifest" \
+  "archived app is missing PrivacyInfo.xcprivacy" \
+  "$app_store_archive_verifier" "$archive_path"
+cp "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" \
+  "$archive_path/Products/Applications/Fluke.app/PrivacyInfo.xcprivacy"
 /usr/libexec/PlistBuddy -c 'Set :ApplicationProperties:CFBundleIdentifier app.fluke.Other' \
   "$archive_path/Info.plist"
 expect_failure "wrong archive bundle identifier fails" "bundle identifier mismatch" \
@@ -334,16 +480,7 @@ cat >"$app_store_fixture/Info.plist" <<'PLIST'
 <key>ITSAppUsesNonExemptEncryption</key><false/>
 </dict></plist>
 PLIST
-cat >"$app_store_fixture/PrivacyInfo.xcprivacy" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>NSPrivacyTracking</key><false/>
-<key>NSPrivacyTrackingDomains</key><array/>
-<key>NSPrivacyCollectedDataTypes</key><array/>
-<key>NSPrivacyAccessedAPITypes</key><array/>
-</dict></plist>
-PLIST
+cp "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" "$app_store_fixture/PrivacyInfo.xcprivacy"
 cat >"$app_store_fixture/Fonts/OFL.txt" <<'TEXT'
 Copyright 2020 The Fraunces Project Authors (github.com/undercasetype/Fraunces)
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
@@ -355,7 +492,7 @@ cat >"$app_store_fixture/metadata/en-US/metadata.json" <<'JSON'
   "version": "1.0",
   "name": "Fluke",
   "subtitle": "Explore PNW orcas",
-  "description": "Browse public sightings, learn about cataloged whales, read field notes, and explore an evidence-based atlas. Release A is read-only.",
+  "description": "Browse public sightings, learn about cataloged whales, submit moderated observations with queued uploads, and explore an evidence-based atlas. Accounts are optional. Photo identification remains visibly in training until the rights-cleared catalog is ready.",
   "keywords": "orca,sightings,Salish Sea,whale catalog,wildlife,marine biology",
   "promotionalText": "Explore public Pacific Northwest orca records with clear source context.",
   "whatsNew": "Initial TestFlight release.",
@@ -363,7 +500,7 @@ cat >"$app_store_fixture/metadata/en-US/metadata.json" <<'JSON'
   "privacyURL": "https://fluke-pnw.vercel.app/privacy",
   "marketingURL": "https://fluke-pnw.vercel.app",
   "copyright": "2026 Cale Lamb",
-  "reviewNotes": "No account is required. Release A is read-only and has four tabs: Sightings, Whales, Learn, and Atlas."
+  "reviewNotes": "Accounts are optional. Anonymous and signed-in observers can submit sightings for public moderation. Offline submissions use queued uploads. Identify is visibly in training until a rights-cleared catalog is ready. Five tabs are Sightings, Whales, Identify, Learn, and You; Atlas opens from Sightings."
 }
 JSON
 expect_success "App Store release verifier accepts complete launch assets" env \
@@ -373,6 +510,62 @@ expect_success "App Store release verifier accepts complete launch assets" env \
   FLUKE_APP_ICON_PATH="$app_store_fixture/icon-1024.png" \
   FLUKE_FONT_LICENSE_PATH="$app_store_fixture/Fonts/OFL.txt" \
   "$app_store_verifier"
+plutil -replace NSPrivacyAccessedAPITypes -xml '<array/>' \
+  "$app_store_fixture/PrivacyInfo.xcprivacy"
+expect_failure "App Store release verifier rejects a missing required-reason declaration" \
+  "PrivacyInfo.xcprivacy must declare exactly FileTimestamp C617.1" env \
+  FLUKE_INFO_PLIST="$app_store_fixture/Info.plist" \
+  FLUKE_PRIVACY_MANIFEST="$app_store_fixture/PrivacyInfo.xcprivacy" \
+  FLUKE_APP_STORE_METADATA="$app_store_fixture/metadata/en-US/metadata.json" \
+  FLUKE_APP_ICON_PATH="$app_store_fixture/icon-1024.png" \
+  FLUKE_FONT_LICENSE_PATH="$app_store_fixture/Fonts/OFL.txt" \
+  "$app_store_verifier"
+cp "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" "$app_store_fixture/PrivacyInfo.xcprivacy"
+python3 - "$app_store_fixture/PrivacyInfo.xcprivacy" <<'PY'
+import plistlib
+import sys
+
+path = sys.argv[1]
+with open(path, "rb") as source:
+    manifest = plistlib.load(source)
+manifest["NSPrivacyAccessedAPITypes"][0]["NSPrivacyAccessedAPITypeReasons"].append("0A2A.1")
+with open(path, "wb") as output:
+    plistlib.dump(manifest, output)
+PY
+expect_failure "App Store release verifier rejects an extra required reason" \
+  "PrivacyInfo.xcprivacy must declare exactly FileTimestamp C617.1" env \
+  FLUKE_INFO_PLIST="$app_store_fixture/Info.plist" \
+  FLUKE_PRIVACY_MANIFEST="$app_store_fixture/PrivacyInfo.xcprivacy" \
+  FLUKE_APP_STORE_METADATA="$app_store_fixture/metadata/en-US/metadata.json" \
+  FLUKE_APP_ICON_PATH="$app_store_fixture/icon-1024.png" \
+  FLUKE_FONT_LICENSE_PATH="$app_store_fixture/Fonts/OFL.txt" \
+  "$app_store_verifier"
+cp "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" "$app_store_fixture/PrivacyInfo.xcprivacy"
+python3 - "$app_store_fixture/PrivacyInfo.xcprivacy" <<'PY'
+import plistlib
+import sys
+
+path = sys.argv[1]
+with open(path, "rb") as source:
+    manifest = plistlib.load(source)
+manifest["NSPrivacyAccessedAPITypes"].append(
+    {
+        "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+        "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
+    }
+)
+with open(path, "wb") as output:
+    plistlib.dump(manifest, output)
+PY
+expect_failure "App Store release verifier rejects an extra required-reason category" \
+  "PrivacyInfo.xcprivacy must declare exactly FileTimestamp C617.1" env \
+  FLUKE_INFO_PLIST="$app_store_fixture/Info.plist" \
+  FLUKE_PRIVACY_MANIFEST="$app_store_fixture/PrivacyInfo.xcprivacy" \
+  FLUKE_APP_STORE_METADATA="$app_store_fixture/metadata/en-US/metadata.json" \
+  FLUKE_APP_ICON_PATH="$app_store_fixture/icon-1024.png" \
+  FLUKE_FONT_LICENSE_PATH="$app_store_fixture/Fonts/OFL.txt" \
+  "$app_store_verifier"
+cp "$repo_root/App/Fluke/PrivacyInfo.xcprivacy" "$app_store_fixture/PrivacyInfo.xcprivacy"
 /usr/libexec/PlistBuddy -c 'Set :ITSAppUsesNonExemptEncryption true' \
   "$app_store_fixture/Info.plist"
 expect_failure "App Store release verifier rejects incorrect export compliance" \
@@ -410,6 +603,9 @@ mkdir -p "$screenshot_fixture"
 sips --resampleHeightWidth 2736 1260 \
   "$repo_root/App/Fluke/Assets.xcassets/AppIcon.appiconset/icon-1024.png" \
   --out "$screenshot_fixture/01-sightings.png" >/dev/null
+for name in 02-whales 03-submit 04-identify 05-atlas 06-you 07-learn; do
+  cp "$screenshot_fixture/01-sightings.png" "$screenshot_fixture/$name.png"
+done
 expect_success "screenshot verifier accepts a 6.9-inch portrait set" \
   "$screenshot_verifier" "$screenshot_fixture"
 cp "$repo_root/App/Fluke/Assets.xcassets/AppIcon.appiconset/icon-1024.png" \
@@ -477,6 +673,9 @@ fi
 if [[ "$1 $2" == "simctl status_bar" ]]; then
   exit 0
 fi
+if [[ "$1 $2" == "simctl ui" ]]; then
+  exit 0
+fi
 if [[ "$1 $2 $3" == "xcresulttool export attachments" ]]; then
   while (($#)); do
     if [[ "$1" == "--output-path" ]]; then
@@ -486,15 +685,18 @@ if [[ "$1 $2 $3" == "xcresulttool export attachments" ]]; then
     shift
   done
   mkdir -p "$output_path"
-  for name in 01-sightings 02-whales 03-learn 04-atlas; do
+  for name in 01-sightings 02-whales 03-submit 04-identify 05-atlas 06-you 07-learn; do
     cp "$FLUKE_SCREENSHOT_FIXTURE" "$output_path/$name.png"
   done
   cat >"$output_path/manifest.json" <<'JSON'
 [{"testIdentifier":"capture","attachments":[
   {"suggestedHumanReadableName":"01-sightings_0_AAAAAAAA.png","exportedFileName":"01-sightings.png"},
   {"suggestedHumanReadableName":"02-whales_0_BBBBBBBB.png","exportedFileName":"02-whales.png"},
-  {"suggestedHumanReadableName":"03-learn_0_CCCCCCCC.png","exportedFileName":"03-learn.png"},
-  {"suggestedHumanReadableName":"04-atlas_0_DDDDDDDD.png","exportedFileName":"04-atlas.png"}
+  {"suggestedHumanReadableName":"03-submit_0_CCCCCCCC.png","exportedFileName":"03-submit.png"},
+  {"suggestedHumanReadableName":"04-identify_0_DDDDDDDD.png","exportedFileName":"04-identify.png"},
+  {"suggestedHumanReadableName":"05-atlas_0_EEEEEEEE.png","exportedFileName":"05-atlas.png"},
+  {"suggestedHumanReadableName":"06-you_0_FFFFFFFF.png","exportedFileName":"06-you.png"},
+  {"suggestedHumanReadableName":"07-learn_0_GGGGGGGG.png","exportedFileName":"07-learn.png"}
 ]}]
 JSON
   exit 0
@@ -503,7 +705,8 @@ printf 'unexpected xcrun command: %s\n' "$*" >&2
 exit 1
 SH
 chmod +x "$capture_bin/curl" "$capture_bin/xcodebuild" "$capture_bin/xcrun"
-expect_success "screenshot capture resolves a pinned simulator and exports named images" env \
+expect_failure "screenshot capture requires real pinned model provenance" \
+  "FLUKE_MODEL_CHECKOUT" env \
   PATH="$capture_bin:$PATH" \
   FLUKE_SCREENSHOT_FIXTURE="$screenshot_fixture/01-sightings.png" \
   FLUKE_CAPTURE_XCODEBUILD_CAPTURE="$test_root/capture-xcodebuild-arguments" \
@@ -513,23 +716,13 @@ expect_success "screenshot capture resolves a pinned simulator and exports named
   FLUKE_SIMULATOR_BOOTSTATUS_COUNT="$test_root/capture-recovery-count" \
   FLUKE_SIMULATOR_BOOT_TIMEOUT_SECONDS="1" \
   "$screenshot_capture" "$capture_output"
-if [[ "$(find "$capture_output" -type f -name '*.png' | wc -l | tr -d ' ')" != "4" ]]; then
-  echo "FAIL: screenshot capture did not export four named images" >&2
+if grep -Fq 'https://fluke-api.onrender.com/api/v1/health' "$screenshot_capture"; then
+  echo "FAIL: screenshot capture must remain fixture-only" >&2
   failures=$((failures + 1))
 fi
-if ! grep -Fxq -- 'simctl shutdown AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE' \
-  "$test_root/capture-simctl-arguments"; then
-  echo "FAIL: screenshot capture did not use bounded simulator recovery" >&2
-  failures=$((failures + 1))
-fi
-if ! grep -Fxq -- 'https://fluke-api.onrender.com/api/v1/health' "$test_root/capture-curl-arguments"; then
-  echo "FAIL: screenshot capture did not warm the production API" >&2
-  failures=$((failures + 1))
-fi
-if ! grep -Fxq -- '-configuration' "$test_root/capture-xcodebuild-arguments" \
-  || ! grep -Fxq -- 'Release' "$test_root/capture-xcodebuild-arguments" \
-  || ! grep -Fxq -- 'ENABLE_TESTABILITY=YES' "$test_root/capture-xcodebuild-arguments"; then
-  echo "FAIL: screenshot capture did not use the live Release configuration" >&2
+if ! grep -Fq 'verify-screenshot-provenance.py' "$screenshot_capture" \
+  || ! grep -Fq 'AppStore/1.1/en-US/screenshots/6.9-inch' "$screenshot_capture"; then
+  echo "FAIL: screenshot capture did not bind App Store 1.1 provenance" >&2
   failures=$((failures + 1))
 fi
 if ! grep -Fxq -- '-resultBundlePath' "$capture" \
@@ -546,7 +739,7 @@ boundary_sources="$test_root/boundary-sources"
 feature_sources="$test_root/feature-sources"
 mkdir -p "$boundary_sources"
 mkdir -p "$feature_sources"
-printf 'let shippingViews = [SightingsView.self, WhalesView.self, LearnView.self, AtlasView.self]\n' \
+printf 'let shippingViews = [SightingsView.self, WhalesView.self, IdentifyView.self, LearnView.self, YouView.self, AtlasView.self]\n' \
   >"$boundary_sources/AllowedPersistence.swift"
 printf 'struct AtlasFeatureItem {}\n' >"$feature_sources/AllowedFeature.swift"
 expect_success "boundary verifier allows ordinary persistence names" env \
@@ -557,7 +750,7 @@ expect_success "boundary verifier allows ordinary persistence names" env \
   "$boundary_verifier"
 sed -i '' 's/AtlasView/AtlasMissing/' "$boundary_sources/AllowedPersistence.swift"
 expect_failure "boundary verifier requires every real shipping view" \
-  "Missing Release A shipping view: AtlasView" env \
+  "Missing full-launch shipping view: AtlasView" env \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
@@ -565,8 +758,7 @@ expect_failure "boundary verifier requires every real shipping view" \
   "$boundary_verifier"
 sed -i '' 's/AtlasMissing/AtlasView/' "$boundary_sources/AllowedPersistence.swift"
 printf 'struct SubmitView {}\n' >"$boundary_sources/ReleaseB.swift"
-expect_failure "boundary verifier rejects Release B presentation" \
-  "Release A boundary violation" env \
+expect_success "boundary verifier permits full-launch presentation" env \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
@@ -574,8 +766,7 @@ expect_failure "boundary verifier rejects Release B presentation" \
   "$boundary_verifier"
 rm "$boundary_sources/ReleaseB.swift"
 printf 'import FlukeReleaseB\nlet response: IdentifyResponse?\n' >"$feature_sources/ReleaseBImport.swift"
-expect_failure "boundary verifier rejects Release B feature imports" \
-  "Release B compile boundary violation" env \
+expect_success "boundary verifier permits the full-launch feature dependency" env \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
@@ -584,7 +775,7 @@ expect_failure "boundary verifier rejects Release B feature imports" \
 rm "$feature_sources/ReleaseBImport.swift"
 printf 'struct SightingsPlaceholder {}\n' >"$feature_sources/SightingsPlaceholder.swift"
 expect_failure "boundary verifier rejects shipping placeholder surfaces" \
-  "Release A placeholder boundary violation" env \
+  "Full-launch placeholder boundary violation" env \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \
@@ -594,8 +785,12 @@ rm "$feature_sources/SightingsPlaceholder.swift"
 
 configuration_root="$test_root/configuration"
 mkdir -p "$configuration_root"
+# The literal $() segment preserves // in xcconfig URL values.
+# shellcheck disable=SC2016
 printf 'FLUKE_API_BASE_URL = http:/$()/localhost:4000\n' >"$configuration_root/Debug.xcconfig"
+# shellcheck disable=SC2016
 printf 'FLUKE_API_BASE_URL = https:/$()/staging-api.fluke.invalid\n' >"$configuration_root/Staging.xcconfig"
+# shellcheck disable=SC2016
 printf 'FLUKE_API_BASE_URL = https:/$()/api.fluke.invalid\n' >"$configuration_root/Release.xcconfig"
 expect_failure "boundary verifier rejects placeholder Release API origins" \
   "Release API origin must be https://fluke-api.onrender.com" env \
@@ -605,6 +800,7 @@ expect_failure "boundary verifier rejects placeholder Release API origins" \
   FLUKE_FEATURE_SOURCE_ROOT="$feature_sources" \
   FLUKE_CONFIGURATION_ROOT="$configuration_root" \
   "$boundary_verifier"
+# shellcheck disable=SC2016
 printf 'FLUKE_API_BASE_URL = https:/$()/fluke-api.onrender.com\n' >"$configuration_root/Release.xcconfig"
 expect_success "boundary verifier accepts the certified Release API origin" env \
   PATH="$fake_bin:$PATH" \
@@ -621,7 +817,7 @@ for documentation_path in README.md docs/architecture.md docs/build-and-ci.md do
 done
 printf 'Five tabs are currently released.\n' >"$documentation_root/README.md"
 expect_failure "boundary verifier rejects stale release documentation" \
-  "Stale Release A documentation" env \
+  "Stale full-launch documentation" env \
   PATH="$fake_bin:$PATH" \
   FLUKE_XCODEBUILD_CAPTURE="$capture" \
   FLUKE_APP_SOURCE_ROOT="$boundary_sources" \

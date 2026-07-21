@@ -3,9 +3,17 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-output_directory="${1:-$repo_root/AppStore/1.0/en-US/screenshots/6.9-inch}"
+output_directory="${1:-$repo_root/AppStore/1.1/en-US/screenshots/6.9-inch}"
 device_name="${FLUKE_SCREENSHOT_DEVICE:-iPhone 17 Pro Max}"
 runtime_identifier="${FLUKE_SCREENSHOT_RUNTIME:-com.apple.CoreSimulator.SimRuntime.iOS-26-0}"
+: "${FLUKE_MODEL_CHECKOUT:?Set FLUKE_MODEL_CHECKOUT to the pinned reviewed checkout}"
+: "${FLUKE_MODEL_RELEASE:?Set FLUKE_MODEL_RELEASE to its verified mobile release directory}"
+if [[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=all)" ]]; then
+  echo "Screenshot capture requires a clean iOS checkout" >&2
+  exit 1
+fi
+source_commit="$(git -C "$repo_root" rev-parse HEAD)"
+source_tree="$(git -C "$repo_root" rev-parse 'HEAD^{tree}')"
 capture_root="$(mktemp -d "${TMPDIR:-/tmp}/fluke-screenshots.XXXXXX")"
 simulator_udid=""
 trap 'if [[ -n "$simulator_udid" ]]; then xcrun simctl status_bar "$simulator_udid" clear >/dev/null 2>&1 || true; fi; rm -rf "$capture_root"' EXIT
@@ -29,9 +37,7 @@ fi
 xcrun simctl status_bar "$simulator_udid" override \
   --time 9:41 --batteryState charged --batteryLevel 100 \
   --wifiBars 3 --cellularBars 4 --operatorName Fluke
-
-curl --fail --silent --show-error --max-time 90 \
-  https://fluke-api.onrender.com/api/v1/health >/dev/null
+xcrun simctl ui "$simulator_udid" appearance light
 
 result_bundle="$capture_root/AppStoreScreenshots.xcresult"
 attachments="$capture_root/attachments"
@@ -46,6 +52,7 @@ xcodebuild test \
   -maximum-concurrent-test-simulator-destinations 1 \
   -resultBundlePath "$result_bundle" \
   ENABLE_TESTABILITY=YES \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS=FLUKE_XCTEST_FIXTURES \
   CODE_SIGNING_ALLOWED=NO
 
 xcrun xcresulttool export attachments \
@@ -62,7 +69,10 @@ attachments_root, output_root = sys.argv[1:]
 with open(os.path.join(attachments_root, "manifest.json"), encoding="utf-8") as source:
     manifest = json.load(source)
 
-expected = ["01-sightings", "02-whales", "03-learn", "04-atlas"]
+expected = [
+    "01-sightings", "02-whales", "03-submit", "04-identify",
+    "05-atlas", "06-you", "07-learn",
+]
 exported = {}
 for test in manifest:
     attachments = test.get("attachments", [])
@@ -86,4 +96,11 @@ for name in expected:
 PY
 
 "$repo_root/scripts/verify-app-store-screenshots.sh" "$output_directory"
+provenance="$output_directory/screenshot-provenance.json"
+python3 "$repo_root/scripts/verify-screenshot-provenance.py" create \
+  --repo "$repo_root" --screenshots "$output_directory" --manifest "$provenance" \
+  --model-checkout "$FLUKE_MODEL_CHECKOUT" --release "$FLUKE_MODEL_RELEASE" \
+  --source-commit "$source_commit" --source-tree "$source_tree" \
+  --runtime "$runtime_identifier" --device "$device_name" \
+  --identifier-mode "${FLUKE_IDENTIFIER_MODE:-live}"
 printf 'App Store screenshots exported to %s\n' "$output_directory"

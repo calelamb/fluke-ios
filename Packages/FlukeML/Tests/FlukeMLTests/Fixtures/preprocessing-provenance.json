@@ -1,0 +1,61 @@
+{
+  "artifacts": {
+    "embedding-golden.f32": "b0b30134a8f630a608865d32b9dfcbbbe7f4386347c439b0e0cf471da055e69e",
+    "preprocessing-golden.f32": "d8953dcd2492b7ec96d7ac92944b4689fd1313acb1c4756fedcbf8e337e0f737",
+    "preprocessing-source.png": "893ef6edca2c1b1e558b1010575ed48674169a8821af725933253d183151f8b9"
+  },
+  "coremltoolsVersion": "9.0",
+  "embedding": {
+    "dtype": "little-endian-float32",
+    "shape": [
+      1,
+      384
+    ]
+  },
+  "generatorSHA256": "fe30ad33f4a78d3eebda83ef815768ec9d200b12221345b189e783bb324a6573",
+  "modelPackageSHA256": "e784dac753edb2b70dd31d1a74208b736cf805c0e34b87d81a7bad11e1c13109",
+  "numpyVersion": "2.2.6",
+  "orientation": {
+    "cgImagePropertyOrientation": 6,
+    "name": "right"
+  },
+  "pillowVersion": "12.3.0",
+  "preprocessing": {
+    "centerCrop": [
+      224,
+      224
+    ],
+    "mean": [
+      0.48500001430511475,
+      0.4560000002384186,
+      0.4059999883174896
+    ],
+    "resample": "Pillow BICUBIC",
+    "resizeShortestEdge": 256,
+    "standardDeviation": [
+      0.2290000021457672,
+      0.2240000069141388,
+      0.22499999403953552
+    ],
+    "version": "dinov2-imagenet-v1"
+  },
+  "producerCommit": "7aa6474ca51c4c7e91cd4552093e7cc3424924b2",
+  "pythonVersion": "3.12.4",
+  "schemaVersion": 1,
+  "source": {
+    "colorSpace": "sRGB",
+    "height": 173,
+    "kind": "deterministic synthetic pattern",
+    "rights": "generated for this test suite; no third-party content",
+    "width": 311
+  },
+  "tensor": {
+    "dtype": "little-endian-float32",
+    "shape": [
+      1,
+      3,
+      224,
+      224
+    ]
+  }
+}

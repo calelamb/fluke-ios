@@ -2,18 +2,37 @@ import FlukeKit
 import FlukeUI
 import SwiftUI
 
+public struct WhaleProfileRequest: Hashable, Sendable {
+    public let whaleID: String
+    public let revision: Int
+
+    public static func next(
+        whaleID: String,
+        after current: WhaleProfileRequest?
+    ) -> WhaleProfileRequest {
+        WhaleProfileRequest(whaleID: whaleID, revision: (current?.revision ?? 0) + 1)
+    }
+}
+
 public struct WhalesView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel: WhalesViewModel
+    @State private var requestedWhale: Whale?
     private let repository: any WhalesRepositoryProtocol
+    private let profileRequest: WhaleProfileRequest?
+    private let openSubmit: () -> Void
     private let openTrace: (Whale) -> Void
 
     public init(
         repository: any WhalesRepositoryProtocol,
-        onOpenTrace: @escaping (Whale) -> Void = { _ in }
+        profileRequest: WhaleProfileRequest? = nil,
+        onOpenTrace: @escaping (Whale) -> Void = { _ in },
+        onOpenSubmit: @escaping () -> Void = {}
     ) {
         self.repository = repository
+        self.profileRequest = profileRequest
         self.openTrace = onOpenTrace
+        openSubmit = onOpenSubmit
         _viewModel = State(initialValue: WhalesViewModel(repository: repository))
     }
 
@@ -26,30 +45,39 @@ public struct WhalesView: View {
         .background(Color.fog)
         .navigationTitle("Whales")
         .searchable(text: $viewModel.searchText, prompt: "Name, catalog ID, pod, or ecotype")
-        .task { await viewModel.load() }
+        .task(id: profileRequest) {
+            await viewModel.load()
+            requestedWhale = profileRequest.flatMap { viewModel.whale(id: $0.whaleID) }
+        }
         .refreshable { await viewModel.load() }
+        .navigationDestination(item: $requestedWhale) { whale in
+            WhaleProfileView(
+                whale: whale,
+                repository: repository,
+                onOpenTrace: { openTrace(whale) },
+                onOpenSubmit: openSubmit
+            )
+        }
     }
 
     private var filters: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(WhalesViewModel.Filter.allCases) { filter in
-                    Button(filter.rawValue) { viewModel.filter = filter }
-                        .font(.flukeBody.weight(.semibold))
-                        .foregroundStyle(viewModel.filter == filter ? Color.bone : Color.abyss)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 44)
-                        .background(
-                            viewModel.filter == filter ? Color.tide : Color.bone,
-                            in: Capsule()
-                        )
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(viewModel.filter == filter ? .isSelected : [])
-                }
+        LazyVGrid(columns: filterColumns, spacing: 8) {
+            ForEach(WhalesViewModel.Filter.allCases) { filter in
+                Button(filter.rawValue) { viewModel.filter = filter }
+                    .font(.flukeBody.weight(.semibold))
+                    .foregroundStyle(viewModel.filter == filter ? Color.bone : Color.abyss)
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(
+                        viewModel.filter == filter ? Color.tide : Color.bone,
+                        in: Capsule()
+                    )
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(viewModel.filter == filter ? .isSelected : [])
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .accessibilityLabel("Whale catalog filters")
     }
 
@@ -101,7 +129,8 @@ public struct WhalesView: View {
                             WhaleProfileView(
                                 whale: whale,
                                 repository: repository,
-                                onOpenTrace: { openTrace(whale) }
+                                onOpenTrace: { openTrace(whale) },
+                                onOpenSubmit: openSubmit
                             )
                         } label: {
                             WhaleCard(whale: whale)
@@ -121,5 +150,10 @@ public struct WhalesView: View {
             return [GridItem(.flexible())]
         }
         return [GridItem(.adaptive(minimum: 155, maximum: 260), spacing: 14)]
+    }
+
+    private var filterColumns: [GridItem] {
+        let minimumWidth: CGFloat = dynamicTypeSize.isAccessibilitySize ? 170 : 104
+        return [GridItem(.adaptive(minimum: minimumWidth), spacing: 8)]
     }
 }

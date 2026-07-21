@@ -72,7 +72,10 @@ if $check_upstream && [[ -n "$api_root" ]]; then
       exit 1
     fi
   else
-    find "$api_fixtures" -maxdepth 1 -type f -name '*.json' -exec basename {} \; \
+    # identify.json is intentionally not packaged: the shipping app has no
+    # server-identification client (identification is on-device only).
+    find "$api_fixtures" -maxdepth 1 -type f -name '*.json' ! -name 'identify.json' \
+      -exec basename {} \; \
       | LC_ALL=C sort >"$verification_root/api-files"
     if ! cmp -s "$verification_root/client-files" "$verification_root/api-files"; then
       printf 'upstream fixture set differs from packaged fixture set\n' >&2

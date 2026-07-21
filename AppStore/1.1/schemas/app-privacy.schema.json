@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "version", "build", "tracking", "analytics", "dataSharedWithThirdParties", "localOnlyProcessing", "transmittedOnlyOnExplicitSightingSubmission", "transmittedOnOptionalAccountUse", "transmittedForAppleAuthentication", "collectedData", "networkDisclosure"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "version": {"const": "1.1"},
+    "build": {"const": 2},
+    "tracking": {"const": false},
+    "analytics": {"const": false},
+    "dataSharedWithThirdParties": {"const": false},
+    "localOnlyProcessing": {"const": ["camera-frames", "photo-crops", "embeddings", "live-candidate-set", "identifier-caches", "submission-drafts"]},
+    "transmittedOnlyOnExplicitSightingSubmission": {"const": ["contact-email", "chosen-location", "submitted-content", "attached-photo", "selected-catalog-id", "similarity-score", "score-semantics", "manifest-version", "model-version", "index-version", "up-to-five-reference-photo-ids"]},
+    "transmittedOnOptionalAccountUse": {"const": ["name", "account-email", "user-id"]},
+    "transmittedForAppleAuthentication": {"const": ["apple-identity-token", "apple-authorization-code"]},
+    "collectedData": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["dataType", "linkedToUser", "purpose", "tracking"],
+        "properties": {
+          "dataType": {"enum": ["email-address", "name", "photos-or-videos", "coarse-location", "user-id", "other-user-content"]},
+          "linkedToUser": {"const": true},
+          "purpose": {"const": "app-functionality"},
+          "tracking": {"const": false}
+        }
+      }
+    },
+    "networkDisclosure": {"const": "The live candidate set stays local. Explicit sighting submission sends its contact email, user-chosen location and content, attached photo, and selected suggestion evidence: catalog ID, similarity score and score semantics, manifest/model/index versions, and up to five reference-photo IDs. Optional account use separately sends Name, account email, and User ID. Sign in with Apple separately sends the Apple identity token and one-use authorization code for authentication. Camera frames, crops, embeddings, caches, drafts, and unselected candidates stay on device."}
+  }
+}

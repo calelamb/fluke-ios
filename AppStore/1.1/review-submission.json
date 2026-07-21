@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "status": "WAITING_FOR_REVIEW",
+  "submitted": true,
+  "version": "1.1",
+  "build": 2,
+  "identifierMode": "dormant",
+  "appStoreConnect": {
+    "appId": "6792087853",
+    "versionId": null,
+    "buildId": null,
+    "submissionId": "a4ae42fb-062a-4d10-aeb5-34238b24be98"
+  },
+  "submittedAt": "2026-07-20T06:24:45.838Z",
+  "acceptedAt": null,
+  "lastCheckedAt": "2026-07-20T06:26:00Z",
+  "sourceCommit": "74dbe295e5672580651f22286f20006548f9af1b",
+  "modelSourceCommit": "6fe4767cd1c5716a04b655c9eaac4bd745471569",
+  "modelPackageSha256": "e784dac753edb2b70dd31d1a74208b736cf805c0e34b87d81a7bad11e1c13109",
+  "testflight": {
+    "build": "1.1 (2)",
+    "status": "Ready to Submit",
+    "internalGroup": "Fluke Internal"
+  },
+  "exportCompliance": {"usesEncryption": true, "exempt": true, "basis": "standard-https"}
+}

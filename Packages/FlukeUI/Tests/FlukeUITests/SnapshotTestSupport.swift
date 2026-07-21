@@ -12,6 +12,14 @@ let releaseImageSnapshot = Snapshotting<NSImage, NSImage>.image(
     perceptualPrecision: 0.98
 )
 
+/// macOS 15 and macOS 26 rasterize SwiftUI text differently even under the same Xcode.
+/// Keep strict, reviewed references for the pinned CI runner instead of lowering precision.
+func releaseSnapshotName(
+    for version: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+) -> String? {
+    version.majorVersion == 15 ? "macos-15" : nil
+}
+
 @MainActor
 func renderedSnapshot<V: View>(
     _ view: V,

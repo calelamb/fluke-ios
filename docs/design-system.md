@@ -12,13 +12,14 @@ Defined in [`Packages/FlukeUI/Sources/FlukeUI/Tokens/Color+Fluke.swift`](../Pack
 
 | Token | Hex | Use |
 | --- | --- | --- |
-| `Color.bone` | `#FAFBFC` | Primary card / content background |
+| `Color.bone` | `#F4F0E8` | Primary card / content background |
 | `Color.fog` | `#E8EEF1` | Page background; lightest semantic surface |
-| `Color.mist` | `#B3C0C8` | Subtle borders, dividers, low-contrast type |
-| `Color.tide` | `#2E5972` | Brand accent — active state, links, primary affordance hover |
-| `Color.deep` | `#4A6478` | Body text on light surfaces |
+| `Color.mist` | `#A8C5D1` | Subtle borders, dividers, low-contrast type |
+| `Color.tide` | `#2C6E8F` | Brand accent — active state, links, primary affordance hover |
+| `Color.deep` | `#143B52` | Body text on light surfaces |
 | `Color.abyss` | `#0A1F2E` | Display text + primary CTAs |
-| `Color.ember` | `#C65A3F` | Warm accent (sparingly) — status dots, BIGGS ecotype, warning moments |
+| `Color.ember` | `#D97742` | Warm accent (sparingly) — status dots, BIGGS ecotype, warning moments |
+| `Color.swell` | `#3B5F75` | Atlas midtone |
 
 ### Semantic mapping per ecotype
 
@@ -65,7 +66,7 @@ Bundled at [`Packages/FlukeUI/Sources/FlukeUI/Resources/Fonts/Fraunces-Variable.
 
 ### Dynamic Type
 
-The display tokens currently use fixed sizes (`Font.custom("Fraunces", size: 44)`). M-iOS-7's accessibility pass swaps these for the relative-to-system form (`Font.custom("Fraunces", size: 44, relativeTo: .largeTitle)`) so Dynamic Type scaling works on display headings too.
+Every display token uses `Font.custom(_:size:relativeTo:)`. Large, medium, and small headings scale relative to `.largeTitle`, `.title`, and `.title3` respectively.
 
 ## Motion tokens
 
@@ -112,6 +113,13 @@ Live in [`Packages/FlukeUI/Sources/FlukeUI/Components/`](../Packages/FlukeUI/Sou
 | `HeatCell` | Release A | Density cell used by the Range heatmap |
 | `ConfidenceCone` | Release A | Probability-cell overlay used by Predict |
 | `PodLegend` | Release A | Semantic pod-color key for Atlas |
+| `EditorialHeading` | Full launch | Fraunces hero, section, and card headings that scale with Dynamic Type |
+| `FlukeButtonStyle` | Full launch | Primary tide and secondary bone actions with visible disabled states |
+| `EcotypeBadge` | Full launch | Primitive label/color badge for ecotype presentation |
+| `FlukeCard` | Full launch | Bone surface with a 16-point radius and one-point mist border |
+| `FlukeEmptyState` | Full launch | Branded, text-first empty-state presentation |
+
+`View.flukeMotion(_:reduceMotion:)` removes transaction animation when Reduce Motion is active. Component gallery snapshots cover standard text, accessibility XXXL, increased contrast, and Reduce Motion.
 
 Sightings rows and markers, whale cards and filters, resilient browse status, and Learn article cards are intentionally feature-local. Promote one into `FlukeUI` only when another shipping feature needs the same behavior.
 

@@ -34,7 +34,67 @@ struct ContractFixtureTests {
 
         #expect(!capabilities.accounts)
         #expect(!capabilities.identification)
+        #expect(capabilities.identificationMode == .disabled)
         #expect(!capabilities.submissions)
+    }
+
+    @Test("Identification modes decode the compatibility flag and exact API wire value")
+    func identificationModesDecode() throws {
+        let onDevice = try JSONDecoder.fluke.decode(
+            Capabilities.self,
+            from: Data(
+                #"{"accounts":true,"identification":true,"identificationMode":"on-device","submissions":true}"#.utf8
+            )
+        )
+        let server = try JSONDecoder.fluke.decode(
+            Capabilities.self,
+            from: Data(
+                #"{"accounts":true,"identification":true,"identificationMode":"server","submissions":true}"#.utf8
+            )
+        )
+
+        #expect(onDevice.identification)
+        #expect(onDevice.identificationMode == .onDevice)
+        #expect(onDevice.identificationMode.rawValue == "on-device")
+        #expect(server.identificationMode == .server)
+    }
+
+    @Test("Identification modes round-trip both the canonical mode and compatibility flag")
+    func identificationModesRoundTrip() throws {
+        for mode in [IdentificationMode.disabled, .onDevice, .server] {
+            let original = try JSONDecoder().decode(
+                Capabilities.self,
+                from: Data(
+                    #"{"accounts":false,"identification":\#(mode != .disabled),"identificationMode":"\#(mode.rawValue)","submissions":true}"#.utf8
+                )
+            )
+            let encoded = try JSONEncoder().encode(original)
+            guard let object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+            else {
+                Issue.record("Encoded capabilities must be a JSON object")
+                continue
+            }
+            let decoded = try JSONDecoder().decode(Capabilities.self, from: encoded)
+
+            #expect(object["identificationMode"] as? String == mode.rawValue)
+            #expect(object["identification"] as? Bool == (mode != .disabled))
+            #expect(decoded == original)
+        }
+    }
+
+    @Test("Legacy identification compatibility flags decode deterministically")
+    func legacyIdentificationFlagsDecode() throws {
+        let enabled = try JSONDecoder().decode(
+            Capabilities.self,
+            from: Data(#"{"accounts":false,"identification":true,"submissions":false}"#.utf8)
+        )
+        let disabled = try JSONDecoder().decode(
+            Capabilities.self,
+            from: Data(#"{"accounts":false,"identification":false,"submissions":false}"#.utf8)
+        )
+
+        #expect(enabled.identificationMode == .server)
+        #expect(disabled.identificationMode == .disabled)
     }
 
     @Test("Whale catalog decodes the released public shape")
@@ -125,18 +185,6 @@ struct ContractFixtureTests {
 
         #expect(prediction.modelVersion == "fixture-prediction-v1")
         #expect(prediction.cells[0].probability == 0.72)
-    }
-
-    @Test("Identification decodes released ranking metadata")
-    func identifyDecodes() throws {
-        let response = try JSONDecoder.fluke.decode(
-            IdentifyResponse.self,
-            from: FixtureLoader.data(named: "identify")
-        )
-
-        #expect(response.confidenceBand == .high)
-        #expect(response.matches[0].rank == 1)
-        #expect(response.uploadURL == "https://fixtures.invalid/identify/upload-1.jpg")
     }
 
     @Test("Safe errors decode without exposing internal details")

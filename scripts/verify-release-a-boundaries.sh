@@ -50,34 +50,22 @@ if [[ "$icon_width" != "1024" || "$icon_height" != "1024" || "$icon_has_alpha" !
   exit 1
 fi
 
-if search_lines '(^|[^[:alnum:]_])(IdentifyPlaceholder|IdentifyService|IdentifyView|YouPlaceholder|AuthService|AuthSession|SubmissionReplayer|SubmissionsRepository|SubmitView|SubmitSheet)([^[:alnum:]_]|$)|/api/v1/(auth|identify|sightings/me)' \
-  "$app_source_root"; then
-  echo "Release A boundary violation in the app target" >&2
-  exit 1
-fi
-
-for shipping_view in SightingsView WhalesView LearnView AtlasView; do
+for shipping_view in SightingsView WhalesView IdentifyView LearnView YouView AtlasView; do
   if ! contains_pattern "(^|[^[:alnum:]_])${shipping_view}([^[:alnum:]_]|$)" "$app_source_root"; then
-    echo "Missing Release A shipping view: $shipping_view" >&2
+    echo "Missing full-launch shipping view: $shipping_view" >&2
     exit 1
   fi
 done
 
-if search_lines 'import[[:space:]]+FlukeReleaseB|(^|[^[:alnum:]_])(IdentifyResponse|ReleaseBEndpoint|ReleaseBAPIClient|AuthService|SubmissionsRepository)([^[:alnum:]_]|$)|/api/v1/(auth|identify|sightings/me)' \
-  "$feature_source_root"; then
-  echo "Release B compile boundary violation in FlukeFeatures" >&2
-  exit 1
-fi
-
-if contains_pattern 'FlukeReleaseB' "$repo_root/Packages/FlukeFeatures/Package.swift"; then
-  echo "Release B compile boundary violation in FlukeFeatures manifest" >&2
+if ! contains_pattern 'FlukeReleaseB' "$repo_root/Packages/FlukeFeatures/Package.swift"; then
+  echo "Missing full-launch FlukeReleaseB dependency" >&2
   exit 1
 fi
 
 if search_lines 'PlaceholderScreen|(^|[^[:alnum:]_])[[:alnum:]_]+Placeholder([^[:alnum:]_]|$)' \
   "$feature_source_root" \
   || search_lines 'PlaceholderScreen' "$ui_source_root"; then
-  echo "Release A placeholder boundary violation" >&2
+  echo "Full-launch placeholder boundary violation" >&2
   exit 1
 fi
 
@@ -89,12 +77,12 @@ documentation_paths=(
 )
 for documentation_path in "${documentation_paths[@]}"; do
   test -f "$documentation_path" || {
-    echo "Missing Release A documentation: $documentation_path" >&2
+    echo "Missing full-launch documentation: $documentation_path" >&2
     exit 1
   }
   if search_lines 'Five tabs|The 5-tab|all 5 tabs|AllFiveTabs|identify-tab placeholder|sign in \(mocked\)|Submit sheet|M-iOS-7 brings|Xcode 16|Node 20|pnpm 9|OS=latest|api\.fluke\.invalid|supply a real production API origin' \
     "$documentation_path"; then
-    echo "Stale Release A documentation" >&2
+    echo "Stale full-launch documentation" >&2
     exit 1
   fi
 done
@@ -140,4 +128,5 @@ if [[ -n "$result_bundle_path" ]]; then
 fi
 xcodebuild_arguments+=(CODE_SIGNING_ALLOWED=NO)
 
+echo "Full launch iOS verification"
 xcodebuild "${xcodebuild_arguments[@]}"
