@@ -131,19 +131,42 @@ public struct SightingsView: View {
   }
 
   private var sightingsList: some View {
-    List(viewModel.items) { item in
-      Button {
-        viewModel.selectedItem = item
-      } label: {
-        SightingRow(item: item)
+    List {
+      ForEach(viewModel.items) { item in
+        Button {
+          viewModel.selectedItem = item
+        } label: {
+          SightingRow(item: item)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.accessibilityLabel)
+        .accessibilityHint("Opens sighting details")
       }
-      .buttonStyle(.plain)
-      .accessibilityLabel(item.accessibilityLabel)
-      .accessibilityHint("Opens sighting details")
+      historyFooter
     }
     .listStyle(.plain)
     .scrollContentBackground(.hidden)
     .accessibilityIdentifier("sightings.loaded")
+  }
+
+  @ViewBuilder
+  private var historyFooter: some View {
+    if let failure = viewModel.loadMoreFailure {
+      VStack(spacing: 8) {
+        Text(failure.message)
+        Button("Retry older sightings") { Task { await viewModel.loadMore() } }
+      }
+      .frame(maxWidth: .infinity)
+      .accessibilityHint("Retries loading older sightings")
+    } else if viewModel.hasMoreHistory {
+      HStack(spacing: 10) {
+        ProgressView()
+        Text("Loading older sightings")
+      }
+      .frame(maxWidth: .infinity)
+      .accessibilityIdentifier("sightings.load-more")
+      .task { await viewModel.loadMore() }
+    }
   }
 
   @ViewBuilder

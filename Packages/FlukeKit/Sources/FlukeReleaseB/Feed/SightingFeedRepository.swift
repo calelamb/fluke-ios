@@ -3,8 +3,33 @@ import Foundation
 import OSLog
 
 public protocol SightingFeedRepositoryProtocol: Sendable {
+  func updates() -> AsyncThrowingStream<SightingFeedState, Error>
+  func hasMoreHistory() async -> Bool
   func load() async throws -> SightingFeedState
+  func loadMore() async throws -> SightingFeedState
   func refresh() async throws -> SightingFeedState
+}
+
+extension SightingFeedRepositoryProtocol {
+  public func updates() -> AsyncThrowingStream<SightingFeedState, Error> {
+    AsyncThrowingStream { continuation in
+      let task = Task {
+        do {
+          continuation.yield(try await load())
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
+        }
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  public func hasMoreHistory() async -> Bool { false }
+
+  public func loadMore() async throws -> SightingFeedState {
+    try await load()
+  }
 }
 
 public enum SightingFeedError: Error, Equatable, Sendable {
@@ -30,6 +55,8 @@ public actor SightingFeedRepository: SightingFeedRepositoryProtocol {
   private var state: SightingFeedState?
   private var representations: [RequestIdentity: CachedRepresentation] = [:]
   private var flight: Flight?
+  private var history = HistoryPagination.none
+  private var loadMoreFlight: LoadMoreFlight?
   private var persistenceTail: Task<Void, Never>?
 
   public init(api: APIClient, cache: any BrowseCacheStore) {
@@ -41,6 +68,40 @@ public actor SightingFeedRepository: SightingFeedRepositoryProtocol {
     try Task.checkCancellation()
     if let state { return state }
     return try await waitForFlight(initial: true)
+  }
+
+  public nonisolated func updates() -> AsyncThrowingStream<SightingFeedState, Error> {
+    let cache = cache
+    return AsyncThrowingStream { continuation in
+      let task = Task {
+        do {
+          if let cached = try await Self.cachedState(from: cache) {
+            continuation.yield(cached)
+          }
+          continuation.yield(try await self.load())
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
+        }
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  public func hasMoreHistory() async -> Bool {
+    history.nextCursor != nil
+  }
+
+  public func loadMore() async throws -> SightingFeedState {
+    try Task.checkCancellation()
+    if let loadMoreFlight {
+      return try await completeLoadMore(loadMoreFlight)
+    }
+    guard let base = state else { return try await load() }
+    guard let cursor = history.nextCursor, let snapshot = history.snapshotCursor else { return base }
+    let flight = makeLoadMoreFlight(base: base, cursor: cursor, snapshot: snapshot)
+    loadMoreFlight = flight
+    return try await completeLoadMore(flight)
   }
 
   public func refresh() async throws -> SightingFeedState {
@@ -104,6 +165,7 @@ public actor SightingFeedRepository: SightingFeedRepositoryProtocol {
       guard let current = flight, current.id == flightID else { return }
       state = fetched.state
       representations = fetched.representations
+      if let pagination = fetched.pagination { history = pagination }
       complete(flightID, with: .success(fetched.state))
     case .failure(let error):
       complete(flightID, with: .failure(error))
@@ -129,7 +191,7 @@ public actor SightingFeedRepository: SightingFeedRepositoryProtocol {
     return Task.detached {
       let cached = try await Self.cachedState(from: cache)
       do {
-        return try await Self.fetchHistory(api: api, representations: representations)
+        return try await Self.fetchFirstPage(api: api, representations: representations)
       } catch is CancellationError {
         throw CancellationError()
       } catch {
@@ -137,6 +199,7 @@ public actor SightingFeedRepository: SightingFeedRepositoryProtocol {
         return FetchResult(
           state: cached,
           representations: representations,
+          pagination: nil,
           shouldPersist: false
         )
       }
@@ -152,7 +215,7 @@ public actor SightingFeedRepository: SightingFeedRepositoryProtocol {
       if let base {
         return try await Self.fetchSync(api: api, base: base, representations: representations)
       }
-      return try await Self.fetchHistory(api: api, representations: representations)
+      return try await Self.fetchFirstPage(api: api, representations: representations)
     }
   }
 
@@ -194,50 +257,31 @@ public actor SightingFeedRepository: SightingFeedRepositoryProtocol {
     await task.value
   }
 
-  private static func fetchHistory(
+  private static func fetchFirstPage(
     api: APIClient,
     representations initialRepresentations: [RequestIdentity: CachedRepresentation]
   ) async throws -> FetchResult {
     var representations = initialRepresentations
-    var pageCursor: String?
-    var visitedCursors = Set<String>()
-    var snapshotCursor: String?
-    var allItems: [SightingFeedItem] = []
-    var providers: [ProviderFreshness] = []
-    var pages = 0
-    repeat {
-      try Task.checkCancellation()
-      try checkBeforeFetch(pages: pages)
-      let identity = RequestIdentity.history(pageCursor)
-      let page = try await fetchPage(
-        api: api, identity: identity, representations: &representations)
-      pages += 1
-      allItems += page.items
-      guard page.items.allSatisfy({ $0.observedAt != nil }) else {
-        throw SightingFeedError.tombstoneInHistory
-      }
-      try checkItems(allItems.count)
-      if let snapshotCursor, snapshotCursor != page.syncCursor {
-        throw SightingFeedError.snapshotChanged
-      }
-      snapshotCursor = page.syncCursor
-      providers = page.providers
-      guard page.hasMore else {
-        pageCursor = nil
-        break
-      }
-      guard let next = page.pageCursor else { throw SightingFeedError.invalidCursorMode }
-      guard visitedCursors.insert(next).inserted else {
-        throw SightingFeedError.cursorDidNotProgress
-      }
-      pageCursor = next
-    } while pageCursor != nil
-    guard let snapshotCursor else { throw APIError.malformedResponse }
+    try Task.checkCancellation()
+    let page = try await fetchPage(
+      api: api, identity: .history(nil), representations: &representations)
+    guard page.items.allSatisfy({ $0.observedAt != nil }) else {
+      throw SightingFeedError.tombstoneInHistory
+    }
+    try checkItems(page.items.count)
+    let next = try historyCursor(page)
     let state = SightingFeedState(
-      items: [], tombstones: [:], syncCursor: snapshotCursor, providers: providers
+      items: [], tombstones: [:], syncCursor: page.syncCursor, providers: page.providers
     )
-    .applying(items: allItems, syncCursor: snapshotCursor, providers: providers)
-    return FetchResult(state: state, representations: [:], shouldPersist: true)
+    .applying(items: page.items, syncCursor: page.syncCursor, providers: page.providers)
+    return FetchResult(
+      state: state,
+      representations: [:],
+      pagination: HistoryPagination(
+        nextCursor: next, snapshotCursor: page.syncCursor, visitedCursors: [], pages: 1
+      ),
+      shouldPersist: true
+    )
   }
 
   private static func fetchSync(
@@ -283,7 +327,83 @@ public actor SightingFeedRepository: SightingFeedRepositoryProtocol {
     }
     let reusableIdentity = RequestIdentity.sync(state.syncCursor)
     let reusable = representations[reusableIdentity].map { [reusableIdentity: $0] } ?? [:]
-    return FetchResult(state: state, representations: reusable, shouldPersist: true)
+    return FetchResult(
+      state: state, representations: reusable, pagination: nil, shouldPersist: true
+    )
+  }
+
+  private func makeLoadMoreFlight(
+    base: SightingFeedState,
+    cursor: String,
+    snapshot: String
+  ) -> LoadMoreFlight {
+    let id = UUID()
+    let api = api
+    let representations = representations
+    let pagination = history
+    let task = Task.detached {
+      try await Self.fetchHistoryPage(
+        api: api, base: base, cursor: cursor, snapshot: snapshot,
+        pagination: pagination, representations: representations
+      )
+    }
+    return LoadMoreFlight(id: id, task: task)
+  }
+
+  private func completeLoadMore(_ flight: LoadMoreFlight) async throws -> SightingFeedState {
+    let fetched = try await flight.task.value
+    guard loadMoreFlight?.id == flight.id else { return state ?? fetched.state }
+    loadMoreFlight = nil
+    state = fetched.state
+    representations = fetched.representations
+    if let pagination = fetched.pagination { history = pagination }
+    if fetched.shouldPersist { await persist(fetched.state) }
+    return fetched.state
+  }
+
+  private static func fetchHistoryPage(
+    api: APIClient,
+    base: SightingFeedState,
+    cursor: String,
+    snapshot: String,
+    pagination: HistoryPagination,
+    representations initialRepresentations: [RequestIdentity: CachedRepresentation]
+  ) async throws -> FetchResult {
+    try checkBeforeFetch(pages: pagination.pages)
+    guard !pagination.visitedCursors.contains(cursor) else {
+      throw SightingFeedError.cursorDidNotProgress
+    }
+    var representations = initialRepresentations
+    let page = try await fetchPage(
+      api: api, identity: .history(cursor), representations: &representations)
+    guard page.syncCursor == snapshot else { throw SightingFeedError.snapshotChanged }
+    guard page.items.allSatisfy({ $0.observedAt != nil }) else {
+      throw SightingFeedError.tombstoneInHistory
+    }
+    let merged = base.applying(
+      items: page.items, syncCursor: base.syncCursor, providers: base.providers)
+    try checkItems(merged.items.count)
+    let next = try historyCursor(page)
+    return FetchResult(
+      state: merged,
+      representations: representations,
+      pagination: HistoryPagination(
+        nextCursor: next,
+        snapshotCursor: snapshot,
+        visitedCursors: pagination.visitedCursors.union([cursor]),
+        pages: pagination.pages + 1
+      ),
+      shouldPersist: true
+    )
+  }
+
+  private static func historyCursor(_ page: SightingFeedPage) throws -> String? {
+    if page.hasMore {
+      guard let cursor = page.pageCursor else { throw SightingFeedError.invalidCursorMode }
+      return cursor
+    }
+    guard page.pageCursor == nil else { throw SightingFeedError.invalidCursorMode }
+    return nil
   }
 
   private static func fetchPage(
@@ -342,7 +462,24 @@ private struct CachedRepresentation: Sendable {
 private struct FetchResult: Sendable {
   let state: SightingFeedState
   let representations: [RequestIdentity: CachedRepresentation]
+  let pagination: HistoryPagination?
   let shouldPersist: Bool
+}
+
+private struct HistoryPagination: Sendable {
+  let nextCursor: String?
+  let snapshotCursor: String?
+  let visitedCursors: Set<String>
+  let pages: Int
+
+  static let none = HistoryPagination(
+    nextCursor: nil, snapshotCursor: nil, visitedCursors: [], pages: 0
+  )
+}
+
+private struct LoadMoreFlight: Sendable {
+  let id: UUID
+  let task: Task<FetchResult, Error>
 }
 
 private struct Flight {

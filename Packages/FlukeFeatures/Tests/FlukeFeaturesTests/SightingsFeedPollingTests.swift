@@ -57,6 +57,29 @@ struct SightingsFeedPollingTests {
   }
 
   @MainActor
+  @Test("Older feed pages append without blocking initial content")
+  func loadsOlderFeedPage() async throws {
+    let first = try feedItem(id: "external:acartia:new", revision: 2, hour: 12)
+    let older = try feedItem(id: "external:gbif:older", revision: 1, hour: 10)
+    let initial = SightingFeedState(
+      items: [first], tombstones: [:], syncCursor: "r2", providers: feedProviders())
+    let complete = SightingFeedState(
+      items: [first, older], tombstones: [:], syncCursor: "r2", providers: feedProviders())
+    let repository = PagingFeedRepository(initial: initial, complete: complete)
+    let model = SightingsViewModel(feedRepository: repository)
+
+    await model.load()
+    #expect(model.items.map(\.id) == ["external:acartia:new"])
+    #expect(model.hasMoreHistory)
+
+    await model.loadMore()
+
+    #expect(model.items.map(\.id) == ["external:acartia:new", "external:gbif:older"])
+    #expect(!model.hasMoreHistory)
+    #expect(await repository.loadMoreCallCount == 1)
+  }
+
+  @MainActor
   @Test("View-model polling propagates failure so the poller can back off")
   func viewModelPropagatesPollingFailure() async {
     let model = SightingsViewModel(feedRepository: FailingFeedRepositoryFake())
@@ -168,6 +191,21 @@ struct SightingsFeedPollingTests {
       await Task.yield()
     }
   }
+
+  private func feedItem(id: String, revision: Int, hour: Int) throws -> SightingFeedItem {
+    let json = """
+      {"attribution":"Real provider","ecotypeGuess":null,"groupSize":3,"id":"\(id)","kind":"external","latitude":48.4,"longitude":-123.1,"notes":null,"observedAt":"2026-07-18T\(hour):00:00Z","revision":\(revision),"source":"provider","sourceUrl":"https://example.test/record","species":"Orcinus orca","trusted":true}
+      """
+    return try JSONDecoder.fluke.decode(SightingFeedItem.self, from: Data(json.utf8))
+  }
+
+  private func feedProviders() -> [ProviderFreshness] {
+    FeedProvider.allCases.map {
+      ProviderFreshness(
+        expectedMaximumLag: 300, lastAttemptAt: nil, lastSuccessAt: nil,
+        provider: $0, status: .succeeded)
+    }
+  }
 }
 
 private actor PollRecorder {
@@ -263,5 +301,27 @@ private actor BlockingFeedRepository: SightingFeedRepositoryProtocol {
     refreshStarted = true
     try await Task.sleep(for: .seconds(60))
     throw PollFailure.expected
+  }
+}
+
+private actor PagingFeedRepository: SightingFeedRepositoryProtocol {
+  let initial: SightingFeedState
+  let complete: SightingFeedState
+  private(set) var loadMoreCallCount = 0
+  private var more = true
+
+  init(initial: SightingFeedState, complete: SightingFeedState) {
+    self.initial = initial
+    self.complete = complete
+  }
+
+  func hasMoreHistory() async -> Bool { more }
+  func load() async throws -> SightingFeedState { initial }
+  func refresh() async throws -> SightingFeedState { initial }
+
+  func loadMore() async throws -> SightingFeedState {
+    loadMoreCallCount += 1
+    more = false
+    return complete
   }
 }

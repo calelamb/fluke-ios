@@ -57,6 +57,9 @@ public final class SightingsViewModel {
   public private(set) var externalState: BrowseViewState<[ExternalSighting]> = .idle
   public private(set) var feedState: SightingFeedState?
   public private(set) var feedFailure: BrowseFailure?
+  public private(set) var hasMoreHistory = false
+  public private(set) var isLoadingMore = false
+  public private(set) var loadMoreFailure: BrowseFailure?
   public var freshness: SightingFeedFreshness {
     guard let feedState else { return .recent(lastSuccessAge: nil) }
     return SightingFeedFreshness(providers: feedState.providers, now: now())
@@ -107,6 +110,27 @@ public final class SightingsViewModel {
     await load()
   }
 
+  public func loadMore() async {
+    guard let feedRepository, hasMoreHistory, !isLoadingMore else { return }
+    isLoadingMore = true
+    loadMoreFailure = nil
+    do {
+      let state = try await feedRepository.loadMore()
+      applyFeedState(state)
+      hasMoreHistory = await feedRepository.hasMoreHistory()
+    } catch is CancellationError {
+      // A disappearing list cancels pagination without presenting an error.
+    } catch {
+      loadMoreFailure = BrowseFailure(
+        code: "SIGHTING_HISTORY_FAILED",
+        message: "Older sightings could not be loaded.",
+        retryable: true,
+        requestId: nil
+      )
+    }
+    isLoadingMore = false
+  }
+
   public func pollRefresh() async throws {
     guard let feedRepository else { return }
     loadGeneration += 1
@@ -115,6 +139,7 @@ public final class SightingsViewModel {
       let state = try await feedRepository.refresh()
       guard generation == loadGeneration else { return }
       applyFeedState(state)
+      hasMoreHistory = await feedRepository.hasMoreHistory()
     } catch is CancellationError {
       throw CancellationError()
     } catch {
@@ -194,9 +219,18 @@ public final class SightingsViewModel {
     loadGeneration += 1
     let generation = loadGeneration
     do {
-      let state = try await (initial ? repository.load() : repository.refresh())
-      guard generation == loadGeneration else { return }
-      applyFeedState(state)
+      if initial {
+        for try await state in repository.updates() {
+          guard generation == loadGeneration else { return }
+          applyFeedState(state)
+          hasMoreHistory = await repository.hasMoreHistory()
+        }
+      } else {
+        let state = try await repository.refresh()
+        guard generation == loadGeneration else { return }
+        applyFeedState(state)
+        hasMoreHistory = await repository.hasMoreHistory()
+      }
     } catch is CancellationError {
       return
     } catch {
@@ -208,6 +242,7 @@ public final class SightingsViewModel {
   private func applyFeedState(_ state: SightingFeedState) {
     feedState = state
     feedFailure = nil
+    loadMoreFailure = nil
   }
 
   private func recordFeedFailure() {

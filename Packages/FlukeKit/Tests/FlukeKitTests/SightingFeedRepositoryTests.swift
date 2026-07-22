@@ -157,8 +157,8 @@ struct SightingFeedRepositoryTests {
         == .recent(lastSuccessAge: 60))
   }
 
-  @Test("History drains only page cursors and preserves one snapshot cursor")
-  func drainsHistorySnapshot() async throws {
+  @Test("Initial history returns one page and older sightings load on demand")
+  func pagesHistoryOnDemand() async throws {
     let transport = FeedTransport(responses: [
       .json(
         pageJSON(
@@ -171,15 +171,72 @@ struct SightingFeedRepositoryTests {
     ])
     let repository = SightingFeedRepository(api: api(transport), cache: MemoryBrowseCacheStore())
 
-    let state = try await repository.load()
+    let initial = try await repository.load()
+
+    #expect(initial.items.map(\.id) == ["internal:a"])
+    #expect(await transport.requests.count == 1)
+    #expect(await repository.hasMoreHistory())
+
+    let complete = try await repository.loadMore()
     let requests = await transport.requests
 
-    #expect(state.items.count == 2)
+    #expect(complete.items.map(\.id) == ["internal:a", "internal:b"])
     #expect(requests.count == 2)
     #expect(requests[0].url?.query?.contains("pageCursor") == false)
     #expect(requests[0].url?.query?.contains("syncCursor") == false)
     #expect(requests[1].url?.query?.contains("pageCursor=page-2") == true)
     #expect(requests[1].url?.query?.contains("syncCursor") == false)
+    #expect(!(await repository.hasMoreHistory()))
+  }
+
+  @Test("Cached feed is emitted before the initial network page completes")
+  func cachedFeedEmitsFirst() async throws {
+    let cache = MemoryBrowseCacheStore()
+    let cachedItem = try decodeItem(internalJSON(id: "internal:cached", revision: 1))
+    let cached = SightingFeedState(
+      items: [cachedItem], tombstones: [:], syncCursor: "sync-cached", providers: providers())
+    try await cache.replace(
+      BrowseCacheDocument(resource: "sighting-feed", fetchedAt: Date(), payload: .value(cached)),
+      for: BrowseCacheKey(resource: "sighting-feed", identity: "global")
+    )
+    let transport = CancellableFeedTransport()
+    let repository = SightingFeedRepository(api: api(transport), cache: cache)
+    var updates = repository.updates().makeAsyncIterator()
+
+    let first = try await updates.next()
+    #expect(first?.items.map(\.id) == ["internal:cached"])
+    await eventually { await transport.isWaiting }
+
+    await transport.succeed(pageJSON(
+      items: [internalJSON(id: "internal:fresh", revision: 2)],
+      hasMore: false, pageCursor: nil, syncCursor: "sync-fresh"))
+    let second = try await updates.next()
+
+    #expect(second?.items.map(\.id) == ["internal:fresh"])
+  }
+
+  @Test("Concurrent older-page requests coalesce into one transport")
+  func coalescesLoadMore() async throws {
+    let transport = FeedTransport(
+      responses: [
+        .json(pageJSON(
+          items: [internalJSON(id: "internal:new", revision: 2)],
+          hasMore: true, pageCursor: "page-2", syncCursor: "sync-2"), etag: nil),
+        .json(pageJSON(
+          items: [internalJSON(id: "internal:old", revision: 1)],
+          hasMore: false, pageCursor: nil, syncCursor: "sync-2"), etag: nil),
+      ],
+      delay: .milliseconds(30)
+    )
+    let repository = SightingFeedRepository(api: api(transport), cache: MemoryBrowseCacheStore())
+    _ = try await repository.load()
+
+    async let first = repository.loadMore()
+    async let second = repository.loadMore()
+    _ = try await (first, second)
+
+    #expect(await transport.requests.count == 2)
+    #expect(try await repository.load().items.count == 2)
   }
 
   @Test("Sync drains returned sync cursors, never page cursors, and applies tombstones")
@@ -387,8 +444,8 @@ struct SightingFeedRepositoryTests {
     #expect(storedState.items.map(\.id) == ["internal:cached"])
   }
 
-  @Test("A partial history failure returns and retains the complete last-known-good cache")
-  func partialFailureRetainsCache() async throws {
+  @Test("An older-page failure retains the complete visible first page")
+  func olderPageFailureRetainsFirstPage() async throws {
     let cache = MemoryBrowseCacheStore()
     let cachedItem = try decodeItem(internalJSON(id: "internal:cached", revision: 7))
     let cached = SightingFeedState(
@@ -409,10 +466,12 @@ struct SightingFeedRepositoryTests {
     let repository = SightingFeedRepository(api: api(transport), cache: cache)
 
     let result = try await repository.load()
+    await #expect(throws: Error.self) { _ = try await repository.loadMore() }
     let stored = try await cache.load(SightingFeedState.self, for: key)
 
-    #expect(result.items.map(\.id) == ["internal:cached"])
-    #expect(stored?.payload == .value(cached))
+    #expect(result.items.map(\.id) == ["internal:partial"])
+    #expect(try await repository.load().items.map(\.id) == ["internal:partial"])
+    #expect(stored?.payload == .value(result))
   }
 
   @Test("Concurrent initial and manual refreshes coalesce into one request")
