@@ -23,6 +23,20 @@ public actor WhalesRepository: WhalesRepositoryProtocol {
         )
     }
 
+    public nonisolated func catalogUpdates()
+        -> AsyncThrowingStream<BrowseResult<[Whale]>, Error>
+    {
+        loader.loadThenRefresh(
+            [Whale].self,
+            key: BrowseCacheKey(resource: "whales", identity: "catalog"),
+            fetch: { [api] in
+                try await PaginatedRepository.fetchAll(api: api, endpoint: Endpoint.whales)
+            },
+            isEmpty: { $0.isEmpty },
+            validate: { try PublicBrowseValidator.whales($0) }
+        )
+    }
+
     /// Compatibility API for callers that need a throwing live-only fetch.
     public func fetchAll() async throws -> [Whale] {
         let values: [Whale] = try await PaginatedRepository.fetchAll(api: api, endpoint: Endpoint.whales)

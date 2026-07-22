@@ -57,6 +57,65 @@ public struct BrowseRepositoryLoader: Sendable {
         }
     }
 
+    public func loadThenRefresh<Value: Codable & Sendable>(
+        _ type: Value.Type,
+        key: BrowseCacheKey,
+        fetch: @escaping @Sendable () async throws -> Value,
+        isEmpty: @escaping @Sendable (Value) -> Bool,
+        validate: @escaping @Sendable (Value) throws -> Void
+    ) -> AsyncThrowingStream<BrowseResult<Value>, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    if let cached = try await cachedResult(type, key: key, validate: validate) {
+                        continuation.yield(cached)
+                    }
+                    let refreshed = try await load(
+                        type, key: key, fetch: fetch, isEmpty: isEmpty, validate: validate
+                    )
+                    continuation.yield(refreshed)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func cachedResult<Value: Codable & Sendable>(
+        _ type: Value.Type,
+        key: BrowseCacheKey,
+        validate: @Sendable (Value) throws -> Void
+    ) async throws -> BrowseResult<Value>? {
+        try Task.checkCancellation()
+        let document: BrowseCacheDocument<Value>?
+        do {
+            document = try await cache.load(type, for: key)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            await diagnostics.record(BrowseCacheDiagnostic(
+                operation: .read,
+                resource: key.resource,
+                errorCode: cacheErrorCode(error)
+            ))
+            return nil
+        }
+        try Task.checkCancellation()
+        guard let document else { return nil }
+        if case .value(let value) = document.payload {
+            do { try validate(value) } catch { return nil }
+        }
+        return .cached(
+            payload: document.payload,
+            metadata: BrowseMetadata(
+                fetchedAt: document.fetchedAt,
+                schemaVersion: document.schemaVersion
+            )
+        )
+    }
+
     private func fallback<Value: Codable & Sendable>(
         _ type: Value.Type,
         key: BrowseCacheKey,

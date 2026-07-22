@@ -70,14 +70,15 @@ public final class AtlasViewModel {
     loadGeneration += 1
     let generation = loadGeneration
     catalogState = catalogState.beginRefresh()
-    let result: BrowseResult<[Whale]>
     do {
-      result = try await repository.loadCatalog()
+      for try await result in repository.catalogUpdates() {
+        guard generation == loadGeneration else { return }
+        catalogState = .resolve(result)
+      }
     } catch {
-      result = .failed(.unexpectedFeatureFailure)
+      guard generation == loadGeneration else { return }
+      catalogState = .failed(.unexpectedFeatureFailure)
     }
-    guard generation == loadGeneration else { return }
-    catalogState = .resolve(result)
   }
 
   public var catalog: [Whale] {

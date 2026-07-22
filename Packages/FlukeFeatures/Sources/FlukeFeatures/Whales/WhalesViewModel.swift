@@ -40,14 +40,15 @@ public final class WhalesViewModel {
         loadGeneration += 1
         let generation = loadGeneration
         state = state.beginRefresh()
-        let result: BrowseResult<[Whale]>
         do {
-            result = try await repository.loadCatalog()
+            for try await result in repository.catalogUpdates() {
+                guard generation == loadGeneration else { return }
+                state = .resolve(result)
+            }
         } catch {
-            result = .failed(.unexpectedFeatureFailure)
+            guard generation == loadGeneration else { return }
+            state = .failed(.unexpectedFeatureFailure)
         }
-        guard generation == loadGeneration else { return }
-        state = .resolve(result)
     }
 
     public func retry() async {

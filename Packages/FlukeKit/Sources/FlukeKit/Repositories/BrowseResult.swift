@@ -51,6 +51,7 @@ public struct BrowseFailure: Error, Equatable, Sendable {
 }
 
 public enum BrowseResult<Value: Codable & Sendable>: Sendable {
+    case cached(payload: BrowsePayload<Value>, metadata: BrowseMetadata)
     case fresh(value: Value, metadata: BrowseMetadata)
     case empty(metadata: BrowseMetadata)
     case stale(

@@ -14,6 +14,8 @@ public enum BrowseViewState<Value: Codable & Equatable & Sendable>: Equatable, S
 
     public static func resolve(_ result: BrowseResult<Value>) -> Self {
         switch result {
+        case .cached(let payload, _):
+            return resolve(payload, notice: nil)
         case .fresh(let value, _):
             return .content(value, notice: nil, isRefreshing: false)
         case .empty:
@@ -63,7 +65,7 @@ public enum BrowseViewState<Value: Codable & Equatable & Sendable>: Equatable, S
         }
     }
 
-    private static func resolve(_ payload: BrowsePayload<Value>, notice: BrowseNotice) -> Self {
+    private static func resolve(_ payload: BrowsePayload<Value>, notice: BrowseNotice?) -> Self {
         switch payload {
         case .value(let value): .content(value, notice: notice, isRefreshing: false)
         case .empty: .empty(notice: notice, isRefreshing: false)

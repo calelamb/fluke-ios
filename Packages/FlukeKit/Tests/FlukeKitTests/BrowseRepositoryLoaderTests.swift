@@ -30,6 +30,42 @@ struct BrowseRepositoryLoaderTests {
         #expect(try await cache.load([String].self, for: key)?.payload == .value(["J35"]))
     }
 
+    @Test("Cached data is emitted before a suspended network refresh")
+    func cachedThenFresh() async throws {
+        let cache = MemoryBrowseCacheStore()
+        let key = BrowseCacheKey(resource: "whales", identity: "catalog")
+        try await seed(["cached"], in: cache, key: key)
+        let gate = BrowseRefreshGate()
+        let loader = BrowseRepositoryLoader(cache: cache, now: { now })
+        var iterator = loader.loadThenRefresh(
+            [String].self,
+            key: key,
+            fetch: {
+                await gate.wait()
+                return ["fresh"]
+            },
+            isEmpty: { $0.isEmpty },
+            validate: { _ in }
+        ).makeAsyncIterator()
+
+        let first = try await iterator.next()
+        guard case .cached(let payload, let metadata) = first else {
+            Issue.record("Expected cache before network completion")
+            return
+        }
+        #expect(payload == .value(["cached"]))
+        #expect(metadata.fetchedAt == Date(timeIntervalSince1970: 1_000))
+
+        await gate.resume()
+        let second = try await iterator.next()
+        guard case .fresh(let value, _) = second else {
+            Issue.record("Expected refreshed network value")
+            return
+        }
+        #expect(value == ["fresh"])
+        #expect(try await iterator.next() == nil)
+    }
+
     @Test("A successful empty response replaces older nonempty data")
     func trueEmpty() async throws {
         let cache = MemoryBrowseCacheStore()
@@ -231,6 +267,22 @@ struct BrowseRepositoryLoaderTests {
             ),
             for: key
         )
+    }
+}
+
+private actor BrowseRefreshGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var resumed = false
+
+    func wait() async {
+        if resumed { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func resume() {
+        resumed = true
+        continuation?.resume()
+        continuation = nil
     }
 }
 

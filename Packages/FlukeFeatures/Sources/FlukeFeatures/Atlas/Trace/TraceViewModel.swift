@@ -124,6 +124,8 @@ public final class TraceViewModel {
       points.sorted { $0.observedAt < $1.observedAt }
     }
     return switch result {
+    case .cached(let payload, let metadata):
+      .cached(payload: map(payload, transform: values), metadata: metadata)
     case .fresh(let points, let metadata):
       .fresh(value: values(points), metadata: metadata)
     case .empty(let metadata):

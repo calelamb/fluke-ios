@@ -113,6 +113,30 @@ struct WhalesViewModelTests {
         #expect(offlineModel.state.notice == .offline)
     }
 
+    @Test("Cached catalog renders before staged network refresh completes")
+    func cachedCatalogRendersFirst() async {
+        let cached = makeWhale(
+            id: "cached", catalogId: "J35", name: nil, ecotype: .resident, pod: "J"
+        )
+        let fresh = makeWhale(
+            id: "fresh", catalogId: "T49A", name: nil, ecotype: .biggs, pod: nil
+        )
+        let (updates, continuation) = AsyncThrowingStream<BrowseResult<[Whale]>, Error>
+            .makeStream()
+        let repository = StagedWhalesRepository(updates: updates)
+        let model = WhalesViewModel(repository: repository)
+        let load = Task { await model.load() }
+
+        continuation.yield(.cached(payload: .value([cached]), metadata: metadata))
+        for _ in 0..<20 { await Task.yield() }
+        #expect(model.filteredWhales.map(\.id) == ["cached"])
+
+        continuation.yield(.fresh(value: [fresh], metadata: metadata))
+        continuation.finish()
+        await load.value
+        #expect(model.filteredWhales.map(\.id) == ["fresh"])
+    }
+
     @Test("Retry loads catalog again")
     func retry() async {
         let repository = WhalesRepositoryFake(catalog: [
@@ -128,6 +152,31 @@ struct WhalesViewModelTests {
 
         #expect(model.filteredWhales.map(\.catalogId) == ["J35"])
         #expect(await repository.catalogCallCount == 2)
+    }
+}
+
+private struct StagedWhalesRepository: WhalesRepositoryProtocol {
+    let updates: AsyncThrowingStream<BrowseResult<[Whale]>, Error>
+
+    func loadCatalog() async throws -> BrowseResult<[Whale]> {
+        return .failed(BrowseFailure(
+            code: "ONE_SHOT_USED", message: "Wrong repository path.",
+            retryable: false, requestId: nil
+        ))
+    }
+
+    func catalogUpdates() -> AsyncThrowingStream<BrowseResult<[Whale]>, Error> {
+        updates
+    }
+
+    func loadProfile(id: String) async throws -> BrowseResult<WhaleProfile?> {
+        .empty(metadata: BrowseMetadata(fetchedAt: Date(), schemaVersion: 1))
+    }
+
+    func loadTrack(
+        whaleId: String, from: Date, to: Date
+    ) async throws -> BrowseResult<[MovementTrackPoint]> {
+        .empty(metadata: BrowseMetadata(fetchedAt: Date(), schemaVersion: 1))
     }
 }
 

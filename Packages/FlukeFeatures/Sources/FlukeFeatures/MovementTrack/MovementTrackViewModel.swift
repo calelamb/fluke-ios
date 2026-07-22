@@ -249,6 +249,8 @@ public final class MovementTrackViewModel {
       }
     }
     return switch result {
+    case .cached(let payload, let metadata):
+      .cached(payload: map(payload, sort), metadata: metadata)
     case .fresh(let points, let metadata): .fresh(value: sort(points), metadata: metadata)
     case .empty(let metadata): .empty(metadata: metadata)
     case .stale(let payload, let metadata, let failure):

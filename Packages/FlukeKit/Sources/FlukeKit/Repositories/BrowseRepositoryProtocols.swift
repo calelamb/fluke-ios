@@ -6,9 +6,26 @@ public protocol SightingsRepositoryProtocol: Sendable {
 }
 
 public protocol WhalesRepositoryProtocol: Sendable {
+    func catalogUpdates() -> AsyncThrowingStream<BrowseResult<[Whale]>, Error>
     func loadCatalog() async throws -> BrowseResult<[Whale]>
     func loadProfile(id: String) async throws -> BrowseResult<WhaleProfile?>
     func loadTrack(whaleId: String, from: Date, to: Date) async throws -> BrowseResult<[MovementTrackPoint]>
+}
+
+extension WhalesRepositoryProtocol {
+    public func catalogUpdates() -> AsyncThrowingStream<BrowseResult<[Whale]>, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    continuation.yield(try await loadCatalog())
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
 }
 
 public protocol HistoricalSightingsRepositoryProtocol: Sendable {

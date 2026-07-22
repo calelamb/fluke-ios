@@ -109,7 +109,7 @@ final class MovementNavigationModel {
     switch result {
     case .fresh(let whales, _):
       resolved(whales, catalogID: catalogID)
-    case .stale(let payload, _, _), .cachedOffline(let payload, _):
+    case .cached(let payload, _), .stale(let payload, _, _), .cachedOffline(let payload, _):
       resolved(payload, catalogID: catalogID)
     case .empty:
       .unavailable(catalogID: catalogID, reason: .notFound)
