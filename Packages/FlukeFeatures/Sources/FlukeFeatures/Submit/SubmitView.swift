@@ -26,8 +26,8 @@ public struct SubmitView: View {
           )
         case .queued:
           SubmissionSuccessView(
-            title: "Saved on this device",
-            message: "Fluke will upload this sighting when a connection is available.")
+            title: "Saved and syncing",
+            message: "Your sighting is safe on this device while Fluke uploads it.")
         case .partial:
           SubmissionSuccessView(
             title: "Sighting submitted", message: "Some photos are queued to finish uploading.")
@@ -100,7 +100,7 @@ public struct SubmitView: View {
         if case .validation = model.state {
           Text("Check the highlighted sighting detail.").foregroundStyle(Color.ember)
         }
-        Button(model.state == .submitting ? "Submitting…" : "Submit sighting") {
+        Button(model.state == .submitting ? "Saving…" : "Submit sighting") {
           Task { await model.submit() }
         }
         .disabled(model.state == .submitting || model.disabledMessage != nil)
@@ -130,7 +130,7 @@ public struct SubmitView: View {
     let message: String? =
       switch state {
       case .success: "Sighting submitted"
-      case .queued: "Sighting saved on this device and queued for upload"
+      case .queued: "Sighting saved and syncing"
       case .partial: "Sighting submitted; some photos are queued"
       case .failed(let message): message
       default: nil

@@ -196,13 +196,12 @@ struct RootScene: View {
     .sheet(item: $movementSubmitPresentation.presentedRoute) { route in
       SubmitView(
         model: SubmitViewModel(
-          service: environment.submissionService,
           queue: environment.submissionQueue,
+          replayQueuedSubmissions: { await submissionReplay.flush() },
           isSignedIn: authSession.isAuthenticated,
           signedInObserverEmail: authSession.authenticatedEmail,
           submissionsEnabled: route.submissionsEnabled,
           localIdentification: route.localIdentification,
-          invalidator: environment.submissionInvalidationHub,
           observedAt: environment.submissionObservedAt()
         )
       )

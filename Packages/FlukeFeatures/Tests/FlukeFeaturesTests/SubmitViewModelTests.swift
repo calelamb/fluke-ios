@@ -7,13 +7,30 @@ import Testing
 @MainActor
 @Suite("Submit state machine")
 struct SubmitViewModelTests {
-  @Test("Offline submit queues once and presents an honest receipt")
+  @Test("Valid submit is durable before replay and never waits for the network")
+  func queuesBeforeReplay() async {
+    let queue = RecordingSubmissionQueue()
+    let replay = BlockingReplaySignal()
+    let model = SubmitViewModel(
+      queue: queue,
+      replayQueuedSubmissions: { await replay.signal() }
+    )
+    model.email = "observer@example.com"
+    model.photos = [.fixture]
+
+    await model.submit()
+    await replay.waitUntilSignaled()
+
+    #expect(model.state == .queued)
+    #expect(await queue.enqueuedCount == 1)
+    #expect(await replay.signalCount == 1)
+    await replay.release()
+  }
+
+  @Test("Submit queues once and presents an honest receipt")
   func queuesOffline() async {
     let queue = RecordingSubmissionQueue()
-    let invalidator = RecordingSubmissionInvalidator()
-    let model = SubmitViewModel(
-      service: SubmitService(error: APIError.offline), queue: queue, invalidator: invalidator
-    )
+    let model = SubmitViewModel(queue: queue)
     model.email = "observer@example.com"
     model.photos = [.fixture]
 
@@ -23,12 +40,11 @@ struct SubmitViewModelTests {
     #expect(model.state == .queued)
     #expect(model.dismissal == .allowed)
     #expect(await queue.enqueuedCount == 1)
-    #expect(await invalidator.count == 0)
   }
 
   @Test("A dirty form requires explicit discard")
   func dirtyDismissal() {
-    let model = SubmitViewModel(service: SubmitService(), queue: RecordingSubmissionQueue())
+    let model = SubmitViewModel(queue: RecordingSubmissionQueue())
     model.locationName = "Lime Kiln"
     #expect(model.dismissal == .requiresConfirmation)
   }
@@ -37,14 +53,14 @@ struct SubmitViewModelTests {
   func coordinateAndDateDirtyDismissal() {
     let initialDate = Date(timeIntervalSince1970: 1_700_000_000)
     let coordinateModel = SubmitViewModel(
-      service: SubmitService(), queue: RecordingSubmissionQueue(), observedAt: initialDate
+      queue: RecordingSubmissionQueue(), observedAt: initialDate
     )
     #expect(coordinateModel.dismissal == .allowed)
     coordinateModel.latitude += 0.001
     #expect(coordinateModel.dismissal == .requiresConfirmation)
 
     let dateModel = SubmitViewModel(
-      service: SubmitService(), queue: RecordingSubmissionQueue(), observedAt: initialDate
+      queue: RecordingSubmissionQueue(), observedAt: initialDate
     )
     dateModel.observedAt = initialDate.addingTimeInterval(60)
     #expect(dateModel.dismissal == .requiresConfirmation)
@@ -52,20 +68,19 @@ struct SubmitViewModelTests {
 
   @Test("Signed-in submit uses hidden account email while anonymous validates it")
   func authEmailBehavior() async {
-    let service = SubmitService()
+    let signedInQueue = RecordingSubmissionQueue()
     let signedIn = SubmitViewModel(
-      service: service,
-      queue: RecordingSubmissionQueue(),
+      queue: signedInQueue,
       isSignedIn: true,
       signedInObserverEmail: "account@example.com"
     )
     signedIn.email = "bad"
     signedIn.photos = [.fixture]
     await signedIn.submit()
-    #expect(signedIn.state == .success)
-    #expect(await service.payloads.first?.observerEmail == "account@example.com")
+    #expect(signedIn.state == .queued)
+    #expect(await signedInQueue.lastPayload?.observerEmail == "account@example.com")
 
-    let anonymous = SubmitViewModel(service: SubmitService(), queue: RecordingSubmissionQueue())
+    let anonymous = SubmitViewModel(queue: RecordingSubmissionQueue())
     anonymous.email = "bad"
     anonymous.photos = [.fixture]
     await anonymous.submit()
@@ -75,7 +90,7 @@ struct SubmitViewModelTests {
   @Test("Photo selection is capped at five and disabled capability is honest")
   func photoCapAndCapability() {
     let model = SubmitViewModel(
-      service: SubmitService(), queue: RecordingSubmissionQueue(), submissionsEnabled: false
+      queue: RecordingSubmissionQueue(), submissionsEnabled: false
     )
     model.addPhotos(
       (0..<6).map { index in
@@ -85,66 +100,43 @@ struct SubmitViewModelTests {
     #expect(model.disabledMessage?.contains("unavailable") == true)
   }
 
-  @Test("Partial upload queues only failed photos and terminal state dismisses cleanly")
-  func partialQueuesAndDismisses() async {
-    let receipt = SubmissionReceipt(id: "created", photoUploadToken: "token")
+  @Test("Queue-first submit saves the complete sighting and all photos")
+  func queuesCompleteSubmission() async {
     let queue = RecordingSubmissionQueue()
-    let invalidator = RecordingSubmissionInvalidator()
-    let model = validModel(
-      service: SubmitService(
-        error: SubmissionServiceError.partial(
-          receipt: receipt, failedPhotoIndices: [1]
-        )),
-      queue: queue,
-      photoCount: 2,
-      invalidator: invalidator
-    )
+    let model = validModel(queue: queue, photoCount: 2)
 
     await model.submit()
 
-    #expect(model.state == .partial)
+    #expect(model.state == .queued)
     #expect(model.dismissal == .allowed)
-    #expect(await queue.lastPhotos.count == 1)
-    #expect(await queue.lastPayload?.existingReceipt == receipt)
-    #expect(await invalidator.count == 1)
+    #expect(await queue.lastPhotos.count == 2)
+    #expect(await queue.lastPayload?.existingReceipt == nil)
   }
 
-  @Test("Partial upload queue failure is explicit and retryable")
-  func partialQueueFailure() async {
+  @Test("Durable save failure is explicit and retryable")
+  func queueFailure() async {
     let queue = RecordingSubmissionQueue(error: TestFailure.queue)
-    let service = SubmitService(
-      error: SubmissionServiceError.partial(
-        receipt: SubmissionReceipt(id: "created", photoUploadToken: "token"),
-        failedPhotoIndices: [0]
-      ))
-    let invalidator = RecordingSubmissionInvalidator()
-    let model = validModel(service: service, queue: queue, invalidator: invalidator)
+    let model = validModel(queue: queue)
 
     await model.submit()
 
-    #expect(
-      model.state == .failed("The sighting was saved, but failed photos could not be queued."))
-    #expect(await invalidator.count == 1)
+    #expect(model.state == .failed("Fluke couldn't safely save this sighting. Please try again."))
+    #expect(model.dismissal == .requiresConfirmation)
   }
 
-  @Test("Generic failure can retry to success")
-  func genericFailureRetry() async {
-    let service = SequencedSubmitService(results: [
-      .failure(TestFailure.service),
-      .success(SubmissionReceipt(id: "created", photoUploadToken: "token")),
-    ])
-    let model = validModel(service: service, queue: RecordingSubmissionQueue())
+  @Test("Durable save failure can retry with the same idempotency identifier")
+  func queueFailureRetry() async {
+    let queue = FailOnceSubmissionQueue()
+    let model = validModel(queue: queue)
 
     await model.submit()
-    #expect(model.state == .failed("Fluke couldn't submit this sighting. Please try again."))
-    #expect(model.failureMessage == "Fluke couldn't submit this sighting. Please try again.")
+    #expect(model.state == .failed("Fluke couldn't safely save this sighting. Please try again."))
     await model.submit()
 
-    #expect(model.state == .success)
+    #expect(model.state == .queued)
     #expect(model.failureMessage == nil)
     #expect(model.dismissal == .allowed)
-    #expect(await service.callCount == 2)
-    let payloads = await service.payloads
+    let payloads = await queue.payloads
     #expect(payloads.map(\.clientSubmissionID).count == 2)
     #expect(Set(payloads.map(\.clientSubmissionID)).count == 1)
   }
@@ -161,13 +153,9 @@ struct SubmitViewModelTests {
         indexVersion: "index",
         matchedReferencePhotoIDs: ["ref-2", "ref-1"]
       ))
-    let service = SequencedSubmitService(results: [
-      .failure(TestFailure.service),
-      .success(SubmissionReceipt(id: "created", photoUploadToken: "token")),
-    ])
+    let queue = RecordingSubmissionQueue()
     let model = SubmitViewModel(
-      service: service,
-      queue: RecordingSubmissionQueue(),
+      queue: queue,
       ecotypeGuess: nil,
       localIdentification: suggestion
     )
@@ -175,16 +163,14 @@ struct SubmitViewModelTests {
     model.photos = [.fixture]
 
     await model.submit()
-    await model.submit()
 
-    let payloads = await service.payloads
-    #expect(payloads.map(\.localIdentification) == [suggestion, suggestion])
-    #expect(payloads.allSatisfy { $0.ecotypeGuess == nil })
+    #expect(await queue.lastPayload?.localIdentification == suggestion)
+    #expect(await queue.lastPayload?.ecotypeGuess == nil)
   }
 
   @Test("Validation state identifies the invalid field")
   func validationFocus() async {
-    let model = validModel(service: SubmitService(), queue: RecordingSubmissionQueue())
+    let model = validModel(queue: RecordingSubmissionQueue())
     model.latitude = 91
     await model.submit()
     #expect(model.state == .validation(.latitude))
@@ -198,36 +184,36 @@ struct SubmitViewModelTests {
     #expect(SubmissionFormField.forValidationError(.photos) == .photos)
   }
 
-  @Test("Duplicate tap while request is suspended submits once")
+  @Test("Duplicate tap while durable save is suspended enqueues once")
   func duplicateTapSuppression() async {
-    let service = BlockingSubmitService()
-    let model = validModel(service: service, queue: RecordingSubmissionQueue())
+    let queue = BlockingSubmissionQueue()
+    let model = validModel(queue: queue)
     let first = Task { await model.submit() }
-    await service.waitUntilCalled()
+    await queue.waitUntilCalled()
 
     await model.submit()
-    #expect(await service.callCount == 1)
-    await service.release()
+    #expect(await queue.callCount == 1)
+    await queue.release()
     await first.value
-    #expect(model.state == .success)
+    #expect(model.state == .queued)
   }
 
   @Test("Signed-in form hides observer email")
   func hidesSignedInEmail() {
     let signedIn = SubmitViewModel(
-      service: SubmitService(), queue: RecordingSubmissionQueue(), isSignedIn: true,
+      queue: RecordingSubmissionQueue(), isSignedIn: true,
       signedInObserverEmail: "account@example.com"
     )
-    let anonymous = SubmitViewModel(service: SubmitService(), queue: RecordingSubmissionQueue())
+    let anonymous = SubmitViewModel(queue: RecordingSubmissionQueue())
     #expect(!signedIn.showsObserverEmail)
     #expect(anonymous.showsObserverEmail)
   }
 
   @Test("Signed-in presentation without an account email fails closed to email entry")
   func signedInMissingEmailShowsEntry() async {
-    let service = SubmitService()
+    let queue = RecordingSubmissionQueue()
     let model = SubmitViewModel(
-      service: service, queue: RecordingSubmissionQueue(), isSignedIn: true,
+      queue: queue, isSignedIn: true,
       signedInObserverEmail: nil
     )
     #expect(model.showsObserverEmail)
@@ -236,8 +222,8 @@ struct SubmitViewModelTests {
 
     await model.submit()
 
-    #expect(model.state == .success)
-    #expect(await service.payloads.first?.observerEmail == "fallback@example.com")
+    #expect(model.state == .queued)
+    #expect(await queue.lastPayload?.observerEmail == "fallback@example.com")
   }
 
   @Test("Repeated picker interactions consume only new asset IDs and never duplicate photos")
@@ -257,7 +243,7 @@ struct SubmitViewModelTests {
       bytes: Data([1]), fileName: "duplicate-with-new-id.jpg",
       idempotencyID: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
     )
-    let model = SubmitViewModel(service: SubmitService(), queue: RecordingSubmissionQueue())
+    let model = SubmitViewModel(queue: RecordingSubmissionQueue())
     model.addPhotos([first])
     model.addPhotos([first, second])
     #expect(model.photos.map(\.idempotencyID) == [first.idempotencyID])
@@ -289,37 +275,17 @@ struct SubmitViewModelTests {
   }
 
   private func validModel(
-    service: any SubmissionServiceProtocol,
     queue: any SubmissionQueueProtocol,
-    photoCount: Int = 1,
-    invalidator: any SubmissionInvalidating = NoopSubmissionInvalidator()
+    photoCount: Int = 1
   ) -> SubmitViewModel {
-    let model = SubmitViewModel(service: service, queue: queue, invalidator: invalidator)
+    let model = SubmitViewModel(queue: queue)
     model.email = "observer@example.com"
     model.photos = Array(repeating: .fixture, count: photoCount)
     return model
   }
 }
 
-private actor RecordingSubmissionInvalidator: SubmissionInvalidating {
-  private(set) var count = 0
-  func ownerSightingsDidChange() { count += 1 }
-}
-
-private enum TestFailure: Error, Sendable { case service, queue }
-
-private actor SubmitService: SubmissionServiceProtocol {
-  let error: (any Error & Sendable)?
-  private(set) var payloads: [SubmissionPayload] = []
-  init(error: (any Error & Sendable)? = nil) { self.error = error }
-  func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws
-    -> SubmissionReceipt
-  {
-    payloads = payloads + [payload]
-    if let error { throw error }
-    return SubmissionReceipt(id: "sighting", photoUploadToken: "token")
-  }
-}
+private enum TestFailure: Error, Sendable { case queue }
 
 private actor RecordingSubmissionQueue: SubmissionQueueProtocol {
   let error: (any Error & Sendable)?
@@ -344,41 +310,72 @@ private actor RecordingSubmissionQueue: SubmissionQueueProtocol {
   func discard(id: UUID) async throws {}
 }
 
-private actor SequencedSubmitService: SubmissionServiceProtocol {
-  private var results: [Result<SubmissionReceipt, any Error & Sendable>]
-  private(set) var callCount = 0
+private actor FailOnceSubmissionQueue: SubmissionQueueProtocol {
   private(set) var payloads: [SubmissionPayload] = []
-  init(results: [Result<SubmissionReceipt, any Error & Sendable>]) { self.results = results }
-  func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws
-    -> SubmissionReceipt
+  func list() async throws -> [QueuedSubmissionValue] { [] }
+  func enqueue(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws
+    -> QueuedSubmissionValue
   {
-    callCount += 1
     payloads = payloads + [payload]
-    return try results.removeFirst().get()
+    if payloads.count == 1 { throw TestFailure.queue }
+    return QueuedSubmissionValue(
+      id: UUID(), payload: payload, photoFileNames: [], state: .queued,
+      attempts: 0, createdAt: Date())
   }
+  func retry(id: UUID) async throws {}
+  func discard(id: UUID) async throws {}
 }
 
-private actor BlockingSubmitService: SubmissionServiceProtocol {
+private actor BlockingSubmissionQueue: SubmissionQueueProtocol {
   private(set) var callCount = 0
-  private var submitContinuation: CheckedContinuation<Void, Never>?
+  private var enqueueContinuation: CheckedContinuation<Void, Never>?
   private var waiters: [CheckedContinuation<Void, Never>] = []
-  func submit(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws
-    -> SubmissionReceipt
+  func list() async throws -> [QueuedSubmissionValue] { [] }
+  func enqueue(payload: SubmissionPayload, photos: [ProcessedPhoto]) async throws
+    -> QueuedSubmissionValue
   {
     callCount += 1
     let current = waiters
     waiters = []
     for continuation in current { continuation.resume() }
-    await withCheckedContinuation { submitContinuation = $0 }
-    return SubmissionReceipt(id: "created", photoUploadToken: "token")
+    await withCheckedContinuation { enqueueContinuation = $0 }
+    return QueuedSubmissionValue(
+      id: UUID(), payload: payload, photoFileNames: [], state: .queued,
+      attempts: 0, createdAt: Date())
   }
   func waitUntilCalled() async {
     if callCount > 0 { return }
     await withCheckedContinuation { waiters.append($0) }
   }
   func release() {
-    submitContinuation?.resume()
-    submitContinuation = nil
+    enqueueContinuation?.resume()
+    enqueueContinuation = nil
+  }
+  func retry(id: UUID) async throws {}
+  func discard(id: UUID) async throws {}
+}
+
+private actor BlockingReplaySignal {
+  private(set) var signalCount = 0
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+
+  func signal() async {
+    signalCount += 1
+    let current = waiters
+    waiters = []
+    current.forEach { $0.resume() }
+    await withCheckedContinuation { continuation = $0 }
+  }
+
+  func waitUntilSignaled() async {
+    if signalCount > 0 { return }
+    await withCheckedContinuation { waiters.append($0) }
+  }
+
+  func release() {
+    continuation?.resume()
+    continuation = nil
   }
 }
 
