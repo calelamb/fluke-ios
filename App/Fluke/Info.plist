@@ -24,6 +24,8 @@
 	<string>$(FLUKE_API_BASE_URL)</string>
 	<key>FLUKE_BUILD_CONFIGURATION</key>
 	<string>$(FLUKE_BUILD_CONFIGURATION)</string>
+	<key>FLUKE_PUBLIC_READ_BASE_URL</key>
+	<string>$(FLUKE_PUBLIC_READ_BASE_URL)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>

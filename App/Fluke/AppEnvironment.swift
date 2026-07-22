@@ -65,6 +65,7 @@ struct AppEnvironment {
   typealias SubmissionObservedAt = @MainActor @Sendable () -> Date
 
   let apiBaseURL: URL
+  let publicReadBaseURL: URL
   let authService: any AuthServiceProtocol
   let browseCacheStore: any BrowseCacheStore
   let configuration: AppBuildConfiguration
@@ -97,6 +98,9 @@ struct AppEnvironment {
       apiBaseURLString: bundle.object(
         forInfoDictionaryKey: "FLUKE_API_BASE_URL"
       ) as? String,
+      publicReadBaseURLString: bundle.object(
+        forInfoDictionaryKey: "FLUKE_PUBLIC_READ_BASE_URL"
+      ) as? String,
       configuration: configuration,
       session: URLSession(configuration: submissionSessionConfiguration()),
       cacheStore: FileBrowseCacheStore(
@@ -108,6 +112,7 @@ struct AppEnvironment {
 
   static func make(
     apiBaseURLString: String?,
+    publicReadBaseURLString: String? = "__FLUKE_USE_API_BASE__",
     configuration: AppBuildConfiguration,
     session: URLSession = .shared,
     capabilitiesFetch: CapabilitiesFetch? = nil,
@@ -122,31 +127,44 @@ struct AppEnvironment {
       apiBaseURLString,
       configuration: configuration
     )
-    let client = APIClient(baseURL: apiBaseURL, session: session)
+    let resolvedPublicReadURLString = publicReadBaseURLString == "__FLUKE_USE_API_BASE__"
+      ? apiBaseURLString
+      : publicReadBaseURLString
+    let publicReadBaseURL = try validatedAPIBaseURL(
+      resolvedPublicReadURLString,
+      configuration: configuration
+    )
+    let mutationClient = APIClient(baseURL: apiBaseURL, session: session)
+    let publicReadClient = APIClient(
+      baseURL: publicReadBaseURL,
+      pathPrefix: "/api/public",
+      session: session
+    )
     let submissionQueue = try SubmissionQueue()
     let submissionInvalidationHub = SubmissionInvalidationHub()
 
     return AppEnvironment(
       apiBaseURL: apiBaseURL,
-      authService: authService ?? AuthService(api: client),
+      publicReadBaseURL: publicReadBaseURL,
+      authService: authService ?? AuthService(api: mutationClient),
       browseCacheStore: cacheStore,
       configuration: configuration,
       fetchCapabilities: capabilitiesFetch ?? {
-        try await client.get("/api/v1/capabilities")
+        try await publicReadClient.get("/api/v1/capabilities")
       },
-      historicalSightingsRepository: HistoricalSightingsRepository(api: client, cache: cacheStore),
+      historicalSightingsRepository: HistoricalSightingsRepository(api: publicReadClient, cache: cacheStore),
       identificationModeCache: IdentificationModeCache(store: cacheStore),
       localIdentifierLoader: OnDeviceIdentificationLoader(load: localIdentifierLoad),
-      logbookRepository: LogbookRepository(api: client),
-      predictionRepository: PredictionRepository(api: client, cache: cacheStore),
-      sightingsRepository: SightingsRepository(api: client, cache: cacheStore),
-      sightingFeedRepository: SightingFeedRepository(api: client, cache: cacheStore),
+      logbookRepository: LogbookRepository(api: mutationClient),
+      predictionRepository: PredictionRepository(api: publicReadClient, cache: cacheStore),
+      sightingsRepository: SightingsRepository(api: publicReadClient, cache: cacheStore),
+      sightingFeedRepository: SightingFeedRepository(api: publicReadClient, cache: cacheStore),
       sessionHintStore: KeychainSessionHintStore(),
       submissionQueue: submissionQueue,
       submissionObservedAt: submissionObservedAt,
-      submissionService: SubmissionService(api: client),
+      submissionService: SubmissionService(api: mutationClient),
       submissionInvalidationHub: submissionInvalidationHub,
-      whalesRepository: WhalesRepository(api: client, cache: cacheStore)
+      whalesRepository: WhalesRepository(api: publicReadClient, cache: cacheStore)
     )
   }
 

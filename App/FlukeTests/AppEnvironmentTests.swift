@@ -17,10 +17,46 @@ struct AppEnvironmentTests {
   func debugAcceptsLocalhost() throws {
     let environment = try AppEnvironment.make(
       apiBaseURLString: "http://localhost:4000",
+      publicReadBaseURLString: "http://localhost:5173",
       configuration: .debug
     )
 
     #expect(environment.apiBaseURL == URL(string: "http://localhost:4000"))
+    #expect(environment.publicReadBaseURL == URL(string: "http://localhost:5173"))
+  }
+
+  @Test("Release separates public reads from authenticated mutations")
+  func releaseSeparatesOrigins() throws {
+    let environment = try AppEnvironment.make(
+      apiBaseURLString: "https://fluke-api.onrender.com",
+      publicReadBaseURLString: "https://fluke-pnw.vercel.app",
+      configuration: .release
+    )
+
+    #expect(environment.apiBaseURL == URL(string: "https://fluke-api.onrender.com"))
+    #expect(environment.publicReadBaseURL == URL(string: "https://fluke-pnw.vercel.app"))
+  }
+
+  @Test("Release requires a public read origin")
+  func releaseRequiresPublicOrigin() {
+    #expect(throws: AppConfigurationError.missingAPIBaseURL) {
+      try AppEnvironment.make(
+        apiBaseURLString: "https://fluke-api.onrender.com",
+        publicReadBaseURLString: nil,
+        configuration: .release
+      )
+    }
+  }
+
+  @Test("Release rejects an insecure public read origin")
+  func releaseRejectsInsecurePublicOrigin() {
+    #expect(throws: AppConfigurationError.insecureAPIBaseURL) {
+      try AppEnvironment.make(
+        apiBaseURLString: "https://fluke-api.onrender.com",
+        publicReadBaseURLString: "http://fluke-pnw.vercel.app",
+        configuration: .release
+      )
+    }
   }
 
   @Test(

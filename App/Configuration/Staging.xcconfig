@@ -1,4 +1,5 @@
 FLUKE_API_BASE_URL = https:/$()/staging-api.fluke.invalid
+FLUKE_PUBLIC_READ_BASE_URL = https:/$()/staging-web.fluke.invalid
 FLUKE_BUILD_CONFIGURATION = staging
 IPHONEOS_DEPLOYMENT_TARGET = 17.0
 SUPPORTED_PLATFORMS = iphoneos iphonesimulator

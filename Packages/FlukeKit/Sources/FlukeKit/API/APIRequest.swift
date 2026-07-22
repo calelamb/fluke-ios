@@ -9,14 +9,16 @@ public struct APIRequest: Hashable, Sendable {
         self.queryItems = queryItems
     }
 
-    public func url(relativeTo baseURL: URL) throws -> URL {
+    public func url(relativeTo baseURL: URL, pathPrefix: String = "") throws -> URL {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw APIError.malformedResponse
         }
-        guard path.hasPrefix("/"), !path.contains("?"), !path.contains("#") else {
+        guard path.hasPrefix("/"), !path.contains("?"), !path.contains("#"),
+              isValidPrefix(pathPrefix) else {
             throw APIError.invalidRequest
         }
-        components.percentEncodedPath = try path
+        let routedPath = try routedPath(pathPrefix: pathPrefix)
+        components.percentEncodedPath = try routedPath
             .split(separator: "/", omittingEmptySubsequences: false)
             .map { segment in
                 guard segment != ".", segment != ".." else {
@@ -41,6 +43,22 @@ public struct APIRequest: Hashable, Sendable {
             throw APIError.malformedResponse
         }
         return url
+    }
+
+    private func isValidPrefix(_ prefix: String) -> Bool {
+        guard prefix.isEmpty || prefix.hasPrefix("/") else { return false }
+        guard !prefix.hasSuffix("/"), !prefix.contains("?"), !prefix.contains("#") else {
+            return false
+        }
+        return prefix.split(separator: "/").allSatisfy { $0 != "." && $0 != ".." }
+    }
+
+    private func routedPath(pathPrefix: String) throws -> String {
+        guard !pathPrefix.isEmpty else { return path }
+        guard path == "/api" || path.hasPrefix("/api/") else {
+            throw APIError.invalidRequest
+        }
+        return "\(pathPrefix)\(path.dropFirst(4))"
     }
 
     private static func encode(_ component: String) -> String? {

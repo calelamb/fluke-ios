@@ -55,6 +55,28 @@ struct BrowseRequestSafetyTests {
         }
     }
 
+    @Test("Public read prefix is inserted before the canonical API path")
+    func publicReadPrefix() throws {
+        let request = APIRequest(
+            path: "/api/v1/sighting-feed",
+            queryItems: [URLQueryItem(name: "limit", value: "100")]
+        )
+
+        let url = try request.url(
+            relativeTo: URL(string: "https://fluke-pnw.vercel.app")!,
+            pathPrefix: "/api/public"
+        )
+
+        #expect(url.absoluteString ==
+            "https://fluke-pnw.vercel.app/api/public/v1/sighting-feed?limit=100")
+        #expect(throws: APIError.invalidRequest) {
+            try request.url(
+                relativeTo: URL(string: "https://fluke-pnw.vercel.app")!,
+                pathPrefix: "/../admin"
+            )
+        }
+    }
+
     @Test("Prediction identifiers are encoded as query items")
     func predictionQueryEncoding() async throws {
         let transport = RequestRecordingTransport(body: try FixtureLoader.data(named: "prediction"))

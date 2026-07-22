@@ -26,6 +26,7 @@ public struct APIClient: Sendable {
   public static let defaultRequestTimeout: Duration = .seconds(15)
 
   public let baseURL: URL
+  public let pathPrefix: String
   private let transport: any HTTPTransport
   private let requestTimeout: Duration
   private let cookies: HTTPCookieStorage?
@@ -34,9 +35,10 @@ public struct APIClient: Sendable {
     cookies ?? .shared
   }
 
-  public init(baseURL: URL, session: URLSession = .shared) {
+  public init(baseURL: URL, pathPrefix: String = "", session: URLSession = .shared) {
     self.init(
       baseURL: baseURL,
+      pathPrefix: pathPrefix,
       transport: URLSessionTransport(session: session),
       requestTimeout: Self.defaultRequestTimeout,
       cookies: session.configuration.httpCookieStorage
@@ -45,12 +47,14 @@ public struct APIClient: Sendable {
 
   public init(
     baseURL: URL,
+    pathPrefix: String = "",
     transport: any HTTPTransport,
     requestTimeout: Duration = APIClient.defaultRequestTimeout,
     cookieStorage: HTTPCookieStorage? = nil
   ) {
     self.init(
       baseURL: baseURL,
+      pathPrefix: pathPrefix,
       transport: transport,
       requestTimeout: requestTimeout,
       cookies: cookieStorage
@@ -59,11 +63,13 @@ public struct APIClient: Sendable {
 
   private init(
     baseURL: URL,
+    pathPrefix: String,
     transport: any HTTPTransport,
     requestTimeout: Duration,
     cookies: HTTPCookieStorage?
   ) {
     self.baseURL = baseURL
+    self.pathPrefix = pathPrefix
     self.transport = transport
     self.requestTimeout = requestTimeout
     self.cookies = cookies
@@ -215,7 +221,7 @@ public struct APIClient: Sendable {
   }
 
   public func validatedCSRFCookieValue(for request: APIRequest) throws -> String {
-    let url = try request.url(relativeTo: baseURL)
+    let url = try request.url(relativeTo: baseURL, pathPrefix: pathPrefix)
     guard url.scheme?.lowercased() == "https",
       let host = url.host?.lowercased(),
       let cookies
@@ -377,7 +383,7 @@ public struct APIClient: Sendable {
     mutation: MutationRequest?,
     headers: [String: String] = [:]
   ) throws -> URLRequest {
-    let url = try apiRequest.url(relativeTo: baseURL)
+    let url = try apiRequest.url(relativeTo: baseURL, pathPrefix: pathPrefix)
     var request = URLRequest(url: url)
     request.httpMethod = method
     request.timeoutInterval = requestTimeout.timeInterval
